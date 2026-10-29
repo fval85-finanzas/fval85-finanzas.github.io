@@ -9,10 +9,11 @@ var App = (function () {
   var C = Calc;
   var token = guardado('mf-ses', null, sessionStorage);
   var pinActivo = false;
+  var pinLargo = Number(guardado('mf-pinlen', '0')) || null;   // cuántos números tiene el PIN
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '1.2.0';
+  var VERSION_WEB = '1.3.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -41,6 +42,7 @@ var App = (function () {
     luna: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
     campana: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
     hoja: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>',
+    huella: '<path d="M7.5 4.2A9 9 0 0 1 20 10M4 8.5A9 9 0 0 0 3.5 13M12 6a6 6 0 0 1 6 6c0 2-.3 4-1 6M6 12a6 6 0 0 1 2-4.5M9 12a3 3 0 0 1 6 0c0 3-.6 5.6-1.7 8M12 12c0 3.5-.8 6.3-2.4 8.6M6.2 15.5c-.3 1.6-.8 3-1.6 4.2"/>',
     ojoNo: '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.6 4.9-1.4M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     cuadros: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     compartir: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
@@ -49,7 +51,7 @@ var App = (function () {
   function ico(n, extra) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '>' + I[n] + '</svg>';
   }
-  var LOGO = '<svg aria-hidden="true" viewBox="0 0 512 512"><rect width="512" height="512" rx="116" fill="#7FD1B0"/><path d="M120 168h244a28 28 0 0 1 28 28v28" fill="none" stroke="#0A4F3E" stroke-width="24" stroke-linecap="round"/><rect x="104" y="196" width="304" height="196" rx="34" fill="#0F6B54"/><rect x="300" y="254" width="128" height="80" rx="26" fill="#0A4F3E"/><circle cx="342" cy="294" r="16" fill="#7FD1B0"/><path d="M196 252a42 42 0 1 0 0 84" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round"/><path d="M180 232l-14 124M202 232l-14 124" stroke="#fff" stroke-width="9" stroke-linecap="round"/></svg>';
+  var LOGO = '<svg aria-hidden="true" viewBox="0 0 512 512"><rect width="512" height="512" rx="116" fill="#121417"/><path d="M120 168h244a28 28 0 0 1 28 28v28" fill="none" stroke="#B9871A" stroke-width="24" stroke-linecap="round"/><rect x="104" y="196" width="304" height="196" rx="34" fill="#F5B82E"/><rect x="300" y="254" width="128" height="80" rx="26" fill="#121417"/><circle cx="342" cy="294" r="16" fill="#F5B82E"/><path d="M196 252a42 42 0 1 0 0 84" fill="none" stroke="#121417" stroke-width="16" stroke-linecap="round"/><path d="M180 232l-14 124M202 232l-14 124" stroke="#121417" stroke-width="9" stroke-linecap="round"/></svg>';
 
   // ------------------------------------------------------------ utilidades
   function esc(s) {
@@ -1093,6 +1095,8 @@ var App = (function () {
     h += '<div class="seccion">Seguridad</div><div class="caja sinpad">' +
       opcion('candado', 'PIN de acceso', AJ.pinActivo ? 'Activado · se pide al abrir y tras ' + MINUTOS_BLOQUEO + ' min fuera de la app' : 'Desactivado',
         '<span class="pill' + (AJ.pinActivo ? ' ok' : '') + '">' + (AJ.pinActivo ? 'Activo' : 'Activar') + '</span>', 'App.formPIN(\'' + (AJ.pinActivo ? 'menu' : 'activar') + '\')') +
+      (AJ.pinActivo ? opcion('huella', 'Entrar con huella', huellaLocal() ? 'Activada en este teléfono' : (huellaSoportada === false ? 'Este teléfono o navegador no lo permite' : 'Usá el lector de huellas en vez del PIN'),
+        interruptor('aj-huella', !!huellaLocal(), 'App.alternarHuella(this)', 'Entrar con huella')) : '') +
       '<div class="suave chico" style="padding:0 16px 14px">La app solo abre con tu cuenta de Google (' + esc(AJ.correo) + '). El PIN agrega una segunda capa por si alguien toma tu teléfono desbloqueado.</div></div>';
 
     h += '<div class="seccion">Recordatorios</div><div class="caja sinpad">' +
@@ -1117,7 +1121,7 @@ var App = (function () {
       opcion('flechas', 'Tipo de cambio de referencia', txt(D.tipoCambio, 'CRC', true) + ' por $1 · se cambia en Config', '') +
       opcion('recargar', 'Recargar datos', 'Trae los cambios que hiciste directo en la hoja', '', 'App.recargar()') + '</div>';
 
-    h += '<div class="suave chico" style="text-align:center;margin-top:6px">Mis Finanzas · app ' + VERSION_WEB + ' · servidor ' + esc(AJ.version) + '</div>';
+    h += '<div class="suave chico" style="text-align:center;margin-top:6px">Finanzas · app ' + VERSION_WEB + ' · servidor ' + esc(AJ.version) + '</div>';
     $('p-ajustes').innerHTML = h;
   }
 
@@ -1145,55 +1149,155 @@ var App = (function () {
   function guardarPIN(modo) {
     var actual = val('pin-actual'), nuevo = val('pin-nuevo'), conf = val('pin-conf');
     if (modo === 'quitar') {
-      return srv('quitarPIN', [actual], function () { pinActivo = false; AJ.pinActivo = false; cerrar(); toast('PIN quitado'); pintar(); }, $('pin-ok'));
+      return srv('quitarPIN', [actual], function () { pinActivo = false; AJ.pinActivo = false; olvidarHuella(); cerrar(); toast('PIN quitado'); pintar(); }, $('pin-ok'));
     }
     if (!/^\d{4,6}$/.test(nuevo)) return toast('El PIN debe tener de 4 a 6 números.');
     if (nuevo !== conf) return toast('Los dos PIN no coinciden.');
     srv('guardarPIN', [nuevo, actual], function (tok) {
       token = tok; guardar('mf-ses', tok, sessionStorage);
-      pinActivo = true; AJ.pinActivo = true; cerrar(); toast('✅ PIN guardado'); pintar();
+      pinActivo = true; AJ.pinActivo = true; recordarLargo(nuevo.length);
+      var habiaHuella = !!huellaLocal(); olvidarHuella();
+      cerrar(); toast(habiaHuella ? '✅ PIN guardado. Activá la huella de nuevo en Seguridad.' : '✅ PIN guardado', 5000); pintar();
     }, $('pin-ok'));
   }
 
-  // ------------------------------------------------------------ BLOQUEO CON PIN
+  // ------------------------------------------------------------ BLOQUEO CON PIN Y HUELLA
   var pinEscrito = '';
+  function recordarLargo(n) { pinLargo = Number(n) || null; guardar('mf-pinlen', pinLargo ? String(pinLargo) : null); }
   function bloquear() {
     pinEscrito = '';
     cerrar();
     $('cargando').style.display = 'none';
     $('bloqueo').classList.add('ver');
     $('logoPin').innerHTML = LOGO;
-    var teclas = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'borrar', '0', 'entrar'];
+    $('pinMsg').textContent = '';
+    var hay = !!huellaLocal();
+    $('pinTitulo').textContent = hay ? 'Usá tu huella o escribí tu PIN' : 'Escribí tu PIN';
+    var teclas = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'izq', '0', 'borrar'];
     $('teclado').innerHTML = teclas.map(function (t) {
       if (t === 'borrar') return '<button class="sin" onclick="App.tecla(\'b\')" aria-label="Borrar">Borrar</button>';
-      if (t === 'entrar') return '<button class="sin" style="color:var(--verde);font-weight:700" onclick="App.tecla(\'e\')">Entrar</button>';
+      if (t === 'izq') {
+        if (hay) return '<button class="huella" onclick="App.usarHuella()" aria-label="Entrar con huella">' + ico('huella') + '</button>';
+        if (!pinLargo) return '<button class="sin" style="color:var(--acento);font-weight:700" onclick="App.tecla(\'e\')">Entrar</button>';
+        return '<span></span>';
+      }
       return '<button onclick="App.tecla(\'' + t + '\')">' + t + '</button>';
     }).join('');
+    $('pinExtra').innerHTML = hay && !pinLargo ? '<button class="btn sec chico" onclick="App.tecla(\'e\')">Entrar con PIN</button>' : '';
     pintarPuntos();
+    if (hay) setTimeout(usarHuella, 350);   // la ventanita de la huella sale sola
   }
   function pintarPuntos() {
-    var n = Math.max(4, pinEscrito.length);
+    var n = pinLargo || Math.max(4, pinEscrito.length);
     var h = '';
     for (var i = 0; i < n; i++) h += '<i class="' + (i < pinEscrito.length ? 'lleno' : '') + '"></i>';
     $('puntos').innerHTML = h;
   }
+  var verificando = false;
   function tecla(t) {
+    if (verificando) return;
     $('pinMsg').textContent = '';
     if (t === 'b') pinEscrito = pinEscrito.slice(0, -1);
     else if (t === 'e') return entrarPIN();
-    else if (pinEscrito.length < 6) pinEscrito += t;
+    else if (pinEscrito.length < (pinLargo || 6)) pinEscrito += t;
     pintarPuntos();
+    if (pinLargo && pinEscrito.length === pinLargo) setTimeout(entrarPIN, 120);   // entra sola al completar
+  }
+  function desbloqueado(tok) {
+    token = tok; guardar('mf-ses', tok, sessionStorage);
+    $('bloqueo').classList.remove('ver');
+    if (D) pintar(); else { $('cargando').style.display = 'flex'; cargar(); }
   }
   function entrarPIN() {
     if (pinEscrito.length < 4) { $('pinMsg').textContent = 'El PIN tiene al menos 4 números'; return; }
     $('pinMsg').textContent = 'Verificando…';
+    verificando = true;
+    var largo = pinEscrito.length;
     llamar('verificarPIN', [pinEscrito]).then(function (tok) {
-      token = tok; guardar('mf-ses', tok, sessionStorage);
-      $('bloqueo').classList.remove('ver');
-      if (D) pintar(); else { $('cargando').style.display = 'flex'; cargar(); }
+      verificando = false;
+      recordarLargo(largo);
+      desbloqueado(tok);
     }, function (e) {
+      verificando = false;
       pinEscrito = ''; pintarPuntos();
       $('pinMsg').textContent = e && e.message ? e.message : 'PIN incorrecto';
+      if (navigator.vibrate) { try { navigator.vibrate([60, 40, 60]); } catch (x) { /* nada */ } }
+    });
+  }
+
+  // Huella: la verifica el teléfono (WebAuthn). El servidor solo recibe la llave de este teléfono.
+  var huellaSoportada = null;
+  function revisarSoporteHuella() {
+    if (!window.PublicKeyCredential || !PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) { huellaSoportada = false; return; }
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(function (s) { huellaSoportada = !!s; }, function () { huellaSoportada = false; });
+  }
+  function huellaLocal() { try { var h = JSON.parse(guardado('mf-huella', 'null')); return h && h.id && h.llave && h.cred ? h : null; } catch (e) { return null; } }
+  function olvidarHuella() { guardar('mf-huella', null); }
+  function aleatorio(n) { var b = new Uint8Array(n); crypto.getRandomValues(b); return b; }
+  function aB64(buf) { var s = ''; new Uint8Array(buf).forEach(function (x) { s += String.fromCharCode(x); }); return btoa(s); }
+  function deB64(t) { var s = atob(t), b = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; }
+
+  function alternarHuella(caja) {
+    if (!caja.checked) {
+      var h = huellaLocal();
+      olvidarHuella(); pintar(); toast('Huella desactivada en este teléfono');
+      if (h) srv('quitarHuella', [h.id], function () {});
+      return;
+    }
+    caja.checked = false;
+    if (huellaSoportada === false) return toast('Este teléfono o navegador no permite usar la huella aquí.', 5000);
+    abrir('<h2>Entrar con huella</h2><div class="suave">Escribí tu PIN una vez. Después el teléfono te pedirá la huella para confirmarla.</div>' +
+      campoPIN('hu-pin', 'Tu PIN') +
+      '<div class="acciones"><button class="btn" id="hu-ok" onclick="App.activarHuella()">Activar huella</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>' +
+      '<div class="suave chico" style="margin-top:12px">Tu huella nunca sale del teléfono. Si cambiás el PIN, hay que activarla otra vez.</div>');
+    setTimeout(function () { var e = $('hu-pin'); if (e) e.focus(); }, 200);
+  }
+  function activarHuella() {
+    var pin = val('hu-pin');
+    if (!/^\d{4,6}$/.test(pin)) return toast('Escribí tu PIN (4 a 6 números).');
+    var b = $('hu-ok'); b.disabled = true;
+    navigator.credentials.create({ publicKey: {
+      challenge: aleatorio(32),
+      rp: { name: 'Finanzas', id: location.hostname },
+      user: { id: aleatorio(16), name: 'Finanzas', displayName: 'Finanzas' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      timeout: 60000, attestation: 'none'
+    } }).then(function (cred) {
+      return llamar('activarHuella', [pin, 'Teléfono ' + new Date().toLocaleDateString('es-CR')]).then(function (r) {
+        guardar('mf-huella', JSON.stringify({ id: r.id, llave: r.llave, cred: aB64(cred.rawId) }));
+        token = r.sesion; guardar('mf-ses', r.sesion, sessionStorage);
+        recordarLargo(pin.length);
+        cerrar(); toast('✅ Huella activada. La próxima vez entrás con el dedo.', 5000); pintar();
+      });
+    }).catch(function (e) {
+      b.disabled = false;
+      var m = e && e.message ? e.message : String(e);
+      if (e && e.name === 'NotAllowedError') m = 'Se canceló o no se confirmó la huella.';
+      if (m.indexOf('desconocida') >= 0) m = 'Falta actualizar el código del servidor (Apps Script) a la versión 1.3.';
+      toast('⚠️ ' + m, 6000);
+    });
+  }
+  var pidiendoHuella = false;
+  function usarHuella() {
+    var h = huellaLocal();
+    if (!h || pidiendoHuella || !$('bloqueo').classList.contains('ver')) return;
+    pidiendoHuella = true;
+    navigator.credentials.get({ publicKey: {
+      challenge: aleatorio(32), rpId: location.hostname, timeout: 60000, userVerification: 'required',
+      allowCredentials: [{ type: 'public-key', id: deB64(h.cred), transports: ['internal', 'hybrid'] }]
+    } }).then(function () {
+      $('pinMsg').textContent = 'Entrando…';
+      return llamar('entrarConHuella', [h.id, h.llave]).then(function (tok) { pidiendoHuella = false; desbloqueado(tok); });
+    }).catch(function (e) {
+      pidiendoHuella = false;
+      var m = e && e.message ? e.message : String(e);
+      if (m.indexOf('HUELLA_INVALIDA') >= 0) {
+        olvidarHuella(); bloquear();
+        $('pinMsg').textContent = 'La huella se desactivó (¿cambiaste el PIN?). Entrá con el PIN y activala de nuevo.';
+      } else if (e && e.name === 'NotAllowedError') {
+        $('pinMsg').textContent = '';
+      } else $('pinMsg').textContent = m;
     });
   }
   document.addEventListener('visibilitychange', function () {
@@ -1244,6 +1348,7 @@ var App = (function () {
   function arrancar() {
     llamar('estadoAcceso').then(function (e) {
       pinActivo = e.pinActivo;
+      if (e.pinLargo) recordarLargo(e.pinLargo);
       if (pinActivo && !token) bloquear(); else cargar();
     }, function (e) {
       var m = e.message || String(e);
@@ -1257,6 +1362,7 @@ var App = (function () {
 
   function iniciar() {
     $('logoCarga').innerHTML = LOGO;
+    revisarSoporteHuella();
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       navigator.serviceWorker.register('sw.js');
       navigator.serviceWorker.addEventListener('message', function (ev) {
@@ -1280,6 +1386,7 @@ var App = (function () {
     revisarCorreos: revisarCorreos,
     tema: setTema, privado: setPrivado, recordatorios: setRecordatorios, pruebaRecordatorio: pruebaRecordatorio,
     formPIN: formPIN, guardarPIN: guardarPIN, tecla: tecla,
+    usarHuella: usarHuella, alternarHuella: alternarHuella, activarHuella: activarHuella,
     recargar: function () { AJ = null; cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     volver: volver, abrirItem: abrirItem, presionar: presionar, soltar: soltar, cancelarPresion: cancelarPresion,

@@ -1,6 +1,6 @@
 {
-  "name": "Mis Finanzas",
-  "short_name": "Mis Finanzas",
+  "name": "Finanzas",
+  "short_name": "Finanzas",
   "description": "Tarjetas, sobres, tasa cero y préstamo de casa en ₡ y $",
   "lang": "es",
   "start_url": "./",

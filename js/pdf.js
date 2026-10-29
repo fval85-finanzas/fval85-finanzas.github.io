@@ -29,7 +29,7 @@ var PDFPrestamo = (function () {
 
     return PDFLib.PDFDocument.create().then(function (doc) {
       doc.setTitle(limpio('Simulación de préstamo - ' + (d.concepto || '')));
-      doc.setCreator('Mis Finanzas');
+      doc.setCreator('Finanzas');
       return Promise.all([
         doc.embedFont(PDFLib.StandardFonts.Helvetica),
         doc.embedFont(PDFLib.StandardFonts.HelveticaBold),

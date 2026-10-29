@@ -180,8 +180,12 @@ nav.tabs svg { width: 22px; height: 22px; }
 .puntos i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--verde); }
 .puntos i.lleno { background: var(--verde); }
 .teclado { display: grid; grid-template-columns: repeat(3, 76px); gap: 14px; }
-.teclado button { height: 76px; border-radius: 38px; border: 1px solid var(--borde); background: var(--tarjeta); font-size: 26px; font-weight: 600; cursor: pointer; }
+.teclado button { height: 76px; border-radius: 38px; border: 1px solid var(--borde); background: var(--tarjeta); font-size: 26px; font-weight: 600; cursor: pointer; color: var(--texto); font-family: inherit; }
 .teclado button.sin { border: 0; background: none; font-size: 15px; color: var(--suave); }
+.teclado button.huella { border: 0; background: none; color: var(--acento); display: flex; align-items: center; justify-content: center; }
+.teclado button.huella svg { width: 36px; height: 36px; }
+.teclado button:active { transform: scale(.94); }
+.puntos i { transition: background .12s; }
 .vacio { text-align: center; color: var(--suave); padding: 28px 12px; font-size: 14px; }
 
 /* Pantalla de conexión (URL /exec + clave) */
