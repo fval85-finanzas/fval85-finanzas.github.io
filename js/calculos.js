@@ -147,12 +147,73 @@ var Calc = (function () {
     return isFinite(n) ? n : null;
   }
 
+  // ---------------- Calculadora de préstamos ----------------
+  function cuotaNivelada(saldo, i, n) {
+    if (n <= 0) return saldo;
+    return i === 0 ? saldo / n : saldo * i / (1 - Math.pow(1 + i, -n));
+  }
+
+  /**
+   * Tabla de amortización mes a mes.
+   * p = { monto, plazo (meses), tasaMensual (fracción), tipo: 'fija'|'decreciente',
+   *       poliza: { monto, tipo: 'fijo'|'pct' (pct = fracción mensual del saldo) },
+   *       comision, primerPago (Date),
+   *       abono: { monto, frecuencia: 'mensual'|'anual'|'unica', mes, modo: 'plazo'|'cuota' } }
+   */
+  function amortizar(p) {
+    var i = Number(p.tasaMensual) || 0;
+    var n = Math.max(1, Math.round(Number(p.plazo) || 1));
+    var saldo = Number(p.monto) || 0;
+    var tipo = p.tipo === 'decreciente' ? 'decreciente' : 'fija';
+    var pol = p.poliza || {};
+    var ab = p.abono && Number(p.abono.monto) > 0 ? p.abono : null;
+    var cuota = cuotaNivelada(saldo, i, n);
+    var capFijo = saldo / n;
+    var filas = [], tInt = 0, tPol = 0, tAb = 0;
+    var inicio = p.primerPago ? new Date(p.primerPago) : null;
+    for (var k = 1; k <= n && saldo > 0.005; k++) {
+      var interes = saldo * i;
+      var capital = tipo === 'fija' ? cuota - interes : capFijo;
+      if (capital > saldo || k === n) capital = saldo;
+      var poliza = pol.tipo === 'pct' ? saldo * (Number(pol.monto) || 0) : (Number(pol.monto) || 0);
+      var extra = 0;
+      if (ab) {
+        var toca = ab.frecuencia === 'mensual' || (ab.frecuencia === 'anual' && k % 12 === 0) ||
+                   (ab.frecuencia === 'unica' && k === Math.max(1, Math.round(Number(ab.mes) || 1)));
+        if (toca) extra = Math.min(Number(ab.monto), saldo - capital);
+      }
+      saldo = saldo - capital - extra;
+      if (saldo < 0.005) saldo = 0;
+      tInt += interes; tPol += poliza; tAb += extra;
+      filas.push({
+        n: k, fecha: inicio ? sumarMeses(inicio, k - 1) : null,
+        cuota: capital + interes, capital: capital, interes: interes, poliza: poliza, abono: extra,
+        pago: capital + interes + poliza + extra, saldo: saldo
+      });
+      if (extra > 0 && saldo > 0 && ab.modo === 'cuota') {
+        cuota = cuotaNivelada(saldo, i, n - k);
+        capFijo = saldo / (n - k);
+      }
+    }
+    var comision = Number(p.comision) || 0;
+    var monto = Number(p.monto) || 0;
+    return {
+      filas: filas, meses: filas.length,
+      cuota: filas.length ? filas[0].cuota : 0,
+      cuotaConPoliza: filas.length ? filas[0].cuota + filas[0].poliza : 0,
+      ultimaCuota: filas.length ? filas[filas.length - 1].cuota : 0,
+      totalIntereses: tInt, totalPolizas: tPol, totalAbonos: tAb, comision: comision,
+      totalPagado: monto + tInt + tPol + comision
+    };
+  }
+
   function pct(n, dec) { return n === null || n === undefined ? '—' : (n * 100).toFixed(dec === undefined ? 2 : dec).replace('.', ',') + '%'; }
 
   return {
     claveMes: claveMes, enMes: enMes, sumarMeses: sumarMeses, mesesCompletos: mesesCompletos, diasEntre: diasEntre,
     proximaFecha: proximaFecha, estadoTasaCero: estadoTasaCero, cuotaEnMes: cuotaEnMes, resumenMes: resumenMes,
-    sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO
+    sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
+    amortizar: amortizar, cuotaNivelada: cuotaNivelada
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

@@ -1,9 +1,9 @@
 // Service worker: guarda la app para que abra rápido y avisa cuando hay una versión nueva.
 // Al publicar cambios, subí el número de VERSION (y el de VERSION_WEB en js/app.js).
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const CACHE = 'misfinanzas-' + VERSION;
 const ARCHIVOS = [
-  './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/app.js',
+  './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/pdf.js', './js/app.js', './js/vendor/pdf-lib.min.js',
   './icons/icono-192.png', './icons/icono-512.png', './icons/icono-maskable-512.png', './icons/apple-touch-icon.png'
 ];
 

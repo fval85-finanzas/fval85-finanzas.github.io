@@ -12,7 +12,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '1.1.0';
+  var VERSION_WEB = '1.2.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -40,7 +40,11 @@ var App = (function () {
     ojo: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     luna: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
     campana: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
-    hoja: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>'
+    hoja: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>',
+    ojoNo: '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.6 4.9-1.4M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+    cuadros: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    compartir: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
+    guardar: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'
   };
   function ico(n, extra) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '>' + I[n] + '</svg>';
@@ -60,7 +64,7 @@ var App = (function () {
   function nombreMes(d) { var t = MESES[d.getMonth()] + ' ' + d.getFullYear(); return t.charAt(0).toUpperCase() + t.slice(1); }
   function fechaCorta(iso) { if (!iso) return '—'; var d = new Date(iso); return d.getDate() + ' ' + MESES_C[d.getMonth()] + ' ' + d.getFullYear(); }
   function hora(iso) { var d = new Date(iso); return d.getHours() || d.getMinutes() ? String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') : ''; }
-  function din(n, m, dec) { return '<span class="m">' + C.dinero(n, m, dec) + '</span>'; }
+  function din(n, m, dec) { return '<span class="m">' + (guardado('mf-privado', 'no') === 'si' ? (m === 'USD' ? '$' : '₡') + '******' : C.dinero(n, m, dec)) + '</span>'; }
   var txt = C.dinero;   // versión sin HTML (para textos y atributos)
   function barra(p, alerta) { var w = Math.max(0, Math.min(100, (p || 0) * 100)); return '<div class="barra' + (alerta ? ' alerta' : '') + '"><i style="width:' + w.toFixed(1) + '%"></i></div>'; }
   function toast(t, ms) { var e = $('toast'); e.textContent = t; e.classList.add('ver'); clearTimeout(toast._t); toast._t = setTimeout(function () { e.classList.remove('ver'); }, ms || 3200); }
@@ -125,47 +129,73 @@ var App = (function () {
   }
 
   // ------------------------------------------------------------ navegación
-  var TABS = [['inicio', 'Inicio', 'inicio'], ['movimientos', 'Movimientos', 'lista'], ['tarjetas', 'Tarjetas', 'tarjeta'], ['sobres', 'Sobres', 'sobre'], ['prestamo', 'Préstamo', 'casa']];
+  var PRINCIPALES = ['inicio', 'movimientos', 'tarjetas', 'mas'];
+  var NAV = [['inicio', 'Inicio', 'inicio'], ['movimientos', 'Movimientos', 'lista'], null, ['tarjetas', 'Tarjetas', 'tarjeta'], ['mas', 'Más', 'cuadros']];
+  var origen = 'inicio';
   function ir(p, chip) {
+    if (PRINCIPALES.indexOf(pantalla) >= 0 && PRINCIPALES.indexOf(p) < 0) origen = pantalla;
+    if (p === 'calculadora') calcVista = 'datos';
     pantalla = p;
     if (chip) filtro.chip = chip;
     window.scrollTo(0, 0);
     pintar();
   }
+  function volver() { ir(PRINCIPALES.indexOf(origen) >= 0 ? origen : 'inicio'); }
   function cambiarMes(delta) { mes = new Date(mes.getFullYear(), mes.getMonth() + delta, 1); pintar(); }
+  function botonAtras(accion) {
+    return '<button class="btn-icono" aria-label="Volver" onclick="' + (accion || 'App.volver()') + '">' + ico('atras') + '</button>';
+  }
   function cabMes(titulo, extra) {
-    return '<div class="cab"><div><div class="sobretitulo">' + nombreMes(mes) + '</div><h1 class="titulo">' + titulo + '</h1></div>' +
+    var sub = PRINCIPALES.indexOf(pantalla) < 0;
+    return '<div class="cab"><div class="atras-cab">' + (sub ? botonAtras() : '') + '<div><div class="sobretitulo">' + nombreMes(mes) + '</div><h1 class="titulo">' + titulo + '</h1></div></div>' +
       '<div class="mesnav">' + (extra || '') +
       '<button class="btn-icono" aria-label="Mes anterior" onclick="App.cambiarMes(-1)">' + ico('atras') + '</button>' +
       '<button class="btn-icono" aria-label="Mes siguiente" onclick="App.cambiarMes(1)">' + ico('adelante') + '</button></div></div>';
+  }
+  function cabSimple(titulo, sub, accion) {
+    return '<div class="cab"><div class="atras-cab">' + botonAtras(accion) + '<div>' + (sub ? '<div class="sobretitulo">' + sub + '</div>' : '') + '<h1 class="titulo">' + titulo + '</h1></div></div></div>';
   }
 
   function pintar() {
     if (!D) return;
     var res = C.resumenMes(D, mes);
     var sob = C.sobres(D, mes, res);
-    $('tabs').innerHTML = TABS.map(function (t) {
-      return '<button class="' + (t[0] === pantalla ? 'on' : '') + '" onclick="App.ir(\'' + t[0] + '\')"' + (t[0] === pantalla ? ' aria-current="page"' : '') + '>' + ico(t[2]) + t[1] + '</button>';
+    var activa = PRINCIPALES.indexOf(pantalla) >= 0 ? pantalla : (pantalla === 'ajustes' ? '' : 'mas');
+    $('tabs').innerHTML = NAV.map(function (t) {
+      if (!t) return '<div class="centro"><button class="nav-mas" aria-label="Agregar movimiento" onclick="App.formMovimiento()">' + ico('mas') + '</button></div>';
+      return '<button class="' + (t[0] === activa ? 'on' : '') + '" onclick="App.ir(\'' + t[0] + '\')"' + (t[0] === activa ? ' aria-current="page"' : '') + '>' + ico(t[2]) + t[1] + '</button>';
     }).join('');
     document.querySelectorAll('.pantalla').forEach(function (s) { s.classList.toggle('activa', s.id === 'p-' + pantalla); });
-    document.body.classList.toggle('privado', guardado('mf-privado', 'no') === 'si');
-    $('fab').style.display = pantalla === 'inicio' || pantalla === 'movimientos' ? 'flex' : 'none';
-    ({ inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes })[pantalla](res, sob);
+    ({
+      inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
+      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, reportes: pReportes, patrimonio: pPatrimonio
+    })[pantalla](res, sob);
   }
 
   // ------------------------------------------------------------ INICIO
+  function oculto() { return guardado('mf-privado', 'no') === 'si'; }
+  function botonOjo() {
+    var o = oculto();
+    return '<button class="ojo" aria-label="' + (o ? 'Mostrar montos' : 'Ocultar montos') + '" onclick="App.privado(' + (!o) + ')">' + ico(o ? 'ojoNo' : 'ojo') + '</button>';
+  }
   function pInicio(res, sob) {
     var h = cabMes('Resumen', '<button class="btn-icono" aria-label="Configuración" onclick="App.ir(\'ajustes\')">' + ico('ajustes') + '</button>');
-    h += '<div class="hero"><div class="et" style="font-size:13px;font-weight:600">Gastado este mes</div>' +
+    h += '<div class="hero"><div style="display:flex;align-items:center;gap:6px"><span class="et" style="font-size:13px;font-weight:600">Gastado este mes</span>' + botonOjo() + '</div>' +
       '<div style="display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap"><div><div class="grande">' + din(res.total.CRC, 'CRC') + '</div><div class="et">en colones</div></div>' +
       '<div><div class="medio">' + din(res.total.USD, 'USD') + '</div><div class="et">en dólares</div></div></div>' +
       (res.cuotasTC.CRC || res.cuotasTC.USD ? '<div class="et">Incluye cuotas tasa cero: ' + din(res.cuotasTC.CRC, 'CRC') + (res.cuotasTC.USD ? ' + ' + din(res.cuotasTC.USD, 'USD') : '') + '</div>' : '') +
-      '<hr><div class="fila" style="font-size:13px"><span>Ingresos ' + din(res.ingresos.CRC, 'CRC') + '</span><span class="fuerte">Te quedan ' + din(res.queda.CRC, 'CRC') + '</span></div></div>';
+      '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Ingresos ' + din(res.ingresos.CRC, 'CRC') + '</span><span class="fuerte">Te quedan <span class="verde">' + din(res.queda.CRC, 'CRC') + '</span></span></div>' +
+      '<div class="rapidos"><button class="principal" onclick="App.formMovimiento()">' + ico('mas') + 'Movimiento</button>' +
+      '<button onclick="App.revisarCorreos(this)">' + ico('recargar') + 'Correos</button>' +
+      '<button onclick="App.formPago()">' + ico('casa') + 'Pagar cuota</button></div></div>';
 
     if (res.porRevisar) {
       h += '<button class="aviso" onclick="App.ir(\'movimientos\',\'revisar\')"><span style="width:22px;height:22px;display:flex">' + ico('alerta') + '</span>' +
         '<span style="flex:1"><b style="font-size:14px">' + res.porRevisar + ' movimiento' + (res.porRevisar > 1 ? 's' : '') + ' por revisar</b><br><span class="chico">Gastos sin categoría</span></span>' + ico('adelante', ' style="width:18px;height:18px"') + '</button>';
     }
+
+    h += '<div class="fila" style="margin-top:4px"><h3 style="margin:0;font-size:15px">Accesos rápidos</h3><a href="#" onclick="App.formAccesos();return false" style="font-size:13px;font-weight:700;text-decoration:none;color:var(--acento)">Editar</a></div>' +
+      '<div class="accesos">' + accesos().concat(['mas']).map(function (k) { return tile(k, false); }).join('') + '</div>';
 
     var vars = sob.lista.filter(function (s) { return s.tipo !== 'Fijo' && s.asignado > 0; })
       .sort(function (a, b) { return (b.pct || 0) - (a.pct || 0); }).slice(0, 3);
@@ -207,6 +237,484 @@ var App = (function () {
     }
     $('p-inicio').innerHTML = h;
   }
+
+  // ------------------------------------------------------------ ACCESOS Y PESTAÑA "MÁS"
+  // Cada ícono: trazo blanco (b) + detalle de color (a)
+  var ITEMS = {
+    tarjetas: ['Tarjetas', 'M2 5h20v14H2zM2 10h20', 'M5 14h4v2H5z', 'ir:tarjetas'],
+    ahorros: ['Ahorros', 'M5 9a7 6 0 0 1 14 0v6H5zM9 15v4M15 15v4', 'M11 5h2v2h-2z', 'ir:patrimonio'],
+    prestamo: ['Préstamo', 'M3 11l9-7 9 7M5 10v10h14V10', 'M10 20v-5h4v5z', 'ir:prestamo'],
+    inversiones: ['Inversiones', 'M4 20V4M4 20h16M7 15l4-4 3 3 5-6', 'M18 7.5a1.5 1.5 0 1 0 0.01 0z', 'ir:patrimonio'],
+    sobres: ['Sobres', 'M3 6h18v12H3zM3 7l9 6 9-6', 'M17 15.5a2 2 0 1 0 0.01 0z', 'ir:sobres'],
+    calculadora: ['Calculadora', 'M5 2h14v20H5zM8 5h8v4H8z', 'M8 13h2v2H8zM14 13h2v2h-2zM8 17h2v2H8zM14 17h2v2h-2z', 'ir:calculadora'],
+    tasacero: ['Tasa cero', 'M3 5h18v16H3zM3 9h18M8 3v4M16 3v4', 'M12 12.5a2.5 3 0 1 0 0.01 0z', 'ir:tasacero'],
+    recurrentes: ['Recurrentes', 'M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4', 'M12 11a1.5 1.5 0 1 0 0.01 0z', 'hoja:Recurrentes'],
+    reportes: ['Reportes', 'M4 20V4M4 20h16', 'M8 16v-4h2v4zM12 16V8h2v8zM16 16v-6h2v6z', 'ir:reportes'],
+    patrimonio: ['Patrimonio', 'M12 3l9 5H3zM5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18', 'M11 6.5h2v1h-2z', 'ir:patrimonio'],
+    categorias: ['Categorías', 'M12 3a9 9 0 1 0 9 9h-9z', 'M14 2.5a8 8 0 0 1 7.5 7.5H14z', 'ir:reportes'],
+    exportar: ['Exportar', 'M4 14v6h16v-6M12 3v11', 'M8.5 7.5L12 3l3.5 4.5z', 'exportar'],
+    configuracion: ['Configuración', 'M12 9a3 3 0 1 0 0.01 0zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1', 'M11 11h2v2h-2z', 'ir:ajustes'],
+    hoja: ['Mi hoja', 'M4 3h16v18H4zM4 9h16M4 15h16M10 3v18', 'M12 11h6v2h-6z', 'hoja:'],
+    bancos: ['Bancos', 'M3 9l9-5 9 5M5 10v8M19 10v8M3 20h18', 'M10 12h4v6h-4z', 'ir:ajustes'],
+    mas: ['Más', 'M4 4h6v6H4zM4 14h6v6H4zM14 14h6v6h-6z', 'M17 3.5l3.5 3.5-3.5 3.5-3.5-3.5z', 'ir:mas'],
+    agregar: ['Agregar', 'M12 7v10M7 12h10', '', 'agregar']
+  };
+  var SECCIONES = [
+    ['MIS CUENTAS', ['tarjetas', 'ahorros', 'prestamo', 'inversiones']],
+    ['PLANIFICAR', ['sobres', 'calculadora', 'tasacero', 'recurrentes']],
+    ['ANÁLISIS', ['reportes', 'patrimonio', 'categorias', 'exportar']],
+    ['AJUSTES', ['configuracion', 'hoja', 'bancos', 'agregar']]
+  ];
+  var ACCESOS_INICIALES = ['sobres', 'prestamo', 'calculadora', 'tasacero', 'recurrentes', 'reportes', 'patrimonio'];
+  var MAX_ACCESOS = 7;
+
+  function accesos() {
+    try {
+      var a = JSON.parse(guardado('mf-accesos', 'null'));
+      if (Array.isArray(a)) return a.filter(function (k) { return ITEMS[k] && k !== 'mas' && k !== 'agregar'; }).slice(0, MAX_ACCESOS);
+    } catch (e) { /* valor dañado */ }
+    return ACCESOS_INICIALES.slice();
+  }
+  function tile(k, conPin) {
+    var it = ITEMS[k];
+    var fijado = conPin && accesos().indexOf(k) >= 0;
+    var eventos = conPin && k !== 'agregar'
+      ? ' onpointerdown="App.presionar(\'' + k + '\')" onpointerup="App.soltar(\'' + k + '\')" onpointerleave="App.cancelarPresion()" oncontextmenu="return false"'
+      : ' onclick="App.abrirItem(\'' + k + '\')"';
+    return '<button class="tile' + (k === 'agregar' ? ' prox' : '') + '"' + eventos + ' aria-label="' + esc(it[0]) + (fijado ? ' (en Inicio)' : '') + '">' +
+      '<span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="b" d="' + it[1] + '"/>' +
+      (it[2] ? '<path class="a" d="' + it[2] + '"/>' : '') + '</svg>' + (fijado ? '<span class="pin"></span>' : '') + '</span>' +
+      '<span class="n">' + esc(it[0]) + '</span></button>';
+  }
+  function abrirItem(k) {
+    var accion = ITEMS[k][3];
+    if (accion.indexOf('ir:') === 0) return ir(accion.slice(3));
+    if (accion.indexOf('hoja:') === 0) return abrirHoja(accion.slice(5));
+    if (accion === 'exportar') return exportarCSV();
+    if (accion === 'agregar') return toast('¿Qué te gustaría agregar aquí? Contámelo y lo sumamos en la próxima versión.', 5000);
+  }
+  var presionTimer = null, presionLarga = false;
+  function presionar(k) {
+    presionLarga = false;
+    clearTimeout(presionTimer);
+    presionTimer = setTimeout(function () { presionLarga = true; alternarAcceso(k); }, 550);
+  }
+  function soltar(k) {
+    clearTimeout(presionTimer);
+    if (!presionLarga) abrirItem(k);
+    presionLarga = false;
+  }
+  function cancelarPresion() { clearTimeout(presionTimer); }
+  function alternarAcceso(k) {
+    if (k === 'mas') return;
+    var a = accesos(), i = a.indexOf(k);
+    if (i >= 0) { a.splice(i, 1); toast(ITEMS[k][0] + ' ya no está en Inicio'); }
+    else if (a.length >= MAX_ACCESOS) { toast('En Inicio caben ' + MAX_ACCESOS + ' accesos. Quitá uno primero.'); return; }
+    else { a.push(k); toast('📌 ' + ITEMS[k][0] + ' fijado en Inicio'); }
+    guardar('mf-accesos', JSON.stringify(a));
+    if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) { /* nada */ } }
+    pintar();
+  }
+  function formAccesos() {
+    var a = accesos();
+    var lista = [];
+    SECCIONES.forEach(function (s) { s[1].forEach(function (k) { if (k !== 'agregar') lista.push(k); }); });
+    abrir('<h2>Accesos de Inicio</h2><div class="suave">Elegí hasta ' + MAX_ACCESOS + '. También podés mantener presionado un ícono en <b>Más</b>.</div>' +
+      lista.map(function (k) {
+        return '<label class="check"><input type="checkbox" class="acc" value="' + k + '"' + (a.indexOf(k) >= 0 ? ' checked' : '') + '> ' + esc(ITEMS[k][0]) + '</label>';
+      }).join('') +
+      '<div class="acciones"><button class="btn" onclick="App.guardarAccesos()">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarAccesos() {
+    var sel = Array.prototype.slice.call(document.querySelectorAll('.acc:checked')).map(function (e) { return e.value; });
+    if (sel.length > MAX_ACCESOS) return toast('Elegí como máximo ' + MAX_ACCESOS + '.');
+    guardar('mf-accesos', JSON.stringify(sel));
+    cerrar(); pintar(); toast('✅ Accesos actualizados');
+  }
+  function pMas() {
+    var h = '<div class="cab"><div><h1 class="titulo">Más</h1></div><span class="suave chico" style="text-align:right;max-width:180px">Mantené presionado un ícono para fijarlo en Inicio</span></div>';
+    SECCIONES.forEach(function (s) {
+      h += '<div class="seccion-t">' + s[0] + '</div><div class="accesos">' + s[1].map(function (k) { return tile(k, true); }).join('') + '</div>';
+    });
+    $('p-mas').innerHTML = h;
+  }
+  function abrirHoja(pestaña) {
+    function ir2() {
+      if (pestaña) toast('Abriendo tu hoja: los ' + pestaña.toLowerCase() + ' están en la pestaña "' + pestaña + '".', 5000);
+      window.open(AJ.urlHoja, '_blank', 'noopener');
+    }
+    if (AJ) return ir2();
+    toast('Abriendo tu hoja…');
+    srv('obtenerAjustes', [], function (a) { AJ = a; ir2(); });
+  }
+
+  // Compartir un archivo (WhatsApp, correo…) o descargarlo si el teléfono no permite compartir
+  function compartirArchivo(bytes, nombre, tipo, titulo) {
+    var archivo;
+    try { archivo = new File([bytes], nombre, { type: tipo }); } catch (e) { archivo = null; }
+    if (archivo && navigator.canShare && navigator.canShare({ files: [archivo] })) {
+      return navigator.share({ files: [archivo], title: titulo }).catch(function (e) {
+        if (e && e.name !== 'AbortError') descargar(bytes, nombre, tipo);
+      });
+    }
+    descargar(bytes, nombre, tipo);
+    return Promise.resolve();
+  }
+  function descargar(bytes, nombre, tipo) {
+    var url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
+    var a = document.createElement('a');
+    a.href = url; a.download = nombre; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 4000);
+    toast('Descargado: ' + nombre);
+  }
+  function exportarCSV() {
+    var res = C.resumenMes(D, mes);
+    var cols = ['Fecha', 'Comercio', 'Lugar', 'Monto', 'Moneda', 'Tipo', 'Cuenta', 'Categoría', 'Sobre', 'Origen', 'Nota'];
+    var q = function (v) { v = String(v === null || v === undefined ? '' : v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var lineas = [cols.join(';')].concat(res.movimientos.slice().reverse().map(function (m) {
+      var d = new Date(m.fecha);
+      return [localInput(m.fecha, true).replace('T', ' '), m.comercio, m.lugar, String(m.monto).replace('.', ','), m.moneda, m.tipo, m.cuenta, m.categoria, m.sobre, m.origen, m.nota].map(q).join(';');
+    }));
+    var nombre = 'Movimientos-' + MESES[mes.getMonth()] + '-' + mes.getFullYear() + '.csv';
+    compartirArchivo('﻿' + lineas.join('\n'), nombre, 'text/csv', 'Movimientos de ' + nombreMes(mes));
+  }
+
+  // ------------------------------------------------------------ TASA CERO
+  function pTasaCero(res) {
+    var h = cabMes('Tasa cero');
+    var items = D.tasaCero.map(function (t) { return { t: t, e: C.estadoTasaCero(t, hoy) }; });
+    var pend = { CRC: 0, USD: 0 };
+    items.forEach(function (x) { pend[x.t.moneda === 'USD' ? 'USD' : 'CRC'] += x.e.saldo; });
+    h += '<div class="hero"><span class="et" style="font-size:13px;font-weight:600">Falta por pagar</span>' +
+      '<div style="display:flex;gap:18px;align-items:baseline;flex-wrap:wrap"><span class="grande">' + din(pend.CRC, 'CRC') + '</span>' + (pend.USD ? '<span class="medio">' + din(pend.USD, 'USD') + '</span>' : '') + '</div>' +
+      '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Cuotas de ' + MESES[mes.getMonth()] + '</span><b>' + din(res.cuotasTC.CRC, 'CRC') + (res.cuotasTC.USD ? ' + ' + din(res.cuotasTC.USD, 'USD') : '') + '</b></div></div>';
+    var activas = items.filter(function (x) { return x.e.restantes > 0; });
+    var listas = items.filter(function (x) { return x.e.restantes === 0; });
+    function tarjetaTC(x) {
+      var avance = x.t.meses ? x.e.cobradas / x.t.meses : 0;
+      return '<div class="caja" style="gap:8px"><div class="fila"><b>' + esc(x.t.descripcion) + '</b><span class="pill' + (x.e.estado === 'Terminada' ? ' ok' : '') + '">' + x.e.estado + '</span></div>' +
+        '<div class="suave chico">' + esc(etiquetaCuenta(x.t.tarjeta)) + ' · ' + din(x.t.monto, x.t.moneda) + ' en ' + x.t.meses + ' meses</div>' + barra(avance) +
+        '<div class="fila chico"><span class="suave">' + x.e.cobradas + ' de ' + x.t.meses + ' cuotas · termina ' + (x.e.ultima ? MESES_C[x.e.ultima.getMonth()] + ' ' + x.e.ultima.getFullYear() : '—') + '</span>' +
+        '<span><b>' + din(x.e.cuota, x.t.moneda) + '</b>/mes</span></div></div>';
+    }
+    h += activas.length ? activas.map(tarjetaTC).join('') : '<div class="caja vacio">No tenés compras a tasa cero activas.</div>';
+    if (listas.length) h += '<div class="seccion-t">TERMINADAS</div>' + listas.map(tarjetaTC).join('');
+    h += '<div class="suave chico" style="text-align:center">Para agregar una: abrí la compra en Movimientos y tocá <b>Pasar a tasa cero</b>.</div>';
+    $('p-tasacero').innerHTML = h;
+  }
+
+  // ------------------------------------------------------------ REPORTES
+  var COLORES_CAT = ['#F5B82E', '#3D8BFD', '#3DD68C', '#FF8A3D', '#B57BFF', '#FF6B9A', '#4FD1E0', '#9AA1AB'];
+  function pReportes(res) {
+    var h = cabMes('Reportes');
+    ['CRC', 'USD'].forEach(function (mon) {
+      var total = res.gastos[mon];
+      if (!total && mon === 'USD') return;
+      var cats = Object.keys(res.porCategoria).map(function (k) { return [k, res.porCategoria[k][mon]]; })
+        .filter(function (x) { return x[1] > 0; }).sort(function (a, b) { return b[1] - a[1]; });
+      h += '<div class="caja"><div class="fila"><h3>Gastos por categoría ' + (mon === 'USD' ? '($)' : '(₡)') + '</h3><b>' + din(total, mon) + '</b></div>';
+      if (!cats.length) h += '<div class="suave">Sin gastos este mes.</div>';
+      else {
+        h += '<div class="apilada" role="img" aria-label="Reparto de gastos por categoría">' + cats.map(function (x, i) {
+          return '<i style="width:' + (x[1] / total * 100).toFixed(1) + '%;background:' + COLORES_CAT[i % COLORES_CAT.length] + '"></i>';
+        }).join('') + '</div>';
+        h += cats.map(function (x, i) {
+          return '<div class="fila" style="font-size:14px"><span><span class="punto" style="background:' + COLORES_CAT[i % COLORES_CAT.length] + '"></span>' + esc(x[0]) + '</span>' +
+            '<span>' + din(x[1], mon) + ' <span class="suave chico">' + Math.round(x[1] / total * 100) + '%</span></span></div>';
+        }).join('');
+      }
+      h += '</div>';
+    });
+    var porTarjeta = Object.keys(res.porCuenta).map(function (k) { return [k, res.porCuenta[k]]; }).filter(function (x) { return x[1].CRC || x[1].USD; });
+    if (porTarjeta.length) {
+      h += '<div class="caja"><h3>Por tarjeta o cuenta</h3>' + porTarjeta.map(function (x) {
+        return '<div class="fila" style="font-size:14px"><span>' + esc(etiquetaCuenta(x[0])) + '</span><b>' + [x[1].CRC ? din(x[1].CRC, 'CRC') : '', x[1].USD ? din(x[1].USD, 'USD') : ''].filter(String).join(' + ') + '</b></div>';
+      }).join('') + '</div>';
+    }
+    h += '<button class="btn sec" onclick="App.exportarCSV()">Exportar movimientos del mes (Excel)</button>';
+    $('p-reportes').innerHTML = h;
+  }
+
+  // ------------------------------------------------------------ PATRIMONIO
+  function pPatrimonio() {
+    var h = cabSimple('Patrimonio', 'Según el saldo de cada cuenta');
+    var act = { CRC: 0, USD: 0 }, deu = { CRC: 0, USD: 0 };
+    var filasA = [], filasD = [];
+    D.cuentas.forEach(function (c) {
+      if (!c.activa) return;
+      var crc = c.saldoCRC || 0, usd = c.saldoUSD || 0;
+      if (c.tipo === 'Préstamo' && D.prestamo && D.prestamo.saldo && !crc) crc = D.prestamo.saldo;
+      if (!crc && !usd) return;
+      var txtS = [crc ? din(crc, 'CRC') : '', usd ? din(usd, 'USD') : ''].filter(String).join(' + ');
+      var linea = '<div class="fila" style="font-size:14px"><span>' + esc(c.nombre) + '<br><span class="suave chico">' + esc(c.tipo) + '</span></span><b>' + txtS + '</b></div>';
+      if (c.tipo === 'Cuenta de ahorro' || c.tipo === 'Inversión') { act.CRC += crc; act.USD += usd; filasA.push(linea); }
+      else { deu.CRC += crc; deu.USD += usd; filasD.push(linea); }
+    });
+    var tc = D.tipoCambio || 0;
+    var neto = (act.CRC - deu.CRC) + (act.USD - deu.USD) * tc;
+    h += '<div class="hero"><div style="display:flex;align-items:center;gap:6px"><span class="et" style="font-size:13px;font-weight:600">Patrimonio neto (todo en colones)</span>' + botonOjo() + '</div>' +
+      '<div class="grande' + (neto < 0 ? ' rojo' : '') + '">' + din(neto, 'CRC') + '</div>' +
+      '<div class="et">Dólares convertidos a ' + txt(tc, 'CRC') + ' (tipo de cambio en Config). No incluye el valor de tu casa ni de otros bienes.</div></div>';
+    h += '<div class="caja"><div class="fila"><h3>Ahorros e inversiones</h3><b class="verde">' + din(act.CRC, 'CRC') + (act.USD ? ' + ' + din(act.USD, 'USD') : '') + '</b></div>' + (filasA.join('') || '<div class="suave">Sin saldos registrados.</div>') + '</div>';
+    h += '<div class="caja"><div class="fila"><h3>Deudas</h3><b class="rojo">' + din(deu.CRC, 'CRC') + (deu.USD ? ' + ' + din(deu.USD, 'USD') : '') + '</b></div>' + (filasD.join('') || '<div class="suave">Sin deudas registradas.</div>') + '</div>';
+    h += '<div class="suave chico" style="text-align:center">Los saldos se actualizan en Tarjetas (tocando cada cuenta) o en la pestaña Cuentas de la hoja.</div>';
+    $('p-patrimonio').innerHTML = h;
+  }
+
+  // ------------------------------------------------------------ CALCULADORA DE PRÉSTAMOS
+  // la calculadora es para simular (también para otras personas): nunca oculta montos
+  function dk(n, m, dec) { return '<span class="m">' + C.dinero(n, m, dec) + '</span>'; }
+  function leerJSON(k, def) { try { var v = JSON.parse(guardado(k, 'null')); return v || def; } catch (e) { return def; } }
+  var CALC_VACIA = { para: '', concepto: '', monto: '', moneda: 'CRC', plazo: '', plazoU: 'meses', tasa: '', tasaU: 'anual', pol: '', polT: 'fijo', com: '', fecha: '', tipo: 'fija' };
+  var calc = leerJSON('mf-calc', JSON.parse(JSON.stringify(CALC_VACIA)));
+  var calcVista = 'datos';
+  var calcAbono = { monto: '', frecuencia: 'mensual', mes: '12', modo: 'plazo' };
+
+  function leerFormCalc() {
+    if (!$('k-monto')) return;
+    ['para', 'concepto', 'monto', 'plazo', 'tasa', 'pol', 'com', 'fecha'].forEach(function (c) { calc[c] = val('k-' + c); });
+    calc.moneda = val('k-moneda') || 'CRC';
+    guardar('mf-calc', JSON.stringify(calc));
+  }
+  function leerFormAbono() {
+    if (!$('a-monto')) return;
+    calcAbono.monto = val('a-monto'); calcAbono.frecuencia = val('a-frec'); calcAbono.mes = val('a-mes') || calcAbono.mes;
+  }
+  function calcSet(campo, valor) { leerFormCalc(); leerFormAbono(); if (campo.indexOf('abono.') === 0) calcAbono[campo.slice(6)] = valor; else calc[campo] = valor; pintar(); }
+
+  /** Parámetros para el motor a partir de lo que escribió la persona. Devuelve null y avisa si falta algo. */
+  function parametrosCalc(conAbono) {
+    var monto = C.leerNumero(calc.monto), plazo = C.leerNumero(calc.plazo), tasa = C.leerNumero(calc.tasa);
+    if (!monto || monto <= 0) { toast('Escribí el monto del préstamo.'); return null; }
+    if (!plazo || plazo <= 0) { toast('Escribí el plazo.'); return null; }
+    if (tasa === null || tasa < 0) { toast('Escribí la tasa de interés (puede ser 0).'); return null; }
+    var meses = Math.round(calc.plazoU === 'anios' ? plazo * 12 : plazo);
+    if (meses > 600) { toast('El plazo máximo es de 50 años.'); return null; }
+    var pol = C.leerNumero(calc.pol) || 0;
+    var p = {
+      monto: monto, plazo: meses, tasaMensual: calc.tasaU === 'mensual' ? tasa / 100 : tasa / 100 / 12,
+      tipo: calc.tipo, poliza: { monto: calc.polT === 'pct' ? pol / 100 : pol, tipo: calc.polT },
+      comision: C.leerNumero(calc.com) || 0, primerPago: calc.fecha ? new Date(calc.fecha + 'T12:00') : null
+    };
+    if (conAbono) {
+      var am = C.leerNumero(calcAbono.monto);
+      if (am > 0) p.abono = { monto: am, frecuencia: calcAbono.frecuencia, mes: C.leerNumero(calcAbono.mes) || 1, modo: calcAbono.modo };
+    }
+    return p;
+  }
+  function textosCalc(p) {
+    var t = C.leerNumero(calc.tasa) || 0;
+    return {
+      tasaTexto: String(t.toFixed(2)).replace('.', ',') + '% ' + (calc.tasaU === 'mensual' ? 'mensual' : 'anual'),
+      polizaTexto: !p.poliza.monto ? 'Sin pólizas' : calc.polT === 'pct' ? String(calc.pol).replace('.', ',') + '% del saldo' : C.dinero(p.poliza.monto, calc.moneda) + '/mes',
+      tipoTexto: calc.tipo === 'decreciente' ? 'Cuota decreciente' : 'Cuota fija'
+    };
+  }
+
+  function pCalc() {
+    if (calcVista === 'resultado' || calcVista === 'ysi') {
+      var p = parametrosCalc(false);
+      if (!p) { calcVista = 'datos'; } else return calcVista === 'ysi' ? pCalcYSi(p) : pCalcResultado(p);
+    }
+    var seg = function (campo, opciones) {
+      return '<div class="seg">' + opciones.map(function (o) {
+        return '<button class="' + (calc[campo] === o[0] ? 'on' : '') + '" onclick="App.calcSet(\'' + campo + '\',\'' + o[0] + '\')">' + o[1] + '</button>';
+      }).join('') + '</div>';
+    };
+    var h = cabSimple('Calculadora', 'Préstamos');
+    if (D.prestamo && D.prestamo.saldo) h += '<button class="btn borde" onclick="App.usarCasa()">' + ico('casa') + 'Usar mi préstamo de casa</button>';
+    h += '<div class="caja" style="gap:0">' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Para (nombre)</span><input id="k-para" value="' + esc(calc.para) + '" placeholder="Opcional"></label>' +
+      '<label class="campo compacto"><span>Concepto</span><input id="k-concepto" value="' + esc(calc.concepto) + '" placeholder="Ej. Carro nuevo"></label></div>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto del préstamo</span><input id="k-monto" class="monto" inputmode="decimal" value="' + esc(calc.monto) + '" placeholder="0"></label>' +
+      '<label class="campo compacto"><span>Moneda</span><select id="k-moneda"><option value="CRC"' + (calc.moneda === 'CRC' ? ' selected' : '') + '>₡</option><option value="USD"' + (calc.moneda === 'USD' ? ' selected' : '') + '>$</option></select></label></div>' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Plazo</span><input id="k-plazo" inputmode="numeric" value="' + esc(calc.plazo) + '" placeholder="60"></label>' +
+      '<label class="campo compacto"><span>Tasa de interés (%)</span><input id="k-tasa" inputmode="decimal" value="' + esc(calc.tasa) + '" placeholder="9,5"></label></div>' +
+      '<div class="dos-campos" style="margin-top:6px">' + seg('plazoU', [['meses', 'Meses'], ['anios', 'Años']]) + seg('tasaU', [['anual', 'Anual'], ['mensual', 'Mensual']]) + '</div>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px;align-items:end"><label class="campo compacto"><span>Pólizas y seguros (opcional)</span><input id="k-pol" inputmode="decimal" value="' + esc(calc.pol) + '" placeholder="0"></label>' +
+      '<div style="margin-top:10px">' + seg('polT', [['fijo', 'Monto'], ['pct', '% saldo']]) + '</div></div>' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Comisión (una vez)</span><input id="k-com" inputmode="decimal" value="' + esc(calc.com) + '" placeholder="0"></label>' +
+      '<label class="campo compacto"><span>Primer pago</span><input id="k-fecha" type="date" value="' + esc(calc.fecha) + '"></label></div>' +
+      '<div class="campo compacto"><span>Tipo de cuota</span>' + seg('tipo', [['fija', 'Fija (nivelada)'], ['decreciente', 'Decreciente']]) + '</div>' +
+      '<button class="btn" style="margin-top:16px" onclick="App.calcular()">Calcular</button></div>';
+
+    var sims = leerJSON('mf-sims', []);
+    if (sims.length) {
+      h += '<div class="seccion-t">SIMULACIONES GUARDADAS</div><div class="sim-lista">' + sims.map(function (s, i) {
+        return '<div class="sim" role="button" tabindex="0" onclick="App.cargarSim(' + i + ')"><b>' + esc(s.calc.concepto || 'Sin nombre') + '</b><span>' +
+          (s.calc.para ? esc(s.calc.para) + ' · ' : '') + txt(s.cuota, s.calc.moneda) + '/mes · ' + s.meses + ' m</span>' +
+          '<button class="x" aria-label="Borrar simulación" onclick="event.stopPropagation();App.borrarSim(' + i + ')">×</button></div>';
+      }).join('') + '</div>';
+    }
+    h += '<div class="suave chico" style="text-align:center">Los cálculos son estimados. El banco puede calcular por días o cambiar la tasa.</div>';
+    $('p-calculadora').innerHTML = h;
+  }
+
+  function calcular() { leerFormCalc(); if (parametrosCalc(false)) { calcVista = 'resultado'; window.scrollTo(0, 0); pintar(); } }
+  function verDatos() { calcVista = 'datos'; window.scrollTo(0, 0); pintar(); }
+  function verYSi() { calcVista = 'ysi'; window.scrollTo(0, 0); pintar(); }
+
+  function resumenCalc(r, mon) {
+    var tot = r.totalPagado - r.comision || 1;
+    var pc = (Number(C.leerNumero(calc.monto)) / tot * 100), pi = r.totalIntereses / tot * 100, pp = r.totalPolizas / tot * 100;
+    return '<div class="caja"><div class="fila" style="align-items:flex-end"><div><div class="suave chico" style="font-weight:600">Cuota mensual' + (r.totalPolizas ? ' con pólizas' : '') + '</div>' +
+      '<div class="cifra-g">' + dk(r.cuotaConPoliza, mon, true) + '</div></div>' +
+      (r.totalPolizas ? '<div class="suave chico" style="text-align:right">' + dk(r.cuota, mon, true) + ' cuota<br>+ ' + dk(r.filas[0].poliza, mon) + ' pólizas</div>' : '') + '</div>' +
+      (calc.tipo === 'decreciente' ? '<div class="suave chico">Baja cada mes hasta ' + dk(r.ultimaCuota + (r.filas[r.filas.length - 1].poliza || 0), mon) + '</div>' : '') +
+      '<div class="apilada" role="img" aria-label="Del total: capital ' + Math.round(pc) + '%, intereses ' + Math.round(pi) + '%, pólizas ' + Math.round(pp) + '%">' +
+      '<i style="width:' + pc.toFixed(1) + '%;background:#3D8BFD"></i><i style="width:' + pi.toFixed(1) + '%;background:var(--acento)"></i><i style="width:' + pp.toFixed(1) + '%;background:var(--suave)"></i></div>' +
+      '<div class="leyenda"><div><span class="punto" style="background:#3D8BFD"></span>Capital<b>' + dk(C.leerNumero(calc.monto), mon) + '</b></div>' +
+      '<div><span class="punto" style="background:var(--acento)"></span>Intereses<b>' + dk(r.totalIntereses, mon) + '</b></div>' +
+      '<div><span class="punto" style="background:var(--suave)"></span>Pólizas<b>' + dk(r.totalPolizas, mon) + '</b></div></div>' +
+      (r.comision ? '<div class="fila chico"><span class="suave">Comisión de formalización</span><span>' + dk(r.comision, mon) + '</span></div>' : '') +
+      '<div class="fila" style="border-top:1px solid var(--linea);padding-top:10px"><span class="suave">Total a pagar</span><b>' + dk(r.totalPagado, mon) + '</b></div></div>';
+  }
+
+  function pCalcResultado(p) {
+    var r = C.amortizar(p), mon = calc.moneda;
+    var t = textosCalc(p);
+    var sub = [calc.para ? 'Para ' + calc.para : '', C.dinero(p.monto, mon), p.plazo + ' meses', t.tasaTexto].filter(String).join(' · ');
+    var h = cabSimple(esc(calc.concepto || 'Resultado'), esc(sub), 'App.verDatos()');
+    h += resumenCalc(r, mon);
+    h += '<div class="rapidos" style="grid-template-columns:repeat(3,minmax(0,1fr))"><button class="principal" onclick="App.compartirPDF(false, this)">' + ico('compartir') + 'Compartir PDF</button>' +
+      '<button onclick="App.verYSi()">' + ico('flechas') + '¿Y si…?</button><button onclick="App.guardarSim()">' + ico('guardar') + 'Guardar</button></div>';
+    h += '<div class="caja"><div class="fila"><h3>Mes a mes</h3><span class="suave chico">' + r.meses + ' cuotas</span></div>' +
+      '<div class="tabla-k"><span class="h">#</span><span class="h d">Capital</span><span class="h d">Interés</span><span class="h d">Saldo</span>' +
+      r.filas.map(function (f) {
+        return '<span>' + f.n + (f.fecha ? '<br><span class="s">' + MESES_C[f.fecha.getMonth()] + ' ' + String(f.fecha.getFullYear()).slice(2) + '</span>' : '') + '</span>' +
+          '<span class="d">' + dk(Math.round(f.capital), mon) + '</span><span class="d" style="color:var(--acento)">' + dk(Math.round(f.interes), mon) + '</span><span class="d fuerte">' + dk(Math.round(f.saldo), mon) + '</span>';
+      }).join('') + '</div></div>';
+    $('p-calculadora').innerHTML = h;
+  }
+
+  function pCalcYSi(p) {
+    var mon = calc.moneda, base = C.amortizar(p);
+    var h = cabSimple('¿Y si…?', esc(calc.concepto || 'Simulación'), 'App.calcVer(\'resultado\')');
+    h += '<div class="caja" style="gap:6px"><div class="fila chico"><span class="suave">Hoy</span><span>' + dk(base.cuotaConPoliza, mon) + '/mes · ' + base.meses + ' cuotas</span></div>' +
+      '<div class="fila chico"><span class="suave">Intereses por pagar</span><b style="color:var(--acento)">' + dk(base.totalIntereses, mon) + '</b></div></div>';
+
+    // abono extra
+    var conAb = parametrosCalc(true);
+    h += '<div class="caja"><h3>Abono extra a capital</h3>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:8px"><label class="campo compacto" style="margin-top:0"><span>Monto</span><input id="a-monto" inputmode="decimal" value="' + esc(calcAbono.monto) + '" placeholder="50.000"></label>' +
+      '<label class="campo compacto" style="margin-top:0"><span>¿Cada cuánto?</span><select id="a-frec" onchange="App.calcSet(\'abono.frecuencia\', this.value)">' +
+      [['mensual', 'Cada mes'], ['anual', 'Cada año'], ['unica', 'Una sola vez']].map(function (o) { return '<option value="' + o[0] + '"' + (calcAbono.frecuencia === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
+      (calcAbono.frecuencia === 'unica' ? '<label class="campo compacto"><span>¿En cuál cuota? (1 = la primera)</span><input id="a-mes" inputmode="numeric" value="' + esc(calcAbono.mes) + '"></label>' : '') +
+      '<div class="seg" style="margin-top:4px"><button class="' + (calcAbono.modo === 'plazo' ? 'on' : '') + '" onclick="App.calcSet(\'abono.modo\',\'plazo\')">Bajar el plazo</button>' +
+      '<button class="' + (calcAbono.modo === 'cuota' ? 'on' : '') + '" onclick="App.calcSet(\'abono.modo\',\'cuota\')">Bajar la cuota</button></div>' +
+      '<button class="btn sec chico" style="justify-content:center" onclick="App.calcSet(\'abono.monto\', document.getElementById(\'a-monto\').value)">Calcular el ahorro</button>';
+    if (conAb && conAb.abono) {
+      var ra = C.amortizar(conAb);
+      var ahorro = base.totalIntereses - ra.totalIntereses;
+      var antes = base.meses - ra.meses;
+      var despues = ra.filas.filter(function (f) { return f.abono > 0; })[0];
+      var nuevaCuota = despues && ra.filas[despues.n] ? ra.filas[despues.n].cuota + ra.filas[despues.n].poliza : null;
+      h += '<div class="dos">' +
+        (calcAbono.modo === 'plazo'
+          ? '<div class="bien"><div class="et">Terminás en</div><div class="v">' + ra.meses + ' cuotas</div><div class="et">' + (antes > 0 ? antes + ' cuotas antes' + (antes >= 12 ? ' (≈ ' + String((antes / 12).toFixed(1)).replace('.', ',').replace(',0', '') + ' años)' : '') : 'mismo plazo') + '</div></div>'
+          : '<div class="bien"><div class="et">La cuota baja a</div><div class="v">' + (nuevaCuota ? dk(nuevaCuota, mon) : '—') + '</div><div class="et">después del abono</div></div>') +
+        '<div class="bien"><div class="et">Te ahorrás</div><div class="v">' + dk(ahorro, mon) + '</div><div class="et">en intereses</div></div></div>' +
+        '<div class="suave chico">Abonos en total: ' + dk(ra.totalAbonos, mon) + '</div>' +
+        '<button class="btn" onclick="App.compartirPDF(true, this)">Compartir PDF con este abono</button>';
+    }
+    h += '</div>';
+
+    // fija vs decreciente
+    var fija = C.amortizar(Object.assign({}, p, { tipo: 'fija' })), dec = C.amortizar(Object.assign({}, p, { tipo: 'decreciente' }));
+    var pol0 = fija.filas[0].poliza, polU = fija.filas[fija.filas.length - 1].poliza;
+    h += '<div class="caja"><h3>Cuota fija o decreciente</h3>' +
+      '<div class="tabla-k" style="grid-template-columns:1.2fr 1fr 1fr"><span class="h"></span><span class="h d">Fija</span><span class="h d">Decreciente</span>' +
+      '<span class="suave">Primera cuota</span><span class="d">' + dk(fija.cuota + pol0, mon) + '</span><span class="d">' + dk(dec.cuota + pol0, mon) + '</span>' +
+      '<span class="suave">Última cuota</span><span class="d">' + dk(fija.ultimaCuota + polU, mon) + '</span><span class="d">' + dk(dec.ultimaCuota + polU, mon) + '</span>' +
+      '<span class="suave">Intereses</span><span class="d">' + dk(fija.totalIntereses, mon) + '</span><span class="d verde fuerte">' + dk(dec.totalIntereses, mon) + '</span></div>' +
+      '<div class="suave chico">La decreciente paga ' + dk(fija.totalIntereses - dec.totalIntereses, mon) + ' menos de intereses, pero empieza más alta.</div></div>';
+
+    // si sube la tasa
+    var anual = p.tasaMensual * 12 * 100;
+    h += '<div class="caja"><h3>Si la tasa sube (tasa variable)</h3>' + [0, 1, 2].map(function (sube) {
+      var r = C.amortizar(Object.assign({}, p, { tasaMensual: p.tasaMensual + sube / 100 / 12 }));
+      var dif = r.cuotaConPoliza - base.cuotaConPoliza;
+      return '<div class="fila" style="font-size:14px"><span class="suave">' + (sube ? '+' + sube + ' punto' + (sube > 1 ? 's' : '') + ' · ' : 'Hoy · ') + String((anual + sube).toFixed(2)).replace('.', ',') + '%</span>' +
+        '<span class="' + (sube ? 'naranja fuerte' : '') + '">' + dk(r.cuotaConPoliza, mon) + (sube ? ' <span class="chico">(+' + dk(dif, mon) + ')</span>' : '') + '</span></div>';
+    }).join('') + '</div>';
+    $('p-calculadora').innerHTML = h;
+  }
+
+  function usarCasa() {
+    var p = D.prestamo;
+    calc = {
+      para: '', concepto: 'Préstamo de casa', moneda: 'CRC',
+      monto: String((Math.round(p.saldo * 100) / 100).toFixed(2)).replace('.', ','),
+      plazo: String(p.restantes), plazoU: 'meses',
+      tasa: String(((p.tasa || 0) * 100).toFixed(2)).replace('.', ','), tasaU: 'anual',
+      pol: p.estimado && p.estimado.polizas ? String(Math.round(p.estimado.polizas * 100) / 100).replace('.', ',') : '', polT: 'fijo',
+      com: '', fecha: p.proximoVenc ? localInput(p.proximoVenc) : '', tipo: 'fija'
+    };
+    guardar('mf-calc', JSON.stringify(calc));
+    if (!calcAbono.monto) calcAbono.monto = '50.000';
+    calcVista = 'ysi'; window.scrollTo(0, 0); pintar();
+    toast('Cargado: saldo, cuotas y tasa de tu préstamo de casa');
+  }
+
+  function guardarSim() {
+    var p = parametrosCalc(false); if (!p) return;
+    var r = C.amortizar(p);
+    var sims = leerJSON('mf-sims', []);
+    sims.unshift({ calc: JSON.parse(JSON.stringify(calc)), cuota: r.cuotaConPoliza, meses: r.meses, fecha: new Date().toISOString() });
+    guardar('mf-sims', JSON.stringify(sims.slice(0, 30)));
+    toast('✅ Simulación guardada en este teléfono');
+  }
+  function cargarSim(i) {
+    var s = leerJSON('mf-sims', [])[i]; if (!s) return;
+    calc = Object.assign(JSON.parse(JSON.stringify(CALC_VACIA)), s.calc);
+    guardar('mf-calc', JSON.stringify(calc));
+    calcVista = 'resultado'; window.scrollTo(0, 0); pintar();
+  }
+  function borrarSim(i) {
+    var sims = leerJSON('mf-sims', []); sims.splice(i, 1);
+    guardar('mf-sims', JSON.stringify(sims)); pintar();
+  }
+
+  // PDF: se arma en el teléfono con pdf-lib (js/vendor) y se comparte por WhatsApp, correo, etc.
+  var scriptsCargados = {};
+  function cargarScript(src) {
+    if (scriptsCargados[src]) return scriptsCargados[src];
+    scriptsCargados[src] = new Promise(function (ok, mal) {
+      var s = document.createElement('script'); s.src = src; s.onload = ok;
+      s.onerror = function () { delete scriptsCargados[src]; mal(new Error('No se pudo cargar ' + src)); };
+      document.head.appendChild(s);
+    });
+    return scriptsCargados[src];
+  }
+  function compartirPDF(conAbono, boton) {
+    var p = parametrosCalc(conAbono); if (!p) return;
+    if (boton) boton.disabled = true;
+    toast('Preparando el PDF…', 8000);
+    var r = C.amortizar(p), t = textosCalc(p);
+    var datos = {
+      para: calc.para.trim(), concepto: calc.concepto.trim(), moneda: calc.moneda, monto: p.monto, plazo: p.plazo,
+      tasaTexto: t.tasaTexto, polizaTexto: t.polizaTexto, tipoTexto: t.tipoTexto, comision: p.comision, res: r
+    };
+    Promise.all([
+      cargarScript('js/vendor/pdf-lib.min.js'),
+      fetch('icons/icono-192.png').then(function (x) { return x.arrayBuffer(); }).then(function (b) { return new Uint8Array(b); }).catch(function () { return null; })
+    ]).then(function (v) {
+      return PDFPrestamo.construir(window.PDFLib, datos, { preparadoPor: guardado('mf-preparado', ''), fecha: new Date(), logoPng: v[1] });
+    }).then(function (bytes) {
+      if (boton) boton.disabled = false;
+      var nombre = PDFPrestamo.nombreArchivo(datos);
+      return compartirArchivo(bytes, nombre, 'application/pdf', 'Simulación de préstamo' + (datos.para ? ' para ' + datos.para : ''));
+    }).catch(function (e) {
+      if (boton) boton.disabled = false;
+      toast('⚠️ No se pudo crear el PDF: ' + (e && e.message ? e.message : e), 6000);
+    });
+  }
+  function formPreparado() {
+    abrir('<h2>Tu nombre en los PDF</h2><div class="suave">Aparece arriba a la derecha como "Preparado por…". Dejalo vacío si no querés que salga.</div>' +
+      '<label class="campo"><span>Preparado por</span><input id="pp-nombre" value="' + esc(guardado('mf-preparado', '')) + '" placeholder="Tu nombre"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarPreparado()">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarPreparado() { guardar('mf-preparado', val('pp-nombre').trim()); cerrar(); toast('✅ Guardado'); pintar(); }
 
   // ------------------------------------------------------------ MOVIMIENTOS
   function itemMov(m) {
@@ -278,7 +786,7 @@ var App = (function () {
     var tarjetas = D.cuentas.filter(function (c) { return c.tipo === 'Tarjeta de crédito' && c.activa; });
     var deudaCRC = 0, deudaUSD = 0;
     tarjetas.forEach(function (c) { deudaCRC += c.saldoCRC || 0; deudaUSD += c.saldoUSD || 0; });
-    var h = '<div class="cab"><div><div class="sobretitulo">Gastos de ' + nombreMes(mes).toLowerCase() + '</div><h1 class="titulo">Tarjetas</h1></div></div>';
+    var h = '<div class="cab"><div><div class="sobretitulo">Gastos de ' + nombreMes(mes).toLowerCase() + '</div><h1 class="titulo">Tarjetas</h1></div>' + botonOjo() + '</div>';
     h += '<div class="suave" style="margin-top:-8px">Deuda total ' + din(deudaCRC, 'CRC') + ' + ' + din(deudaUSD, 'USD') + '</div>';
     tarjetas.forEach(function (c) {
       var g = res.porCuenta[c.nombre] || { CRC: 0, USD: 0, cuotasTC: { CRC: 0, USD: 0 } };
@@ -342,7 +850,8 @@ var App = (function () {
   // ------------------------------------------------------------ PRÉSTAMO
   function pPrestamo() {
     var p = D.prestamo;
-    var h = '<div class="cab"><div><div class="sobretitulo">BCR · Operación ' + esc(p.operacion) + '</div><h1 class="titulo">Préstamo de casa</h1></div></div>';
+    var h = '<div class="cab"><div class="atras-cab">' + botonAtras() + '<div><div class="sobretitulo">BCR · Operación ' + esc(p.operacion) + '</div><h1 class="titulo">Préstamo de casa</h1></div></div>' +
+      '<button class="btn-icono" aria-label="Simular abonos en la calculadora" onclick="App.usarCasa()">' + ico('flechas') + '</button></div>';
     h += '<div class="hero oscuro"><div class="et" style="font-size:13px;font-weight:600">Saldo pendiente</div><div class="grande">' + din(p.saldo, 'CRC', true) + '</div>' +
       barra(p.pagadoPct) + '<div class="fila chico" style="opacity:.9"><span>Pagado ' + Math.round((p.pagadoPct || 0) * 100) + '% de ' + din(p.saldoInicial, 'CRC') + '</span><span>Faltan ' + p.restantes + ' cuotas</span></div></div>';
     h += '<div class="tres"><div class="mini"><div class="et">Próxima cuota</div><div class="v">' + din(p.estimado.total, 'CRC') + '</div></div>' +
@@ -560,22 +1069,26 @@ var App = (function () {
       (det ? '<span class="det" style="display:block">' + det + '</span>' : '') + '</span>' + (derecha || '') + '</' + tag + '>';
   }
   function pAjustes() {
-    var cab = '<div class="cab"><div style="display:flex;gap:10px;align-items:center"><button class="btn-icono" aria-label="Volver" onclick="App.ir(\'inicio\')">' + ico('atras') + '</button><h1 class="titulo">Configuración</h1></div></div>';
+    var cab = '<div class="cab"><div style="display:flex;gap:10px;align-items:center"><button class="btn-icono" aria-label="Volver" onclick="App.volver()">' + ico('atras') + '</button><h1 class="titulo">Configuración</h1></div></div>';
     if (!AJ) {
       $('p-ajustes').innerHTML = cab + '<div class="caja vacio"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div>';
       srv('obtenerAjustes', [], function (a) { AJ = a; pinActivo = a.pinActivo; if (pantalla === 'ajustes') pintar(); });
       return;
     }
-    var tema = guardado('mf-tema', 'auto');
+    var tema = guardado('mf-tema', 'dorado');
     var privado = guardado('mf-privado', 'no') === 'si';
     var h = cab;
 
     h += '<div class="seccion">Apariencia</div><div class="caja sinpad">' +
-      opcion('luna', 'Tema', 'Automático sigue la configuración de tu teléfono', '') +
-      '<div class="chips" style="padding:0 16px 14px">' + [['auto', 'Automático'], ['claro', 'Claro'], ['oscuro', 'Oscuro']].map(function (t) {
+      opcion('luna', 'Tema', 'Automático sigue el modo claro u oscuro de tu teléfono', '') +
+      '<div class="chips" style="padding:0 16px 14px;flex-wrap:wrap;overflow:visible">' + [['dorado', 'Negro y amarillo'], ['oscuro', 'Oscuro verde'], ['claro', 'Claro'], ['auto', 'Automático']].map(function (t) {
         return '<button class="chip' + (tema === t[0] ? ' on' : '') + '" onclick="App.tema(\'' + t[0] + '\')">' + t[1] + '</button>';
       }).join('') + '</div>' +
-      opcion('ojo', 'Ocultar montos', 'Difumina las cantidades (útil en lugares públicos)', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')) + '</div>';
+      opcion('ojo', 'Ocultar montos', 'Muestra ****** en vez de las cantidades. También con el ojo 👁 de Inicio', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')) + '</div>';
+
+    var prep = guardado('mf-preparado', '');
+    h += '<div class="seccion">Calculadora</div><div class="caja sinpad">' +
+      opcion('hoja', 'Preparado por (en los PDF)', prep ? esc(prep) : 'Sin nombre · tocá para escribirlo', '', 'App.formPreparado()') + '</div>';
 
     h += '<div class="seccion">Seguridad</div><div class="caja sinpad">' +
       opcion('candado', 'PIN de acceso', AJ.pinActivo ? 'Activado · se pide al abrir y tras ' + MINUTOS_BLOQUEO + ' min fuera de la app' : 'Desactivado',
@@ -609,7 +1122,7 @@ var App = (function () {
   }
 
   function setTema(t) { guardar('mf-tema', t); document.documentElement.setAttribute('data-tema', t); pintar(); }
-  function setPrivado(on) { guardar('mf-privado', on ? 'si' : 'no'); document.body.classList.toggle('privado', on); }
+  function setPrivado(on) { guardar('mf-privado', on ? 'si' : 'no'); pintar(); }
   function setRecordatorios(on) {
     srv('guardarRecordatorios', [on], function () { AJ.recordatorios = on; toast(on ? '✅ Recordatorios activados' : 'Recordatorios desactivados'); });
   }
@@ -744,8 +1257,6 @@ var App = (function () {
 
   function iniciar() {
     $('logoCarga').innerHTML = LOGO;
-    $('fab').innerHTML = ico('mas');
-    document.body.classList.toggle('privado', guardado('mf-privado', 'no') === 'si');
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       navigator.serviceWorker.register('sw.js');
       navigator.serviceWorker.addEventListener('message', function (ev) {
@@ -770,7 +1281,14 @@ var App = (function () {
     tema: setTema, privado: setPrivado, recordatorios: setRecordatorios, pruebaRecordatorio: pruebaRecordatorio,
     formPIN: formPIN, guardarPIN: guardarPIN, tecla: tecla,
     recargar: function () { AJ = null; cargar(function () { toast('Datos actualizados'); }); },
-    conectar: conectar, cambiarConexion: cambiarConexion
+    conectar: conectar, cambiarConexion: cambiarConexion,
+    volver: volver, abrirItem: abrirItem, presionar: presionar, soltar: soltar, cancelarPresion: cancelarPresion,
+    formAccesos: formAccesos, guardarAccesos: guardarAccesos, exportarCSV: exportarCSV,
+    calcSet: calcSet, calcular: calcular, verDatos: verDatos, verYSi: verYSi,
+    calcVer: function (v) { leerFormAbono(); calcVista = v; window.scrollTo(0, 0); pintar(); },
+    usarCasa: function () { if (pantalla !== 'calculadora') ir('calculadora'); usarCasa(); },
+    guardarSim: guardarSim, cargarSim: cargarSim, borrarSim: borrarSim, compartirPDF: compartirPDF,
+    formPreparado: formPreparado, guardarPreparado: guardarPreparado
   };
 })();
 App.iniciar();
