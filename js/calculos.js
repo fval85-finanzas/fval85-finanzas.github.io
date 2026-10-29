@@ -31,32 +31,85 @@ var Calc = (function () {
     return new Date(y, m, Math.min(dia, diasDelMes(y, m)));
   }
 
-  // ---------------- Tasa cero ----------------
+  // ---------------- Tasa cero (con abonos extraordinarios) ----------------
+  /**
+   * Plan completo de una compra a tasa cero. Cada abono baja el saldo y la cuota se recalcula
+   * desde la siguiente cuota: (lo que falta) ÷ (cuotas que faltan). El plazo no cambia.
+   * Si un abono deja el saldo en cero, la compra queda pagada antes de tiempo.
+   */
+  function planTasaCero(t, hoy) {
+    var meses = Math.max(1, t.meses || 1);
+    var c0 = t.monto / meses;
+    var abonos = (t.abonos || []).filter(function (a) { return a.fecha && a.monto > 0; })
+      .slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+    var primera = t.primeraCuota ? new Date(t.primeraCuota) : null;
+    var saldo = t.monto, cuota = c0, ia = 0, filas = [], hist = [], liquidada = null;
+    function aplicarHasta(limite) {   // abonos hechos antes de `limite` (o todos si es null)
+      while (ia < abonos.length && (!limite || soloFecha(new Date(abonos[ia].fecha)) < soloFecha(limite))) {
+        var ab = abonos[ia++], antes = cuota;
+        var m = Math.min(ab.monto, Math.max(0, saldo));
+        saldo = Math.max(0, saldo - ab.monto);
+        var faltan = meses - filas.length;
+        cuota = faltan > 0 ? saldo / faltan : 0;
+        if (saldo <= 0.005 && !liquidada) { liquidada = new Date(ab.fecha); saldo = 0; }
+        hist.push({ abono: ab, aplicado: m, cuotaAntes: antes, cuotaNueva: cuota, saldo: saldo });
+      }
+    }
+    for (var k = 1; k <= meses; k++) {
+      var f = primera ? sumarMeses(primera, k - 1) : null;
+      aplicarHasta(f);
+      if (saldo <= 0.005) break;
+      var c = k === meses ? saldo : Math.min(cuota, saldo);
+      saldo -= c;
+      filas.push({ n: k, fecha: f, cuota: c, saldo: Math.max(0, saldo), cobrada: !!f && soloFecha(f) <= soloFecha(hoy) });
+    }
+    aplicarHasta(null);
+    return { filas: filas, abonos: hist, cuotaOriginal: c0, liquidada: liquidada };
+  }
+
   function estadoTasaCero(t, hoy) {
-    var cuota = t.meses ? t.monto / t.meses : t.monto;
-    if (!t.primeraCuota) return { cuota: cuota, cobradas: 0, restantes: t.meses, saldo: t.monto, ultima: null, estado: 'Sin fecha' };
-    var primera = new Date(t.primeraCuota);
-    var ultima = sumarMeses(primera, t.meses - 1);
-    var cobradas = soloFecha(hoy) < soloFecha(primera) ? 0 : Math.min(t.meses, mesesCompletos(primera, hoy) + 1);
-    var restantes = t.meses - cobradas;
+    var p = planTasaCero(t, hoy);
+    var c0 = p.cuotaOriginal;
+    var abonado = 0;
+    p.abonos.forEach(function (h) { if (soloFecha(new Date(h.abono.fecha)) <= soloFecha(hoy)) abonado += h.aplicado; });
+    if (!t.primeraCuota) {
+      return { cuota: c0, cuotaOriginal: c0, cobradas: 0, restantes: t.meses, saldo: Math.max(0, t.monto - abonado), ultima: null,
+        estado: 'Sin fecha', abonado: abonado, plan: p, pagado: abonado };
+    }
+    var cobradas = 0, pagadoCuotas = 0, proxima = null, ultima = null;
+    p.filas.forEach(function (f) {
+      if (f.cobrada) { cobradas++; pagadoCuotas += f.cuota; } else if (!proxima) proxima = f;
+      ultima = f.fecha;
+    });
+    var saldo = Math.max(0, t.monto - pagadoCuotas - abonado);
+    if (saldo < 0.005) saldo = 0;
+    var restantes = saldo > 0 ? p.filas.length - cobradas : 0;
+    var pagadaAntes = saldo === 0 && p.liquidada && soloFecha(p.liquidada) <= soloFecha(hoy) && cobradas < t.meses;
     return {
-      cuota: cuota, cobradas: cobradas, restantes: restantes, saldo: restantes * cuota, ultima: ultima,
-      estado: restantes === 0 ? 'Terminada' : (cobradas === 0 ? 'Por iniciar' : 'Activa')
+      cuota: proxima ? proxima.cuota : (p.filas.length ? p.filas[p.filas.length - 1].cuota : c0),
+      cuotaOriginal: c0, cobradas: cobradas, restantes: restantes, saldo: saldo, ultima: ultima,
+      estado: pagadaAntes ? 'Pagada' : restantes === 0 ? 'Terminada' : (cobradas === 0 ? 'Por iniciar' : 'Activa'),
+      abonado: abonado, pagado: pagadoCuotas + abonado, proxima: proxima, plan: p, liquidada: pagadaAntes ? p.liquidada : null
     };
   }
 
   function cuotaEnMes(t, mes) {
     if (!t.primeraCuota) return 0;
-    var primera = new Date(t.primeraCuota);
-    var ultima = sumarMeses(primera, t.meses - 1);
-    var k = claveMes(mes);
-    return k >= claveMes(primera) && k <= claveMes(ultima) ? t.monto / t.meses : 0;
+    var k = claveMes(mes), s = 0;
+    planTasaCero(t, new Date()).filas.forEach(function (f) { if (claveMes(f.fecha) === k) s += f.cuota; });
+    return s;
+  }
+  /** Abonos extra de un mes que cuentan como gasto. */
+  function abonosEnMes(t, mes) {
+    var s = 0;
+    (t.abonos || []).forEach(function (a) { if (a.gasto !== false && enMes(a.fecha, mes)) s += a.monto; });
+    return s;
   }
 
   // ---------------- Resumen del mes ----------------
   function resumenMes(d, mes) {
     var r = {
-      gastos: { CRC: 0, USD: 0 }, ingresos: { CRC: 0, USD: 0 }, cuotasTC: { CRC: 0, USD: 0 },
+      gastos: { CRC: 0, USD: 0 }, ingresos: { CRC: 0, USD: 0 }, cuotasTC: { CRC: 0, USD: 0 }, abonosTC: { CRC: 0, USD: 0 },
       porCategoria: {}, porCuenta: {}, porRevisar: 0, movimientos: []
     };
     d.movimientos.forEach(function (m) {
@@ -76,9 +129,11 @@ var Calc = (function () {
       }
     });
     d.tasaCero.forEach(function (t) {
-      var c = cuotaEnMes(t, mes);
-      if (!c) return;
       var mon = t.moneda === 'USD' ? 'USD' : 'CRC';
+      var ab = abonosEnMes(t, mes);
+      r.abonosTC[mon] += ab;
+      var c = cuotaEnMes(t, mes) + ab;   // los abonos extra cuentan como pago del mes
+      if (!c) return;
       r.cuotasTC[mon] += c;
       r.porCuenta[t.tarjeta] = r.porCuenta[t.tarjeta] || { CRC: 0, USD: 0, cuotasTC: { CRC: 0, USD: 0 } };
       r.porCuenta[t.tarjeta].cuotasTC[mon] += c;
@@ -213,7 +268,7 @@ var Calc = (function () {
     claveMes: claveMes, enMes: enMes, sumarMeses: sumarMeses, mesesCompletos: mesesCompletos, diasEntre: diasEntre,
     proximaFecha: proximaFecha, estadoTasaCero: estadoTasaCero, cuotaEnMes: cuotaEnMes, resumenMes: resumenMes,
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
-    amortizar: amortizar, cuotaNivelada: cuotaNivelada
+    amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
