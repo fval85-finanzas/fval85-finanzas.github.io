@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mis Finanzas</title>
+  <meta name="theme-color" content="#0F6B54">
+  <meta name="color-scheme" content="light dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mis Finanzas">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icono-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilos.css">
+  <script>
+    try { document.documentElement.setAttribute('data-tema', localStorage.getItem('mf-tema') || 'auto'); } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="cargando" id="cargando">
+    <div id="logoCarga" class="logo"></div>
+    <div class="spinner"></div>
+    <div class="suave">Cargando tus finanzas…</div>
+  </div>
+
+  <main class="app">
+    <section class="pantalla" id="p-inicio"></section>
+    <section class="pantalla" id="p-movimientos"></section>
+    <section class="pantalla" id="p-tarjetas"></section>
+    <section class="pantalla" id="p-sobres"></section>
+    <section class="pantalla" id="p-prestamo"></section>
+    <section class="pantalla" id="p-ajustes"></section>
+  </main>
+
+  <button class="fab" id="fab" aria-label="Agregar movimiento" onclick="App.formMovimiento()"></button>
+  <nav class="tabs" id="tabs" aria-label="Secciones"></nav>
+
+  <div class="velo" id="velo" onclick="if (event.target === this) App.cerrar()">
+    <div class="panel" role="dialog" aria-modal="true" id="panel"></div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <div class="bloqueo" id="bloqueo" aria-label="Ingresá tu PIN">
+    <div class="logo" id="logoPin"></div>
+    <div style="font-size:18px;font-weight:700">Ingresá tu PIN</div>
+    <div class="puntos" id="puntos"></div>
+    <div class="suave" id="pinMsg" style="min-height:20px"></div>
+    <div class="teclado" id="teclado"></div>
+  </div>
+
+  <div class="conexion" id="conexion"></div>
+
+  <noscript>Esta aplicación necesita JavaScript.</noscript>
+  <script src="js/calculos.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
