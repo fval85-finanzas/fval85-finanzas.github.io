@@ -215,7 +215,13 @@ var Calc = (function () {
         if (asignado < m.monto - 0.005) pendientes.push({ mov: m, sentido: sentido, falta: m.monto - asignado, asignado: asignado });
         return;
       }
-      if (m.sobre) { efectos.push({ sobre: m.sobre, monto: sentido === 'entra' ? m.monto : -m.monto, fecha: m.fecha, tipo: 'Regla', movimiento: m.fila }); return; }
+      if (m.sobre) {
+        var nombre = m.sobre;
+        // inversiones anotadas antes de elegir el sobre de fondos (quedaron con el nombre "Fondos")
+        if (m.tipo === 'Inversión' && (d.sobreEspecial || {}).fondos && !(d.sobres || []).some(function (s) { return s.nombre === nombre; })) nombre = d.sobreEspecial.fondos;
+        efectos.push({ sobre: nombre, monto: sentido === 'entra' ? m.monto : -m.monto, fecha: m.fecha, tipo: m.tipo === 'Inversión' ? 'Inversión' : 'Regla', movimiento: m.fila });
+        return;
+      }
       pendientes.push({ mov: m, sentido: sentido, falta: m.monto, asignado: 0 });
     });
     var esp = (d.sobreEspecial || {}).prestamo;

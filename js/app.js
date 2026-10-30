@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '1.7.0';
+  var VERSION_WEB = '1.7.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -1139,7 +1139,7 @@ var App = (function () {
   // ------------------------------------------------------------ SOBRES
   // ------------------------------------------------------------ SOBRES CON SALDO (v1.6)
   function SB() { return C.saldosSobres(D, mes, hoy); }
-  function sobreTarjetas() { return (D.sobreEspecial || {}).tarjetas || 'Pago tarjetas'; }
+  function sobreTarjetas() { return (D.sobreEspecial || {}).tarjetas || ''; }
   function grupoNuevo() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function movPorFila(f) { return D.movimientos.filter(function (m) { return m.fila === f; })[0]; }
   function sinServidorSobres() { return !D.sobresDesde; }
@@ -1206,7 +1206,8 @@ var App = (function () {
     var m = movPorFila(fila); if (!m) return;
     var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0];
     if (!p) return toast('Este movimiento ya está asignado.');
-    asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: p.sentido === 'entra' ? 'sobre' : 'sobre', filas: [{ sobre: sobreTarjetas(), monto: p.falta }] };
+    var primero = sobreTarjetas() || ((SB().lista.filter(function (s) { return s.moneda === m.moneda; })[0] || {}).nombre) || '';
+    asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: 'sobre', filas: [{ sobre: primero, monto: p.falta }] };
     var h = '<div class="suave chico">' + esc(m.tipo) + ' · ' + fechaCorta(m.fecha) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</div>' +
       '<h2>' + esc(m.comercio || m.tipo) + '</h2><div class="grande ' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="font-size:28px;font-weight:800">' + (p.sentido === 'entra' ? '+' : '−') + din(p.falta, m.moneda) + '</div>' +
       (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + '<div id="as-cuerpo"></div>';
@@ -1221,7 +1222,7 @@ var App = (function () {
     if (m.tipo === 'Pago de tarjeta') {
       var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0);
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿DE QUÉ SOBRES SALIÓ?</div>' +
-        '<div class="chips" style="margin:6px 0"><button class="chip" onclick="App.asigTodo()">Todo de ' + esc(sobreTarjetas()) + '</button></div>' +
+        (sobreTarjetas() ? '<div class="chips" style="margin:6px 0"><button class="chip" onclick="App.asigTodo()">Todo de ' + esc(sobreTarjetas()) + '</button></div>' : '') +
         asig.filas.map(function (f, i) {
           return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(m.moneda, f.sobre, true) + '</select>' +
             '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '" oninput="App.asigFila(' + i + ',\'monto\',this.value)">' +
@@ -1232,7 +1233,7 @@ var App = (function () {
     } else if (asig.sentido === 'entra') {
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿A DÓNDE VA ESTE DINERO?</div>' +
         radio('sobre', 'Meter en un sobre', asig.modo === 'sobre' ? '<select id="as-sobre" onclick="event.stopPropagation()">' + opcionesSobre(m.moneda, null, true) + '</select>' : '') +
-        radio('tarjetas', 'Para pagar tarjetas', '<span class="suave chico"> (sobre ' + esc(sobreTarjetas()) + ')</span>') +
+        (sobreTarjetas() ? radio('tarjetas', 'Para pagar tarjetas', '<span class="suave chico"> (sobre ' + esc(sobreTarjetas()) + ')</span>') : '') +
         radio('repartir', 'Repartir en varios sobres') +
         radio('ninguno', 'Dejar en la cuenta (sin sobre)');
     } else {
@@ -1253,7 +1254,7 @@ var App = (function () {
   function asigAgregar() {
     var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0);
     var m = movPorFila(asig.fila), otro = SB().lista.filter(function (s) { return s.moneda === m.moneda && !asig.filas.some(function (f) { return f.sobre === s.nombre; }); })[0];
-    asig.filas.push({ sobre: otro ? otro.nombre : sobreTarjetas(), monto: Math.max(0, Math.round((asig.falta - suma) * 100) / 100) });
+    asig.filas.push({ sobre: otro ? otro.nombre : asig.filas[0].sobre, monto: Math.max(0, Math.round((asig.falta - suma) * 100) / 100) });
     pintarAsignar();
   }
   function asigQuitar(i) { asig.filas.splice(i, 1); pintarAsignar(); }
@@ -1358,7 +1359,7 @@ var App = (function () {
     var mon = 'CRC';
     abrir('<h2>Mover entre sobres</h2>' +
       '<label class="campo"><span>De</span><select id="mv-de">' + opcionesSobre(mon, desde, true) + '</select></label>' +
-      '<label class="campo"><span>A</span><select id="mv-a">' + opcionesSobre(mon, desde === sobreTarjetas() ? null : sobreTarjetas(), true) + '</select></label>' +
+      '<label class="campo"><span>A</span><select id="mv-a">' + opcionesSobre(mon, sobreTarjetas() && desde !== sobreTarjetas() ? sobreTarjetas() : null, true) + '</select></label>' +
       '<label class="campo"><span>Monto</span><input id="mv-monto" data-dinero inputmode="decimal" placeholder="0"></label>' +
       '<label class="campo"><span>Nota</span><input id="mv-nota" placeholder="Opcional"></label>' +
       '<div class="acciones"><button class="btn" id="mv-ok" onclick="App.guardarMover()">Mover</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
@@ -1377,7 +1378,7 @@ var App = (function () {
   function pLimpiar() {
     var sb = SB();
     if (!limpiar) {
-      limpiar = { destino: sobreTarjetas(), sel: {} };
+      limpiar = { destino: sobreTarjetas() || ((sb.lista.filter(function (s) { return s.tipo === 'Ahorro'; })[0] || sb.lista[0] || {}).nombre || ''), sel: {} };
       sb.lista.forEach(function (s) { if (s.tipo === 'Variable' && s.saldo > 0.005) limpiar.sel[s.nombre] = true; });
     }
     var h = cabSimple('Limpiar sobres', nombreMes(mes), 'App.ir(\'sobres\')');
@@ -1465,7 +1466,7 @@ var App = (function () {
 
   // ------------------------------------------------------------ FONDOS DE INVERSIÓN (v1.7)
   function FD() { return C.fondos(D, hoy); }
-  function sobreFondos() { return 'Fondos'; }
+  function sobreFondos() { return (D.sobreEspecial || {}).fondos || ''; }
   function sinServidorV17() { return !D.fondos; }
   function avisoV17() { return '<div class="caja vacio">Para esto hay que actualizar el código del servidor (Apps Script) a la versión 1.7.</div>'; }
 
@@ -1701,6 +1702,20 @@ var App = (function () {
       '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
   }
 
+  function formSobresEspeciales() {
+    var esp = D.sobreEspecial || {};
+    var sel = function (id, actual) {
+      return '<select id="' + id + '"><option value="">— Ninguno —</option>' + D.sobres.map(function (s) { return '<option' + (s.nombre === actual ? ' selected' : '') + '>' + esc(s.nombre) + '</option>'; }).join('') + '</select>';
+    };
+    abrir('<h2>Sobres especiales</h2><div class="suave">Elegí cuál de tus sobres cumple cada función. Les podés poner el nombre que quieras.</div>' +
+      '<label class="campo"><span>Préstamo de casa (los pagos del préstamo salen solos de aquí)</span>' + sel('se-prestamo', esp.prestamo) + '</label>' +
+      '<label class="campo"><span>Fondos de inversión (las inversiones de BCR SAFI salen solas de aquí)</span>' + sel('se-fondos', esp.fondos) + '</label>' +
+      '<label class="campo"><span>Pago de tarjetas (botón "Todo de…" al asignar un pago)</span>' + sel('se-tarjetas', esp.tarjetas) + '</label>' +
+      '<div class="acciones"><button class="btn" id="se-ok" onclick="App.guardarSobresEspeciales()">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarSobresEspeciales() {
+    srv('guardarSobresEspeciales', [{ prestamo: val('se-prestamo'), fondos: val('se-fondos'), tarjetas: val('se-tarjetas') }], function () { listo('✅ Sobres especiales guardados'); }, $('se-ok'));
+  }
   function formSobresDesde() {
     abrir('<h2>Saldos desde</h2><div class="suave">La fecha de los saldos iniciales de la pestaña Sobres. Los movimientos de antes no cuentan para los sobres.</div>' +
       '<label class="campo"><span>Fecha</span><input id="sd-fecha" type="date" value="' + localInput(D.sobresDesde) + '"></label>' +
@@ -1926,8 +1941,12 @@ var App = (function () {
       opcion('ojo', 'Ocultar montos', 'Muestra ****** en vez de las cantidades. También con el ojo 👁 de Inicio', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')) + '</div>';
 
     var prep = guardado('mf-preparado', '');
-    if (D.sobresDesde) h += '<div class="seccion">Sobres</div><div class="caja sinpad">' +
-      opcion('sobre', 'Saldos de los sobres desde', fechaCorta(D.sobresDesde) + ' · los saldos iniciales se ponen en la pestaña Sobres', '', 'App.formSobresDesde()') + '</div>';
+    if (D.sobresDesde) {
+      var esp = D.sobreEspecial || {}, nom = function (x) { return x ? esc(x) : 'ninguno'; };
+      h += '<div class="seccion">Sobres</div><div class="caja sinpad">' +
+        opcion('sobre', 'Saldos de los sobres desde', fechaCorta(D.sobresDesde) + ' · los saldos iniciales se ponen en la pestaña Sobres', '', 'App.formSobresDesde()') +
+        opcion('ajustes', 'Sobres especiales', 'Préstamo: ' + nom(esp.prestamo) + ' · Fondos: ' + nom(esp.fondos) + ' · Pago de tarjetas: ' + nom(esp.tarjetas), '', 'App.formSobresEspeciales()') + '</div>';
+    }
     h += '<div class="seccion">Calculadora</div><div class="caja sinpad">' +
       opcion('hoja', 'Preparado por (en los PDF)', prep ? esc(prep) : 'Sin nombre · tocá para escribirlo', '', 'App.formPreparado()') + '</div>';
 
@@ -2288,7 +2307,7 @@ var App = (function () {
     guardarAsignar: guardarAsignar, repCambio: repCambio, repAjuste: repAjuste, guardarRepartoMov: guardarRepartoMov,
     repGuardarCheck: function (v) { rep.guardar = v; }, formMover: formMover, guardarMover: guardarMover,
     limpiarSel: function (n, v) { limpiar.sel[n] = v; pintar(); }, limpiarDestino: function (n) { limpiar.destino = n; pintar(); },
-    guardarLimpiar: guardarLimpiar, deshacerSobres: deshacerSobres, formSobresDesde: formSobresDesde, guardarSobresDesde: guardarSobresDesde,
+    guardarLimpiar: guardarLimpiar, deshacerSobres: deshacerSobres, formSobresDesde: formSobresDesde, guardarSobresDesde: guardarSobresDesde, formSobresEspeciales: formSobresEspeciales, guardarSobresEspeciales: guardarSobresEspeciales,
     formSubcuenta: formSubcuenta, guardarSubcuenta: guardarSubcuenta, formFondo: formFondo, guardarFondo: guardarFondo,
     formActualizarFondo: formActualizarFondo, vistaFondo: vistaFondo, guardarActualizarFondo: guardarActualizarFondo,
     verViaje: verViaje, formViaje: formViaje, guardarViaje: guardarViaje, borrarViaje: borrarViaje, formLimiteViaje: formLimiteViaje,
