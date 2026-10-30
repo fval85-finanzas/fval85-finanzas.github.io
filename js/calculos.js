@@ -177,6 +177,90 @@ var Calc = (function () {
     };
   }
 
+
+  // ---------------- Sobres con saldo (v1.6) ----------------
+  /*
+   * Cada sobre tiene plata real: saldo inicial + lo que entra − lo que sale, desde la fecha de inicio (D.sobresDesde).
+   *  - Las compras con TARJETA DE CRÉDITO no tocan los sobres: se descuentan al asignar el PAGO de la tarjeta.
+   *  - Un movimiento puede asignarse con filas en "Movimientos de sobres" (D.sobresMov, ligadas por `movimiento`)
+   *    o, si no tiene esas filas, con su columna Sobre (reglas del correo).
+   *  - Los pagos del préstamo salen solos del sobre de la cuota de la casa.
+   */
+  function esTarjeta(d, nombre) {
+    return (d.cuentas || []).some(function (c) { return c.nombre === nombre && c.tipo === 'Tarjeta de crédito'; });
+  }
+  /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
+  function sentidoSobre(d, m) {
+    if (m.tipo === 'Ingreso') return 'entra';
+    if (m.tipo === 'Pago de tarjeta') return 'sale';
+    if (m.tipo === 'Gasto' && !esTarjeta(d, m.cuenta)) return 'sale';
+    return null;
+  }
+  function analizarSobres(d) {
+    var desde = d.sobresDesde ? soloFecha(new Date(d.sobresDesde)) : null;
+    var efectos = [], porMov = {}, pendientes = [];
+    (d.sobresMov || []).forEach(function (x) {
+      if (x.movimiento) (porMov[x.movimiento] = porMov[x.movimiento] || []).push(x);
+      if (x.sobre) efectos.push({ sobre: x.sobre, monto: x.monto, fecha: x.fecha, tipo: x.tipo, grupo: x.grupo, movimiento: x.movimiento || null, nota: x.nota });
+    });
+    if (!desde) return { efectos: efectos, pendientes: [], porMov: porMov, desde: null };
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha || soloFecha(new Date(m.fecha)) < desde) return;
+      var sentido = sentidoSobre(d, m);
+      if (!sentido) return;
+      var filas = porMov[m.fila];
+      if (filas && filas.length) {
+        var asignado = filas.reduce(function (a, x) { return a + Math.abs(x.monto); }, 0);
+        if (asignado < m.monto - 0.005) pendientes.push({ mov: m, sentido: sentido, falta: m.monto - asignado, asignado: asignado });
+        return;
+      }
+      if (m.sobre) { efectos.push({ sobre: m.sobre, monto: sentido === 'entra' ? m.monto : -m.monto, fecha: m.fecha, tipo: 'Regla', movimiento: m.fila }); return; }
+      pendientes.push({ mov: m, sentido: sentido, falta: m.monto, asignado: 0 });
+    });
+    var esp = (d.sobreEspecial || {}).prestamo;
+    if (esp && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
+      if (p.fecha && soloFecha(new Date(p.fecha)) >= desde && p.total) efectos.push({ sobre: esp, monto: -p.total, fecha: p.fecha, tipo: 'Préstamo' });
+    });
+    pendientes.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+    return { efectos: efectos, pendientes: pendientes, porMov: porMov, desde: desde };
+  }
+  /** Saldo de cada sobre al final del mes `mes` (o hoy) y lo que entró / salió en ese mes. */
+  function saldosSobres(d, mes, hoy) {
+    var an = analizarSobres(d);
+    var ini = new Date(mes.getFullYear(), mes.getMonth(), 1), fin = new Date(mes.getFullYear(), mes.getMonth() + 1, 1);
+    var lista = (d.sobres || []).map(function (s) {
+      var o = { fila: s.fila, nombre: s.nombre, moneda: s.moneda, tipo: s.tipo, asignado: s.asignado || 0, asignadoAuto: s.asignadoAuto,
+        meta: s.meta || null, ajuste: !!s.ajuste, notas: s.notas, saldoInicial: s.saldoInicial || 0,
+        saldo: s.saldoInicial || 0, inicioMes: s.saldoInicial || 0, entradas: 0, salidas: 0, movs: [] };
+      an.efectos.forEach(function (e) {
+        if (e.sobre !== s.nombre) return;
+        var f = new Date(e.fecha);
+        if (f >= fin) return;
+        o.saldo += e.monto;
+        if (f < ini) o.inicioMes += e.monto;
+        else { if (e.monto >= 0) o.entradas += e.monto; else o.salidas -= e.monto; o.movs.push(e); }
+      });
+      o.disponibleMes = o.inicioMes + o.entradas;
+      o.pct = o.disponibleMes > 0 ? Math.min(1, o.salidas / o.disponibleMes) : (o.salidas > 0 ? 1 : 0);
+      return o;
+    });
+    var total = { CRC: 0, USD: 0 };
+    lista.forEach(function (s) { total[s.moneda === 'USD' ? 'USD' : 'CRC'] += s.saldo; });
+    var porAsignar = { CRC: 0, USD: 0 };
+    an.pendientes.forEach(function (p) { if (p.sentido === 'entra') porAsignar[p.mov.moneda === 'USD' ? 'USD' : 'CRC'] += p.falta; });
+    return { lista: lista, total: total, pendientes: an.pendientes, porAsignar: porAsignar, porMov: an.porMov, desde: an.desde };
+  }
+  /** Reparto: montos de siempre; la diferencia con lo que entró va (o se resta) al sobre de ajuste. */
+  function reparto(d, monto, moneda, ajusteNombre) {
+    var sob = (d.sobres || []).filter(function (s) { return (s.moneda || 'CRC') === moneda; });
+    var ajuste = ajusteNombre || (sob.filter(function (s) { return s.ajuste; })[0] || {}).nombre || null;
+    var filas = sob.map(function (s) { return { nombre: s.nombre, monto: s.asignado || 0, ajuste: s.nombre === ajuste }; });
+    var siempre = filas.reduce(function (a, f) { return a + f.monto; }, 0);
+    var dif = monto - siempre;
+    filas.forEach(function (f) { if (f.ajuste) f.monto = Math.round((f.monto + dif) * 100) / 100; });
+    return { filas: filas, siempre: siempre, diferencia: dif, ajuste: ajuste };
+  }
+
   // ---------------- Formato ----------------
   function miles(entero) { return entero.replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 
@@ -268,7 +352,8 @@ var Calc = (function () {
     claveMes: claveMes, enMes: enMes, sumarMeses: sumarMeses, mesesCompletos: mesesCompletos, diasEntre: diasEntre,
     proximaFecha: proximaFecha, estadoTasaCero: estadoTasaCero, cuotaEnMes: cuotaEnMes, resumenMes: resumenMes,
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
-    amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes
+    amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
+    esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

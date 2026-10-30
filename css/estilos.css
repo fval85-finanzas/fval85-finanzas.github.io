@@ -307,3 +307,18 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .panel { border-radius: 22px; max-height: 88vh; }
   .accesos { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
+/* v1.6 · sobres con saldo */
+.op { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px; margin-top: 8px; border: 1px solid var(--borde); border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.op.on { border-color: var(--acento); background: rgba(245, 184, 46, .08); }
+.op input[type=radio] { width: 18px; height: 18px; accent-color: var(--acento); margin: 0; }
+.op select { flex: 1 1 100%; height: 40px; border-radius: 10px; border: 1px solid var(--borde); background: var(--fondo); color: var(--texto); font: inherit; padding: 0 10px; }
+.fila-sobre { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: 8px; align-items: center; margin-top: 8px; }
+.fila-sobre select, .fila-sobre input, .fila-rep input { height: 42px; border-radius: 10px; border: 1px solid var(--borde); background: var(--fondo); color: var(--texto); font: inherit; padding: 0 10px; min-width: 0; }
+.fila-sobre input, .fila-rep input { text-align: right; font-weight: 700; }
+.fila-sobre .x { width: 32px; height: 32px; border-radius: 16px; border: 0; background: var(--tarjeta); color: var(--suave); font-size: 18px; cursor: pointer; }
+.fila-rep { display: grid; grid-template-columns: minmax(0, 1fr) 128px; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--borde); font-size: 14px; }
+.fila-rep:first-child { border-top: 0; }
+.fila-rep.aj input { border-color: var(--acento); color: var(--acento); }
+label.fila-rep { grid-template-columns: minmax(0, 1fr) auto; cursor: pointer; }
+@media (max-width: 370px) { .fila-sobre { grid-template-columns: minmax(0, 1fr) 100px auto; } .fila-rep { grid-template-columns: minmax(0, 1fr) 108px; } }
