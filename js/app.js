@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '1.4.0';
+  var VERSION_WEB = '1.5.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -172,6 +172,7 @@ var App = (function () {
       inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
       mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
+    formatearMontos();
   }
 
   // ------------------------------------------------------------ INICIO
@@ -569,7 +570,7 @@ var App = (function () {
       }).join('') + '</select></label>';
     }
     h += '<div class="suave chico" id="ab-info"></div>' +
-      '<div class="dos-campos"><label class="campo compacto"><span>Monto del abono</span><input id="ab-monto" class="monto" inputmode="decimal" placeholder="0" oninput="App.abonoVista()" value="' + (ab ? esc(String(ab.monto).replace('.', ',')) : '') + '"></label>' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Monto del abono</span><input id="ab-monto" data-dinero class="monto" inputmode="decimal" placeholder="0" oninput="App.abonoVista()" value="' + (ab ? esc(String(ab.monto).replace('.', ',')) : '') + '"></label>' +
       '<label class="campo compacto"><span>Fecha</span><input id="ab-fecha" type="date" onchange="App.abonoVista()" value="' + localInput(ab ? ab.fecha : (mov ? mov.fecha : new Date().toISOString())) + '"></label></div>' +
       '<div class="chips" id="ab-chips" style="margin-top:10px"></div>' +
       '<label class="campo compacto"><span>¿De dónde salió? (opcional)</span><select id="ab-origen">' + opciones(origenes, ab ? ab.origen : '', '—') + '</select></label>' +
@@ -591,6 +592,7 @@ var App = (function () {
     return t;
   }
   function abonoVista() {
+    formatearMontos();
     var t = tcSinEsteAbono(), mon = t.moneda, e = C.estadoTasaCero(t, hoy);
     var monto = C.leerNumero(val('ab-monto')) || 0;
     $('ab-info').textContent = 'Falta ' + txt(e.saldo, mon) + ' · ' + (e.restantes ? 'quedan ' + e.restantes + ' cuota' + (e.restantes === 1 ? '' : 's') + ' de ' + txt(e.cuota, mon) : 'sin cuotas pendientes');
@@ -776,14 +778,14 @@ var App = (function () {
     h += '<div class="caja" style="gap:0">' +
       '<div class="dos-campos"><label class="campo compacto"><span>Para (nombre)</span><input id="k-para" value="' + esc(calc.para) + '" placeholder="Opcional"></label>' +
       '<label class="campo compacto"><span>Concepto</span><input id="k-concepto" value="' + esc(calc.concepto) + '" placeholder="Ej. Carro nuevo"></label></div>' +
-      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto del préstamo</span><input id="k-monto" class="monto" inputmode="decimal" value="' + esc(calc.monto) + '" placeholder="0"></label>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto del préstamo</span><input id="k-monto" data-dinero class="monto" inputmode="decimal" value="' + esc(calc.monto) + '" placeholder="0"></label>' +
       '<label class="campo compacto"><span>Moneda</span><select id="k-moneda"><option value="CRC"' + (calc.moneda === 'CRC' ? ' selected' : '') + '>₡</option><option value="USD"' + (calc.moneda === 'USD' ? ' selected' : '') + '>$</option></select></label></div>' +
       '<div class="dos-campos"><label class="campo compacto"><span>Plazo</span><input id="k-plazo" inputmode="numeric" value="' + esc(calc.plazo) + '" placeholder="60"></label>' +
       '<label class="campo compacto"><span>Tasa de interés (%)</span><input id="k-tasa" inputmode="decimal" value="' + esc(calc.tasa) + '" placeholder="9,5"></label></div>' +
       '<div class="dos-campos" style="margin-top:6px">' + seg('plazoU', [['meses', 'Meses'], ['anios', 'Años']]) + seg('tasaU', [['anual', 'Anual'], ['mensual', 'Mensual']]) + '</div>' +
-      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px;align-items:end"><label class="campo compacto"><span>Pólizas y seguros (opcional)</span><input id="k-pol" inputmode="decimal" value="' + esc(calc.pol) + '" placeholder="0"></label>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px;align-items:end"><label class="campo compacto"><span>Pólizas y seguros (opcional)</span><input id="k-pol" data-dinero inputmode="decimal" value="' + esc(calc.pol) + '" placeholder="0"></label>' +
       '<div style="margin-top:10px">' + seg('polT', [['fijo', 'Monto'], ['pct', '% saldo']]) + '</div></div>' +
-      '<div class="dos-campos"><label class="campo compacto"><span>Comisión (una vez)</span><input id="k-com" inputmode="decimal" value="' + esc(calc.com) + '" placeholder="0"></label>' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Comisión (una vez)</span><input id="k-com" data-dinero inputmode="decimal" value="' + esc(calc.com) + '" placeholder="0"></label>' +
       '<label class="campo compacto"><span>Primer pago</span><input id="k-fecha" type="date" value="' + esc(calc.fecha) + '"></label></div>' +
       '<div class="campo compacto"><span>Tipo de cuota</span>' + seg('tipo', [['fija', 'Fija (nivelada)'], ['decreciente', 'Decreciente']]) + '</div>' +
       '<button class="btn" style="margin-top:16px" onclick="App.calcular()">Calcular</button></div>';
@@ -846,7 +848,7 @@ var App = (function () {
     // abono extra
     var conAb = parametrosCalc(true);
     h += '<div class="caja"><h3>Abono extra a capital</h3>' +
-      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:8px"><label class="campo compacto" style="margin-top:0"><span>Monto</span><input id="a-monto" inputmode="decimal" value="' + esc(calcAbono.monto) + '" placeholder="50.000"></label>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:8px"><label class="campo compacto" style="margin-top:0"><span>Monto</span><input id="a-monto" data-dinero inputmode="decimal" value="' + esc(calcAbono.monto) + '" placeholder="50.000"></label>' +
       '<label class="campo compacto" style="margin-top:0"><span>¿Cada cuánto?</span><select id="a-frec" onchange="App.calcSet(\'abono.frecuencia\', this.value)">' +
       [['mensual', 'Cada mes'], ['anual', 'Cada año'], ['unica', 'Una sola vez']].map(function (o) { return '<option value="' + o[0] + '"' + (calcAbono.frecuencia === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
       (calcAbono.frecuencia === 'unica' ? '<label class="campo compacto"><span>¿En cuál cuota? (1 = la primera)</span><input id="a-mes" inputmode="numeric" value="' + esc(calcAbono.mes) + '"></label>' : '') +
@@ -986,7 +988,7 @@ var App = (function () {
     var chips = [['todos', 'Todos'], ['revisar', 'Por revisar']].concat(bancos.map(function (b) { return ['b:' + b, b]; })).concat([['CRC', '₡'], ['USD', '$']]);
     var h = cabMes('Movimientos', '<button class="btn-icono" aria-label="Revisar correos ahora" onclick="App.revisarCorreos(this)">' + ico('recargar') + '</button>');
     h += '<label class="buscador">' + ico('buscar', ' style="width:18px;height:18px;color:var(--suave)"') +
-      '<input type="search" id="q" aria-label="Buscar movimientos" placeholder="Buscar comercio, lugar, categoría…" value="' + esc(filtro.q) + '" oninput="App.buscar(this.value)"></label>';
+      '<input type="search" id="q" aria-label="Buscar movimientos" placeholder="Buscar…" value="' + esc(filtro.q) + '" oninput="App.buscar(this.value)"></label>';
     h += '<div class="chips">' + chips.map(function (c) {
       return '<button class="chip' + (filtro.chip === c[0] ? ' on' : '') + '" onclick="App.chip(\'' + esc(c[0]).replace(/'/g, '') + '\')">' + esc(c[1]) + '</button>';
     }).join('') + '</div><div id="listaMov"></div>';
@@ -1142,7 +1144,7 @@ var App = (function () {
   }
 
   // ------------------------------------------------------------ PANELES (formularios)
-  function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); }
+  function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); }
   function cerrar() { $('velo').classList.remove('abierto'); }
   function val(id) { var e = $(id); return e ? e.value : ''; }
   function listo(msg) { cerrar(); toast(msg); cargar(); }
@@ -1155,7 +1157,7 @@ var App = (function () {
     var h = '<h2>' + (fila ? 'Movimiento' : 'Nuevo movimiento') + '</h2>';
     if (m.origen === 'Correo') h += '<div class="pill ok" style="display:inline-block">Registrado desde un correo' + (m.autorizacion && m.autorizacion.indexOf('auto-') !== 0 ? ' · aut. ' + esc(m.autorizacion) : '') + '</div>';
     h += '<label class="campo"><span>Tipo</span><select id="f-tipo">' + opciones(D.tiposMovimiento.length ? D.tiposMovimiento : ['Gasto', 'Ingreso'], m.tipo) + '</select></label>' +
-      '<div style="display:flex;gap:8px;align-items:flex-end"><label class="campo" style="flex:1"><span>Monto</span><input id="f-monto" class="monto" inputmode="decimal" placeholder="0" value="' + (fila ? esc(String(m.monto).replace('.', ',')) : '') + '"></label>' +
+      '<div style="display:flex;gap:8px;align-items:flex-end"><label class="campo" style="flex:1"><span>Monto</span><input id="f-monto" data-dinero class="monto" inputmode="decimal" placeholder="0" value="' + (fila ? esc(String(m.monto).replace('.', ',')) : '') + '"></label>' +
       '<label class="campo" style="width:96px"><span>Moneda</span><select id="f-moneda">' + '<option value="CRC"' + (m.moneda === 'CRC' ? ' selected' : '') + '>₡</option><option value="USD"' + (m.moneda === 'USD' ? ' selected' : '') + '>$</option></select></label></div>' +
       '<label class="campo"><span>Comercio o descripción</span><input id="f-comercio" value="' + esc(m.comercio) + '" placeholder="Ej. Automercado"></label>' +
       '<label class="campo"><span>Lugar</span><input id="f-lugar" value="' + esc(m.lugar) + '" placeholder="Opcional"></label>' +
@@ -1226,9 +1228,9 @@ var App = (function () {
       '<div class="dos"><label class="campo"><span>Banco</span><input id="c-banco" value="' + esc(c.banco) + '" placeholder="BCR, Davibank…"></label>' +
       '<label class="campo"><span>Últimos 4 dígitos</span><input id="c-u4" inputmode="numeric" maxlength="4" value="' + esc(c.ultimos4) + '" placeholder="1234"></label></div>' +
       '<label class="campo"><span>Moneda principal</span><select id="c-moneda"><option value="CRC"' + (c.moneda === 'CRC' ? ' selected' : '') + '>Colones ₡</option><option value="USD"' + (c.moneda === 'USD' ? ' selected' : '') + '>Dólares $</option></select></label>' +
-      '<div class="dos"><label class="campo"><span>Límite ₡</span><input id="c-limc" inputmode="decimal" value="' + num(c.limiteCRC) + '"></label><label class="campo"><span>Límite $</span><input id="c-limu" inputmode="decimal" value="' + num(c.limiteUSD) + '"></label></div>' +
+      '<div class="dos"><label class="campo"><span>Límite ₡</span><input id="c-limc" data-dinero inputmode="decimal" value="' + num(c.limiteCRC) + '"></label><label class="campo"><span>Límite $</span><input id="c-limu" data-dinero inputmode="decimal" value="' + num(c.limiteUSD) + '"></label></div>' +
       '<div class="dos"><label class="campo"><span>Día de corte</span><input id="c-corte" type="number" min="1" max="31" value="' + (c.diaCorte || '') + '"></label><label class="campo"><span>Día de pago</span><input id="c-pago" type="number" min="1" max="31" value="' + (c.diaPago || '') + '"></label></div>' +
-      '<div class="dos"><label class="campo"><span>Saldo actual ₡</span><input id="c-salc" inputmode="decimal" value="' + num(c.saldoCRC) + '"></label><label class="campo"><span>Saldo actual $</span><input id="c-salu" inputmode="decimal" value="' + num(c.saldoUSD) + '"></label></div>' +
+      '<div class="dos"><label class="campo"><span>Saldo actual ₡</span><input id="c-salc" data-dinero inputmode="decimal" value="' + num(c.saldoCRC) + '"></label><label class="campo"><span>Saldo actual $</span><input id="c-salu" data-dinero inputmode="decimal" value="' + num(c.saldoUSD) + '"></label></div>' +
       '<label class="campo"><span>Notas</span><input id="c-notas" value="' + esc(c.notas) + '"></label>' +
       (fila ? '<label class="check"><input type="checkbox" id="c-activa"' + (c.activa ? ' checked' : '') + '> Cuenta activa</label>' : '') +
       '<div class="suave chico" style="margin-top:10px">Con los últimos 4 dígitos, las compras que lleguen por correo se asignan solas a esta tarjeta. Si es un banco nuevo, agregá su correo en la pestaña Config de la hoja.</div>' +
@@ -1253,7 +1255,7 @@ var App = (function () {
       return abrir('<h2>Nuevo sobre</h2><label class="campo"><span>Nombre</span><input id="s-nombre" placeholder="Ej. Mascotas"></label>' +
         '<div class="dos"><label class="campo"><span>Moneda</span><select id="s-moneda"><option value="CRC">Colones ₡</option><option value="USD">Dólares $</option></select></label>' +
         '<label class="campo"><span>Tipo</span><select id="s-tipo"><option>Variable</option><option>Fijo</option></select></label></div>' +
-        '<label class="campo"><span>Monto por mes</span><input id="s-monto" class="monto" inputmode="decimal" placeholder="0"></label>' +
+        '<label class="campo"><span>Monto por mes</span><input id="s-monto" data-dinero class="monto" inputmode="decimal" placeholder="0"></label>' +
         '<div class="acciones"><button class="btn" id="s-ok" onclick="App.guardarSob()">Crear sobre</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
     }
     var s = C.sobres(D, mes, C.resumenMes(D, mes)).lista[i];
@@ -1261,7 +1263,7 @@ var App = (function () {
       return abrir('<h2>' + esc(s.nombre) + '</h2><div class="suave" style="margin-top:6px">Este sobre se calcula solo con las cuotas tasa cero del mes: ' + din(s.asignado, s.moneda) + '.</div><div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
     }
     abrir('<h2>' + esc(s.nombre) + '</h2><div class="suave">' + (s.notas ? esc(s.notas) + ' · ' : '') + 'Gastado este mes: ' + din(s.gastado, s.moneda) + '</div>' +
-      '<label class="campo"><span>Monto por mes (' + (s.moneda === 'USD' ? '$' : '₡') + ')</span><input id="s-monto" class="monto" inputmode="decimal" value="' + String(s.asignado).replace('.', ',') + '"></label>' +
+      '<label class="campo"><span>Monto por mes (' + (s.moneda === 'USD' ? '$' : '₡') + ')</span><input id="s-monto" data-dinero class="monto" inputmode="decimal" value="' + String(s.asignado).replace('.', ',') + '"></label>' +
       '<div class="acciones"><button class="btn" id="s-ok" onclick="App.guardarSob(' + s.fila + ')">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function guardarSob(fila) {
@@ -1278,9 +1280,9 @@ var App = (function () {
     abrir('<h2>Registrar pago del préstamo</h2><div class="suave">Normalmente se registra solo con el correo del banco. Usá esto solo si no llegó.</div>' +
       '<label class="campo"><span>Fecha de pago</span><input id="p-fecha" type="date" value="' + localInput() + '"></label>' +
       '<label class="campo"><span>N° de comprobante</span><input id="p-comp" inputmode="numeric"></label>' +
-      '<label class="campo"><span>Abono a principal</span><input id="p-prin" inputmode="decimal" value="' + r(e.principal) + '"></label>' +
-      '<label class="campo"><span>Intereses</span><input id="p-int" inputmode="decimal" value="' + r(e.intereses) + '"></label>' +
-      '<label class="campo"><span>Pólizas</span><input id="p-pol" inputmode="decimal" value="' + r(e.polizas) + '"></label>' +
+      '<label class="campo"><span>Abono a principal</span><input id="p-prin" data-dinero inputmode="decimal" value="' + r(e.principal) + '"></label>' +
+      '<label class="campo"><span>Intereses</span><input id="p-int" data-dinero inputmode="decimal" value="' + r(e.intereses) + '"></label>' +
+      '<label class="campo"><span>Pólizas</span><input id="p-pol" data-dinero inputmode="decimal" value="' + r(e.polizas) + '"></label>' +
       '<div class="suave chico" style="margin-top:8px">Los montos vienen del estimado: cambialos por los reales del comprobante.</div>' +
       '<div class="acciones"><button class="btn" id="p-ok" onclick="App.guardarPago()">Registrar pago</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
@@ -1355,7 +1357,7 @@ var App = (function () {
     var ult = AJ.ultimaRevision ? new Date(Number(AJ.ultimaRevision) + 10 * 60000) : null;
     h += '<div class="seccion">Correos de los bancos</div><div class="caja sinpad">' +
       opcion('recargar', 'Revisar correos ahora', ult ? 'Última revisión: ' + fechaCorta(ult.toISOString()) + ' ' + hora(ult.toISOString()) : 'Todavía no se ha revisado', '', 'App.revisarCorreos(this)') +
-      opcion('sobre', 'Bancos que se leen', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + comprobantes del préstamo', '') +
+      opcion('sobre', 'Bancos que se leen', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE Móvil BCR + recibos del préstamo', '') +
       '<div class="suave chico" style="padding:0 16px 14px">Para agregar un banco (por ejemplo Davibank), escribí su correo en la pestaña <b>Config</b> de la hoja.</div></div>';
 
     var cx = conexion();
@@ -1558,6 +1560,40 @@ var App = (function () {
   });
 
   // ------------------------------------------------------------ arranque
+
+  // ------------------------------------------------------------ MONTOS CON SEPARADOR DE MILES (mientras se escribe)
+  /** "1250000,5" → "1.250.000,5". La coma es el decimal (máximo 2). */
+  function formatoMonto(v) {
+    v = String(v || '');
+    var i = v.indexOf(',');
+    var ent = (i < 0 ? v : v.slice(0, i)).replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    var dec = i < 0 ? null : v.slice(i + 1).replace(/\D/g, '').slice(0, 2);
+    if (!ent && dec !== null) ent = '0';
+    return ent.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dec !== null ? ',' + dec : '');
+  }
+  function alEscribirMonto(e) {
+    var c = e.target;
+    if (!c.hasAttribute || !c.hasAttribute('data-dinero')) return;
+    var v = c.value, pos = c.selectionStart === null ? v.length : c.selectionStart;
+    // el punto del teclado se toma como coma decimal (si todavía no hay una)
+    if (e.data === '.' && v.charAt(pos - 1) === '.') {
+      var yaHayComa = v.indexOf(',') >= 0;
+      v = v.slice(0, pos - 1) + (yaHayComa ? '' : ',') + v.slice(pos);
+      if (yaHayComa) pos--;
+    }
+    var antes = v.slice(0, pos).replace(/[^\d,]/g, '').length;   // cifras antes del cursor
+    var nuevo = formatoMonto(v);
+    if (nuevo === c.value) return;
+    c.value = nuevo;
+    var k = 0, n = 0;
+    while (k < nuevo.length && n < antes) { if (/[\d,]/.test(nuevo.charAt(k))) n++; k++; }
+    try { c.setSelectionRange(k, k); } catch (x) { /* nada */ }
+  }
+  function formatearMontos() {
+    document.querySelectorAll('input[data-dinero]').forEach(function (c) { if (c.value) c.value = formatoMonto(String(c.value).replace(/\.(?=\d{1,2}$)/, ',')); });
+  }
+  document.addEventListener('input', alEscribirMonto, true);
+
   // ------------------------------------------------------------ CONEXIÓN (URL /exec + clave)
   function mostrarConexion(msg) {
     var c = conexion();

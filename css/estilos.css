@@ -260,3 +260,50 @@ nav.tabs button.on { color: var(--acento); }
   background: var(--acento); color: #121417; font: inherit; font-weight: 800; font-size: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; }
 .fab-txt svg { width: 20px; height: 20px; }
 #p-tcdetalle { padding-bottom: 90px; }
+
+/* ---------- v1.5 · se ajusta a cualquier teléfono (portada del Fold, normal y Fold abierto) ---------- */
+/* nada se corta: los textos largos pasan a una segunda línea */
+.item .cuerpo { min-width: 0; flex: 1; }
+.item .nombre, .item .det { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.item .monto { flex-shrink: 0; }
+/* los chips bajan a otra fila en vez de salirse de la pantalla */
+.chips { flex-wrap: wrap; overflow: visible; }
+/* encabezados: el título se acomoda y los botones no empujan la pantalla */
+.cab { flex-wrap: wrap; }
+.cab > div:first-child { min-width: 0; flex: 1 1 170px; }
+.atras-cab { min-width: 0; }
+.titulo { font-size: clamp(21px, 6.6vw, 28px); overflow-wrap: anywhere; line-height: 1.15; }
+.panel h2 { overflow-wrap: anywhere; }
+.fila { gap: 10px; }
+.fila > :last-child:not(:first-child) { text-align: right; }
+.fila > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.m { white-space: nowrap; }   /* un monto nunca se parte en dos líneas */
+.cifra-g { font-size: clamp(26px, 8.6vw, 34px); white-space: nowrap; }
+.hero .grande { font-size: clamp(25px, 8.4vw, 34px); }
+.hero .medio { font-size: clamp(18px, 5.6vw, 22px); }
+input, select, textarea { min-width: 0; max-width: 100%; }
+
+/* pantallas angostas (portada del Fold ≈ 344 px) */
+@media (max-width: 370px) {
+  .pantalla { padding: 18px 12px 8px; gap: 12px; }
+  .caja { padding: 14px; }
+  .btn-icono { width: 38px; height: 38px; }
+  .mesnav { gap: 4px; }
+  .panel { padding-left: 14px; padding-right: 14px; }
+  .dos-campos { grid-template-columns: minmax(0, 1fr); }
+  .rapidos button { font-size: 12px; padding-left: 4px; padding-right: 4px; }
+  .accesos { gap: 14px 6px; }
+  .tile .ic { width: 54px; height: 54px; }
+  .tile span.n { font-size: 11px; }
+  .tabla-k { grid-template-columns: 30px repeat(3, minmax(0, 1fr)); font-size: 11px; gap: 6px 4px; }
+  .chip { padding: 0 12px; font-size: 13px; }
+  .leyenda { gap: 10px; }
+  .leyenda b { font-size: 11.5px; }
+}
+/* Fold abierto y tabletas: contenido centrado y formularios como ventana */
+@media (min-width: 640px) {
+  .pantalla { max-width: 640px; margin: 0 auto; }
+  .velo { align-items: center; }
+  .panel { border-radius: 22px; max-height: 88vh; }
+  .accesos { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
