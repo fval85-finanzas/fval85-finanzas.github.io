@@ -191,7 +191,8 @@ var Calc = (function () {
   }
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
   function sentidoSobre(d, m) {
-    if (m.tipo === 'Ingreso') return 'entra';
+    if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
+    if (m.tipo === 'Inversión') return 'sale';
     if (m.tipo === 'Pago de tarjeta') return 'sale';
     if (m.tipo === 'Gasto' && !esTarjeta(d, m.cuenta)) return 'sale';
     return null;
@@ -259,6 +260,89 @@ var Calc = (function () {
     var dif = monto - siempre;
     filas.forEach(function (f) { if (f.ajuste) f.monto = Math.round((f.monto + dif) * 100) / 100; });
     return { filas: filas, siempre: siempre, diferencia: dif, ajuste: ajuste };
+  }
+
+
+  // ---------------- Fondos de inversión (v1.7) ----------------
+  /** Saldo de cada subcuenta = saldo anotado (a una fecha) + aportes − retiros después de esa fecha. */
+  function fondos(d, hoy) {
+    var movs = (d.movimientos || []).filter(function (m) { return m.tipo === 'Inversión' || m.tipo === 'Retiro de fondo'; });
+    var claveMesHoy = claveMes(hoy);
+    var lista = (d.fondos || []).map(function (f) {
+      var desde = f.fechaSaldo ? new Date(f.fechaSaldo) : null;
+      var o = { fila: f.fila, nombre: f.nombre, fondo: f.fondo, moneda: f.moneda || 'CRC', meta: f.meta || null, saldoBase: f.saldo || 0,
+        fechaSaldo: f.fechaSaldo, intereses: f.intereses || 0, saldo: f.saldo || 0, aportesMes: 0, retirosMes: 0, movs: [] };
+      movs.forEach(function (m) {
+        if (m.subcuenta !== f.nombre) return;
+        var fm = new Date(m.fecha), signo = m.tipo === 'Inversión' ? 1 : -1;
+        if (!desde || fm > desde) o.saldo += signo * m.monto;
+        if (claveMes(fm) === claveMesHoy) { if (signo > 0) o.aportesMes += m.monto; else o.retirosMes += m.monto; }
+        o.movs.push(m);
+      });
+      o.movs.sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+      return o;
+    });
+    var total = { CRC: 0, USD: 0 };
+    lista.forEach(function (f) { total[f.moneda === 'USD' ? 'USD' : 'CRC'] += f.saldo; });
+    var pendientes = movs.filter(function (m) { return !m.subcuenta; }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    return { lista: lista, total: total, pendientes: pendientes };
+  }
+  /** Subcuenta que se usó la última vez con el mismo monto (para sugerirla). */
+  function sugerirSubcuenta(d, m) {
+    var c = (d.movimientos || []).filter(function (x) { return x.tipo === m.tipo && x.subcuenta && Math.abs(x.monto - m.monto) < 0.01 && x.fila !== m.fila; })
+      .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); })[0];
+    return c ? c.subcuenta : null;
+  }
+
+  // ---------------- Presupuesto de viaje (v1.7) ----------------
+  var CATS_VIAJE = ['Transporte', 'Comida', 'Hospedaje', 'Tours', 'Compras', 'Otros'];
+  var PALABRAS_VIAJE = [
+    ['Transporte', /AVIANCA|COPA|AIRLINE|AIRWAYS|AEROL|VOLARIS|UNITED|DELTA|AMERICAN AIR|JETBLUE|SPIRIT|UBER|TAXI|CABIFY|DIDI|BOLT|RENT ?A ?CAR|HERTZ|AVIS|ALAMO|BUDGET|GASOL|FUEL|SHELL|TEXACO|METRO|BUS|PARKING|PARQUEO|PEAJE/i],
+    ['Hospedaje', /HOTEL|HOSTEL|AIRBNB|BOOKING|EXPEDIA|MARRIOTT|HILTON|HYATT|SHERATON|RESORT|INN\b|LODGE|SUITES/i],
+    ['Comida', /REST|CAFE|COFFEE|STARBUCKS|BAR\b|GRILL|PIZZA|BURGER|MCDONALD|KFC|SUBWAY|FOOD|SUSHI|TACO|DINER|BAKERY|PANADER|SODA|POLLO|COMIDA/i],
+    ['Tours', /TOUR|TICKET|ENTRADA|MUSEO|MUSEUM|PARK|PARQUE|EXCURS|CANOPY|ZOO|DISNEY|UNIVERSAL|GETYOURGUIDE|VIATOR/i],
+    ['Compras', /MALL|STORE|SHOP|TIENDA|OUTLET|DUTY|WALMART|TARGET|ZARA|NIKE|ADIDAS|ALBROOK|MULTIPLAZA|AMAZON|FARMAC|PHARM|SUPER/i]
+  ];
+  var CAT_A_VIAJE = { Restaurantes: 'Comida', Transporte: 'Transporte', Compras: 'Compras', Ropa: 'Compras', Entretenimiento: 'Tours', Viajes: 'Otros', Supermercado: 'Comida' };
+  function categoriaViaje(m) {
+    var v = String(m.viaje || '').replace(/^\+/, '');
+    if (CATS_VIAJE.indexOf(v) >= 0) return v;
+    for (var i = 0; i < PALABRAS_VIAJE.length; i++) if (PALABRAS_VIAJE[i][1].test(m.comercio || '')) return PALABRAS_VIAJE[i][0];
+    return CAT_A_VIAJE[m.categoria] || 'Otros';
+  }
+  function enViaje(v, m) {
+    if (!m.fecha || m.viaje === 'Fuera' || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero')) return false;
+    var f = new Date(m.fecha), ini = soloFecha(new Date(v.desde)), fin = new Date(soloFecha(new Date(v.hasta)).getTime() + 86400000);
+    if (f < ini || f >= fin) return false;
+    if (String(m.viaje || '').charAt(0) === '+') return true;
+    var t = v.tarjetas || [];
+    return t.indexOf(m.cuenta) >= 0 || (t.indexOf('Efectivo') >= 0 && !m.cuenta);
+  }
+  /** Montos en la moneda del viaje (los ₡ se pasan a $ con el tipo de cambio, y al revés). */
+  function aMoneda(monto, de, a, tc) {
+    if (de === a || !tc) return monto;
+    return a === 'USD' ? monto / tc : monto * tc;
+  }
+  function viaje(d, v, hoy) {
+    var tc = d.tipoCambio || 0, mon = v.moneda || 'USD';
+    var compras = (d.movimientos || []).filter(function (m) { return enViaje(v, m); }).map(function (m) {
+      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc) };
+    }).sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+    var gastado = compras.reduce(function (s, c) { return s + c.monto; }, 0);
+    var porCategoria = {};
+    CATS_VIAJE.forEach(function (c) { porCategoria[c] = 0; });
+    compras.forEach(function (c) { porCategoria[c.categoria] += c.monto; });
+    var ini = soloFecha(new Date(v.desde)), fin = soloFecha(new Date(v.hasta)), h = soloFecha(hoy);
+    var total = Math.max(1, diasEntre(ini, fin) + 1);
+    var restantes = h < ini ? total : h > fin ? 0 : diasEntre(h, fin) + 1;
+    var transcurridos = Math.max(1, Math.min(total, diasEntre(ini, h) + 1));
+    var limite = v.limite || 0, disponible = limite - gastado;
+    return {
+      compras: compras, gastado: gastado, limite: limite, disponible: disponible, pct: limite ? gastado / limite : 0,
+      diasTotal: total, diasRestantes: restantes, porDia: restantes ? Math.max(0, disponible) / restantes : 0,
+      promedio: h < ini ? 0 : gastado / transcurridos, porCategoria: porCategoria, moneda: mon,
+      estado: h < ini ? 'Próximo' : h > fin ? 'Terminado' : 'En curso'
+    };
   }
 
   // ---------------- Formato ----------------
@@ -353,7 +437,8 @@ var Calc = (function () {
     proximaFecha: proximaFecha, estadoTasaCero: estadoTasaCero, cuotaEnMes: cuotaEnMes, resumenMes: resumenMes,
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
-    esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto
+    esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
