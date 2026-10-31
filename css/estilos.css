@@ -529,3 +529,60 @@ details.grupo-aj summary .flecha { margin-left: auto; }
 .resumen-mov small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tj .nombre { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .widget .w-t, .widget .w-n, details.grupo-aj summary .det { white-space: normal; overflow-wrap: anywhere; }
+
+/* ================= v2.1 ================= */
+/* el ícono dentro de un botón nunca se agranda */
+.btn svg, .btn.sec svg { width: 18px; height: 18px; flex-shrink: 0; vertical-align: -3px; margin-right: 6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+/* botón de agregar con nombre (arriba a la derecha) */
+.btn-nuevo { height: 38px; border-radius: 19px; border: 0; background: var(--relleno); color: var(--sobre-relleno); font: inherit; font-size: 14px; font-weight: 800;
+  padding: 0 14px; white-space: nowrap; cursor: pointer; flex-shrink: 0; align-self: center; }
+/* secciones que se abren y se cierran */
+details.pleg { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 18px; overflow: hidden; }
+details.pleg summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; }
+details.pleg summary::-webkit-details-marker { display: none; }
+details.pleg .pl-t { flex: 1; min-width: 0; font-size: 15px; font-weight: 700; }
+details.pleg .pl-d { font-size: 14px; font-weight: 700; white-space: nowrap; color: var(--suave); }
+details.pleg .pl-d b { font-weight: 800; }
+details.pleg[open] summary .flecha { transform: rotate(90deg); }
+details.pleg .pl-c { border-top: 1px solid var(--linea); padding: 4px 0; }
+details.pleg .pl-c > .tabla, details.pleg .pl-c > .graf, details.pleg .pl-c > .graf-et, details.pleg .pl-c > .lista-pl { margin: 10px 16px; }
+details.pleg .pl-c > .btn { margin: 0 16px 12px; width: calc(100% - 32px); }
+.lista-pl { display: flex; flex-direction: column; gap: 10px; }
+details.pleg.alerta { background: var(--naranja-fondo); border-color: var(--aviso-borde); }
+details.pleg.alerta summary { color: var(--aviso-txt); }
+details.pleg.alerta .pl-t { font-weight: 600; }
+details.pleg.alerta .pl-d { color: var(--acento); }
+details.pleg.alerta .pl-c { background: var(--tarjeta); }
+/* pantalla vacía con dibujo */
+.vacio-lindo { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 20px; padding: 28px 20px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; margin-top: 10px; }
+.vacio-lindo .dibujo { font-size: 54px; line-height: 1; }
+.vacio-lindo b { font-size: 19px; }
+.vacio-lindo span { color: var(--suave); font-size: 14px; line-height: 1.5; margin-bottom: 8px; }
+/* viaje en curso */
+.viaje-curso { display: flex; align-items: center; gap: 12px; background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 18px; padding: 14px 16px; color: var(--texto); font: inherit; text-align: left; cursor: pointer; width: 100%; }
+.viaje-curso .vc-ic { font-size: 28px; }
+.viaje-curso .cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.viaje-curso .cuerpo > b { font-size: 17px; }
+.viaje-curso .barra { margin-top: 6px; }
+/* tasa cero v2.1 */
+.tc-fila { display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 13px 16px; border: 0; border-bottom: 1px solid var(--linea); background: none; color: var(--texto); font: inherit; text-align: left; cursor: pointer; }
+.tc-fila:last-child { border-bottom: 0; }
+.tc-fila .cuerpo { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.tc-fila .monto { display: flex; flex-direction: column; align-items: flex-end; text-align: right; white-space: nowrap; }
+.tc-fila .monto small { font-size: 11px; font-weight: 600; color: var(--suave); }
+.tc-fila .barra { flex: 1; height: 6px; }
+details.pleg .pl-c > .tc-fila { padding: 13px 16px; }
+.comp-tc button.h { background: none; border: 0; font: inherit; font-size: 12px; font-weight: 700; color: var(--suave); cursor: pointer; padding: 6px 0; text-align: right; }
+.comp-tc button.h.on { color: var(--acento); }
+/* calculadora v2.1 */
+.btn-limpiar { height: 38px; border-radius: 19px; border: 1px solid var(--borde); background: var(--tarjeta); color: var(--texto); font: inherit; font-size: 14px; font-weight: 700; padding: 0 13px; white-space: nowrap; cursor: pointer; flex-shrink: 0; align-self: center; }
+.ayuda-tasa { font-size: 12.5px; color: var(--suave); margin: 6px 2px 2px; line-height: 1.4; }
+.ayuda-tasa b { color: var(--texto); }
+.aviso-tasa { background: var(--naranja-fondo); border: 1px solid var(--aviso-borde); color: var(--aviso-txt); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; margin-top: 8px; }
+.bien-col { display: flex; flex-direction: column; gap: 8px; }
+.bien-col .bien .v { font-size: clamp(18px, 6.5vw, 26px); overflow-wrap: anywhere; line-height: 1.15; }
+.mes-a-mes { grid-template-columns: 68px repeat(3, minmax(0, 1fr)); }
+.mes-a-mes .nf { white-space: nowrap; }
+@media (max-width: 380px) { .mes-a-mes { grid-template-columns: 62px repeat(3, minmax(0, 1fr)); } }
+.mes-a-mes { gap: 7px 10px; font-size: 11.5px; }

@@ -62,14 +62,26 @@ var PDFPrestamo = (function () {
         var notas = ['Tipo de cuota: ' + d.tipoTexto + (res.meses !== d.plazo ? ' · Se termina de pagar en ' + res.meses + ' meses' : '')];
         if (res.totalAbonos > 0) notas.push('Incluye abonos extra por ' + dinero(res.totalAbonos, d.moneda));
         if (d.comision) notas.push('Comisión de formalización: ' + dinero(d.comision, d.moneda) + ' (incluida en el total)');
-        var FILA = 15, PRIMERA_Y = H - 252 - notas.length * 13 - 22, OTRAS_Y = 700, PIE = 70;
+        var HDR = d.para ? 128 : 104;                  // alto del encabezado negro
+        var DY = HDR - 92;                              // cuánto baja todo lo demás
+        var GRAF = 150;                                 // alto del bloque de gráficos
+        var FILA = 15, PRIMERA_Y = H - 252 - DY - GRAF - notas.length * 13 - 22, OTRAS_Y = 700, PIE = 70;
         var porPrimera = Math.floor((PRIMERA_Y - PIE) / FILA);
         var porOtra = Math.floor((OTRAS_Y - PIE) / FILA);
         var paginas = 1 + Math.max(0, Math.ceil((filas.length - porPrimera) / porOtra));
 
+        // ancho real de los montos de cada columna, para centrar el título encima de ellos
+        var anchoCol = cols.map(function (c, j) {
+          var m = 0;
+          filas.forEach(function (r) { var v = valores(r)[j]; m = Math.max(m, (j === cols.length - 1 ? B : R).widthOfTextAtSize(limpio(v), 8.5)); });
+          return Math.max(m, B.widthOfTextAtSize(limpio(c.t), 8));
+        });
         function encabezadoTabla(pg, y) {
           pg.drawRectangle({ x: M, y: y - 5, width: W - 2 * M, height: 18, color: NEGRO });
-          cols.forEach(function (c) { texto(pg, c.t, c.x, y, 8, B, BLANCO, c.a === 'der' ? 'der' : null); });
+          cols.forEach(function (c, j) {
+            var centro = c.a === 'der' ? c.x - anchoCol[j] / 2 : c.x + anchoCol[j] / 2;
+            texto(pg, c.t, centro, y, 8, B, BLANCO, 'centro');
+          });
           return y - FILA - 2;
         }
         function pie(pg, n) {
@@ -77,24 +89,33 @@ var PDFPrestamo = (function () {
           texto(pg, 'Cálculo estimado (' + d.tipoTexto.toLowerCase() + '). No es una oferta de ninguna entidad financiera.', M, 32, 8, R, GRIS);
           texto(pg, 'Página ' + n + ' de ' + paginas, W - M, 32, 8, R, GRIS, 'der');
         }
-        function fila(pg, r, y, par) {
-          if (par) pg.drawRectangle({ x: M, y: y - 4, width: W - 2 * M, height: FILA, color: SUAVE });
+        function valores(r) {
           var v = [String(r.n), fechaCorta(r.fecha), num(r.cuota + r.poliza), num(r.capital), num(r.interes), num(r.poliza)];
           if (hayAbono) v.push(r.abono ? num(r.abono) : '-');
           v.push(num(r.saldo));
+          return v;
+        }
+        function fila(pg, r, y, par) {
+          if (par) pg.drawRectangle({ x: M, y: y - 4, width: W - 2 * M, height: FILA, color: SUAVE });
+          var v = valores(r);
           cols.forEach(function (c, j) { texto(pg, v[j], c.x, y, 8.5, j === cols.length - 1 ? B : R, NEGRO, c.a === 'der' ? 'der' : null); });
         }
 
         // ---------- Página 1 ----------
         var pg = doc.addPage([W, H]);
-        pg.drawRectangle({ x: 0, y: H - 92, width: W, height: 92, color: NEGRO });
-        pg.drawRectangle({ x: 0, y: H - 96, width: W, height: 4, color: AMARILLO });
+        pg.drawRectangle({ x: 0, y: H - HDR, width: W, height: HDR, color: NEGRO });
+        pg.drawRectangle({ x: 0, y: H - HDR - 4, width: W, height: 4, color: AMARILLO });
         var xt = M;
-        if (logo) { pg.drawImage(logo, { x: M, y: H - 72, width: 44, height: 44 }); xt = M + 56; }
-        var sub = 'SIMULACIÓN DE PRÉSTAMO' + (d.concepto ? ' · ' + d.concepto.toUpperCase() : '');
-        texto(pg, ajustar(sub, B, 9, 330), xt, H - 40, 9, B, AMARILLO);
+        if (logo) { pg.drawImage(logo, { x: M, y: H - 72, width: 44, height: 44 }); xt = M + 58; }
+        var anchoT = W - xt - M - 130;                  // deja libre la fecha de la derecha
+        texto(pg, 'SIMULACIÓN DE PRÉSTAMO', xt, H - 38, 9, B, AMARILLO);
+        if (d.concepto) texto(pg, ajustar(d.concepto.toUpperCase(), B, 9, anchoT), xt, H - 52, 9, B, AMARILLO);
         var titulo = d.para ? 'Preparado para ' + d.para : (d.concepto || 'Simulación de préstamo');
-        texto(pg, ajustar(titulo, B, 19, 330), xt, H - 64, 19, B, BLANCO);
+        if (d.para) {
+          texto(pg, 'Preparado para', xt, H - 80, 15, R, BLANCO);
+          var tam = 19; while (tam > 12 && B.widthOfTextAtSize(limpio(d.para), tam) > W - xt - M) tam -= 1;
+          texto(pg, ajustar(d.para, B, tam, W - xt - M), xt, H - 104, tam, B, BLANCO);
+        } else texto(pg, ajustar(titulo, B, 19, anchoT), xt, H - 80, 19, B, BLANCO);
         if (op.preparadoPor) texto(pg, 'Preparado por ' + op.preparadoPor, W - M, H - 42, 9, R, GRIS_CLARO, 'der');
         texto(pg, fechaLarga(op.fecha || new Date()), W - M, op.preparadoPor ? H - 56 : H - 42, 9, R, GRIS_CLARO, 'der');
 
@@ -102,8 +123,8 @@ var PDFPrestamo = (function () {
         var datos = [['MONTO', dinero(d.monto, d.moneda)], ['PLAZO', d.plazo + ' meses'], ['TASA', d.tasaTexto], ['PÓLIZAS', d.polizaTexto]];
         var anchoD = (W - 2 * M) / 4;
         datos.forEach(function (x, j) {
-          texto(pg, x[0], M + j * anchoD, H - 128, 8, B, GRIS);
-          texto(pg, ajustar(x[1], B, 12, anchoD - 8), M + j * anchoD, H - 145, 12, B, NEGRO);
+          texto(pg, x[0], M + j * anchoD, H - 128 - DY, 8, B, GRIS);
+          texto(pg, ajustar(x[1], B, 12, anchoD - 8), M + j * anchoD, H - 145 - DY, 12, B, NEGRO);
         });
 
         // resumen
@@ -115,13 +136,56 @@ var PDFPrestamo = (function () {
         var anchoC = (W - 2 * M - 20) / 3;
         cajas.forEach(function (c, j) {
           var x = M + j * (anchoC + 10);
-          pg.drawRectangle({ x: x, y: H - 228, width: anchoC, height: 56, color: c[2] });
-          texto(pg, c[0], x + 10, H - 190, 7.5, B, GRIS);
-          texto(pg, c[1], x + 10, H - 214, 15, B, NEGRO);
+          pg.drawRectangle({ x: x, y: H - 228 - DY, width: anchoC, height: 56, color: c[2] });
+          texto(pg, c[0], x + 10, H - 190 - DY, 7.5, B, GRIS);
+          texto(pg, c[1], x + 10, H - 214 - DY, 15, B, NEGRO);
         });
 
+        // gráficos: saldo con el tiempo (con y sin abonos) y capital/intereses por año
+        var gTop = H - 244 - DY, gAlto = 104, gAncho = (W - 2 * M - 24) / 2;
+        var NARANJA = rgb(0.878, 0.635, 0.11), AZUL = rgb(0.357, 0.553, 0.937);
+        var corto = function (v) { return v >= 1e6 ? (v / 1e6).toFixed(1).replace('.0', '').replace('.', ',') + 'M' : v >= 1000 ? Math.round(v / 1000) + 'k' : String(Math.round(v)); };
+        // izquierda
+        texto(pg, d.base ? 'Saldo con y sin abonos' : 'Saldo con el tiempo', M, gTop, 9.5, B, NEGRO);
+        var gx0 = M + 30, gx1 = M + gAncho, gy0 = gTop - 14, gy1 = gTop - 14 - gAlto;
+        var nMax = Math.max(filas.length, d.base ? d.base.filas.length : 0), sMax = d.monto || 1;
+        [0, 0.5, 1].forEach(function (k) {
+          var yy = gy1 + (gy0 - gy1) * k;
+          pg.drawLine({ start: { x: gx0, y: yy }, end: { x: gx1, y: yy }, thickness: 0.5, color: LINEA });
+          texto(pg, (d.moneda === 'USD' ? '$' : '') + corto(sMax * k), gx0 - 4, yy - 3, 7, R, GRIS, 'der');
+        });
+        function lineaSaldo(lista, color, grosor) {
+          var px = function (k) { return gx0 + (gx1 - gx0) * k / nMax; }, py = function (v) { return gy1 + (gy0 - gy1) * Math.max(0, v) / sMax; };
+          var prev = { x: px(0), y: py(sMax) };
+          lista.forEach(function (r) { var cur = { x: px(r.n), y: py(r.saldo) }; pg.drawLine({ start: prev, end: cur, thickness: grosor, color: color }); prev = cur; });
+        }
+        if (d.base) lineaSaldo(d.base.filas, GRIS_CLARO, 2);
+        lineaSaldo(filas, NARANJA, 2.2);
+        var anios = nMax / 12;
+        [0, 0.5, 1].forEach(function (k) { texto(pg, k ? (Math.round(anios * k * 10) / 10 + ' años').replace('.', ',') : 'hoy', gx0 + (gx1 - gx0) * k, gy1 - 11, 7, R, GRIS, k === 1 ? 'der' : k ? 'centro' : null); });
+        if (d.base) {
+          pg.drawRectangle({ x: gx0, y: gy1 - 25, width: 7, height: 7, color: GRIS_CLARO }); texto(pg, ('sin abonos (' + Math.round(d.base.meses / 12 * 10) / 10 + ' años)').replace('.', ','), gx0 + 10, gy1 - 24, 7.5, R, GRIS);
+          pg.drawRectangle({ x: gx0 + 120, y: gy1 - 25, width: 7, height: 7, color: NARANJA }); texto(pg, ('con abonos (' + Math.round(res.meses / 12 * 10) / 10 + ' años)').replace('.', ','), gx0 + 130, gy1 - 24, 7.5, R, GRIS);
+        }
+        // derecha: barras por año
+        var bx0 = M + gAncho + 24, bx1 = W - M;
+        texto(pg, 'Capital e intereses por año', bx0, gTop, 9.5, B, NEGRO);
+        var porAnio = [];
+        filas.forEach(function (r) { var k = Math.floor((r.n - 1) / 12); porAnio[k] = porAnio[k] || { c: 0, i: 0 }; porAnio[k].c += r.capital + (r.abono || 0); porAnio[k].i += r.interes; });
+        var bMax = Math.max.apply(null, porAnio.map(function (x) { return x.c + x.i; })) || 1;
+        var bw = (bx1 - bx0) / Math.max(1, porAnio.length);
+        porAnio.forEach(function (x, k) {
+          var hC = gAlto * x.c / bMax, hI = gAlto * x.i / bMax, xx = bx0 + k * bw + bw * 0.12;
+          pg.drawRectangle({ x: xx, y: gy1, width: bw * 0.76, height: hC, color: AZUL });
+          pg.drawRectangle({ x: xx, y: gy1 + hC, width: bw * 0.76, height: hI, color: NARANJA });
+        });
+        texto(pg, 'año 1', bx0, gy1 - 11, 7, R, GRIS);
+        texto(pg, 'año ' + porAnio.length, bx1, gy1 - 11, 7, R, GRIS, 'der');
+        pg.drawRectangle({ x: bx0, y: gy1 - 25, width: 7, height: 7, color: AZUL }); texto(pg, 'capital', bx0 + 10, gy1 - 24, 7.5, R, GRIS);
+        pg.drawRectangle({ x: bx0 + 60, y: gy1 - 25, width: 7, height: 7, color: NARANJA }); texto(pg, 'intereses', bx0 + 70, gy1 - 24, 7.5, R, GRIS);
+
         // notas
-        var yN = H - 252;
+        var yN = H - 252 - DY - GRAF;
         notas.forEach(function (t) { texto(pg, t, M, yN, 9, R, GRIS); yN -= 13; });
 
         // tabla
@@ -131,7 +195,7 @@ var PDFPrestamo = (function () {
         pie(pg, n);
         while (i < filas.length) {
           pg = doc.addPage([W, H]); n++;
-          texto(pg, limpio(titulo), M, H - 44, 11, B, NEGRO);
+          texto(pg, ajustar(titulo, B, 11, W - 2 * M - 160), M, H - 44, 11, B, NEGRO);
           texto(pg, 'Tabla mes a mes (continuación)', W - M, H - 44, 9, R, GRIS, 'der');
           y = encabezadoTabla(pg, OTRAS_Y + 8);
           for (var c = 0; c < porOtra && i < filas.length; c++, i++) { fila(pg, filas[i], y, i % 2 === 1); y -= FILA; }
