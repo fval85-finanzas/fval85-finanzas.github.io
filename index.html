@@ -16,7 +16,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/estilos.css">
   <script>
-    try { document.documentElement.setAttribute('data-tema', localStorage.getItem('mf-tema') || 'dorado'); } catch (e) {}
+    try {
+      var t = localStorage.getItem('mf-tema') || 'dorado';
+      if (t === 'auto') t = window.matchMedia('(prefers-color-scheme: dark)').matches ? (localStorage.getItem('mf-tema-oscuro') || 'dorado') : (localStorage.getItem('mf-tema-claro') || 'crema');
+      document.documentElement.setAttribute('data-tema', t);
+      document.documentElement.setAttribute('data-letra', localStorage.getItem('mf-letra') || 'normal');
+    } catch (e) {}
   </script>
 </head>
 <body>
