@@ -190,46 +190,55 @@ var Calc = (function () {
     return (d.cuentas || []).some(function (c) { return c.nombre === nombre && c.tipo === 'Tarjeta de crédito'; });
   }
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
+  /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
   function sentidoSobre(d, m) {
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
-    if (m.tipo === 'Inversión') return 'sale';
-    if (m.tipo === 'Pago de tarjeta') return 'sale';
-    if (m.tipo === 'Gasto' && !esTarjeta(d, m.cuenta)) return 'sale';
+    if (m.tipo === 'Inversión' || m.tipo === 'Pago de tarjeta' || m.tipo === 'Gasto') return 'sale';
     return null;
   }
+  /**
+   * v1.8: las compras con TARJETA también se asignan a un sobre (el sobre baja en el momento) y ese monto queda
+   * "reservado" para la tarjeta. Cuando llega el pago de la tarjeta, lo reservado lo cubre solo (no se descuenta dos veces);
+   * solo se pregunta por lo que falte (intereses, cuotas tasa cero, compras sin sobre).
+   */
   function analizarSobres(d) {
     var desde = d.sobresDesde ? soloFecha(new Date(d.sobresDesde)) : null;
-    var efectos = [], porMov = {}, pendientes = [];
+    var efectos = [], porMov = {}, pendientes = [], reservado = {}, cubierto = {};
     (d.sobresMov || []).forEach(function (x) {
       if (x.movimiento) (porMov[x.movimiento] = porMov[x.movimiento] || []).push(x);
       if (x.sobre) efectos.push({ sobre: x.sobre, monto: x.monto, fecha: x.fecha, tipo: x.tipo, grupo: x.grupo, movimiento: x.movimiento || null, nota: x.nota });
     });
-    if (!desde) return { efectos: efectos, pendientes: [], porMov: porMov, desde: null };
-    (d.movimientos || []).forEach(function (m) {
-      if (!m.fecha || soloFecha(new Date(m.fecha)) < desde) return;
-      var sentido = sentidoSobre(d, m);
-      if (!sentido) return;
-      var filas = porMov[m.fila];
-      if (filas && filas.length) {
-        var asignado = filas.reduce(function (a, x) { return a + Math.abs(x.monto); }, 0);
-        if (asignado < m.monto - 0.005) pendientes.push({ mov: m, sentido: sentido, falta: m.monto - asignado, asignado: asignado });
-        return;
-      }
-      if (m.sobre) {
+    if (!desde) return { efectos: efectos, pendientes: [], porMov: porMov, desde: null, reservado: {}, cubierto: {} };
+    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && sentidoSobre(d, m); })
+      .slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+    movs.forEach(function (m) {
+      var sentido = sentidoSobre(d, m), tarjeta = m.tipo === 'Gasto' && esTarjeta(d, m.cuenta);
+      var filas = porMov[m.fila] || [];
+      var explicito = filas.reduce(function (a, x) { return a + Math.abs(x.monto); }, 0);
+      var aSobres = filas.reduce(function (a, x) { return a + (x.sobre ? Math.abs(x.monto) : 0); }, 0);
+      if (!filas.length && m.sobre && m.tipo !== 'Pago de tarjeta') {
         var nombre = m.sobre;
         // inversiones anotadas antes de elegir el sobre de fondos (quedaron con el nombre "Fondos")
         if (m.tipo === 'Inversión' && (d.sobreEspecial || {}).fondos && !(d.sobres || []).some(function (s) { return s.nombre === nombre; })) nombre = d.sobreEspecial.fondos;
-        efectos.push({ sobre: nombre, monto: sentido === 'entra' ? m.monto : -m.monto, fecha: m.fecha, tipo: m.tipo === 'Inversión' ? 'Inversión' : 'Regla', movimiento: m.fila });
-        return;
+        efectos.push({ sobre: nombre, monto: sentido === 'entra' ? m.monto : -m.monto, fecha: m.fecha, tipo: m.tipo === 'Inversión' ? 'Inversión' : tarjeta ? 'Compra con tarjeta' : 'Regla', movimiento: m.fila });
+        explicito = aSobres = m.monto;
       }
-      pendientes.push({ mov: m, sentido: sentido, falta: m.monto, asignado: 0 });
+      var clave = m.cuenta + '|' + (m.moneda === 'USD' ? 'USD' : 'CRC');   // lo reservado se lleva por tarjeta y moneda
+      if (tarjeta) reservado[clave] = (reservado[clave] || 0) + aSobres;
+      var auto = 0;
+      if (m.tipo === 'Pago de tarjeta') {
+        auto = Math.max(0, Math.min(reservado[clave] || 0, m.monto - explicito));
+        if (auto) { reservado[clave] -= auto; cubierto[m.fila] = auto; }
+      }
+      var falta = m.monto - explicito - auto;
+      if (falta > 0.005) pendientes.push({ mov: m, sentido: sentido, falta: falta, asignado: explicito + auto, reservadoUsado: auto, tarjeta: tarjeta });
     });
     var esp = (d.sobreEspecial || {}).prestamo;
     if (esp && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
       if (p.fecha && soloFecha(new Date(p.fecha)) >= desde && p.total) efectos.push({ sobre: esp, monto: -p.total, fecha: p.fecha, tipo: 'Préstamo' });
     });
     pendientes.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
-    return { efectos: efectos, pendientes: pendientes, porMov: porMov, desde: desde };
+    return { efectos: efectos, pendientes: pendientes, porMov: porMov, desde: desde, reservado: reservado, cubierto: cubierto };
   }
   /** Saldo de cada sobre al final del mes `mes` (o hoy) y lo que entró / salió en ese mes. */
   function saldosSobres(d, mes, hoy) {
@@ -255,7 +264,15 @@ var Calc = (function () {
     lista.forEach(function (s) { total[s.moneda === 'USD' ? 'USD' : 'CRC'] += s.saldo; });
     var porAsignar = { CRC: 0, USD: 0 };
     an.pendientes.forEach(function (p) { if (p.sentido === 'entra') porAsignar[p.mov.moneda === 'USD' ? 'USD' : 'CRC'] += p.falta; });
-    return { lista: lista, total: total, pendientes: an.pendientes, porAsignar: porAsignar, porMov: an.porMov, desde: an.desde };
+    var reservadoTotal = 0, reservadoUSD = 0, reservadoPor = {};
+    Object.keys(an.reservado).forEach(function (k) {
+      var v = Math.max(0, an.reservado[k]), partes = k.split('|');
+      reservadoPor[partes[0]] = reservadoPor[partes[0]] || { CRC: 0, USD: 0 };
+      reservadoPor[partes[0]][partes[1]] += v;
+      if (partes[1] === 'USD') reservadoUSD += v; else reservadoTotal += v;
+    });
+    return { lista: lista, total: total, pendientes: an.pendientes, porAsignar: porAsignar, porMov: an.porMov, desde: an.desde,
+      reservado: reservadoPor, reservadoTotal: reservadoTotal, reservadoUSD: reservadoUSD, cubierto: an.cubierto };
   }
   /** Reparto: montos de siempre; la diferencia con lo que entró va (o se resta) al sobre de ajuste. */
   function reparto(d, monto, moneda, ajusteNombre) {

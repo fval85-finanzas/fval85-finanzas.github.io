@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '1.7.1';
+  var VERSION_WEB = '1.8.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -91,7 +91,29 @@ var App = (function () {
   // POST como texto plano para evitar la consulta previa (CORS) que Apps Script no responde.
   function conexion() { return { url: guardado('mf-url', ''), clave: guardado('mf-clave', '') }; }
 
+  // ---- aviso visible mientras se habla con Google (en cualquier acción)
+  var enCurso = 0, avisoTimer = null;
+  var TEXTO_ACCION = { obtenerDatos: 'Actualizando…', revisarCorreosAhora: 'Revisando correos…', verificarPIN: 'Verificando…', entrarConHuella: 'Entrando…', obtenerAjustes: 'Actualizando…' };
+  function trabajando(accion, on) {
+    if (accion === 'ping' || accion === 'estadoAcceso') return;
+    enCurso = Math.max(0, enCurso + (on ? 1 : -1));
+    var e = $('ocupado');
+    if (on) {
+      if (e) e.textContent = TEXTO_ACCION[accion] || 'Guardando…';
+      document.body.classList.add('sinc');
+      clearTimeout(avisoTimer);
+      avisoTimer = setTimeout(function () { if (enCurso && e) e.classList.add('ver'); }, 250);
+    } else if (!enCurso) {
+      clearTimeout(avisoTimer);
+      document.body.classList.remove('sinc');
+      if (e) e.classList.remove('ver');
+    }
+  }
   function llamar(accion, args, conex) {
+    trabajando(accion, true);
+    return llamarDirecto(accion, args, conex).then(function (x) { trabajando(accion, false); return x; }, function (e) { trabajando(accion, false); throw e; });
+  }
+  function llamarDirecto(accion, args, conex) {
     var c = conex || conexion();
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var t = setTimeout(function () { if (ctl) ctl.abort(); }, 60000);
@@ -138,10 +160,11 @@ var App = (function () {
     });
   }
   // ---- datos guardados en el teléfono: la app abre al instante y se actualiza por detrás
+  function leerJSONSeguro(k) { try { var t = localStorage.getItem(k); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
   function leerCache() { try { var t = localStorage.getItem('mf-cache'); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
   function guardarCache(json) { try { localStorage.setItem('mf-cache', json); } catch (e) { /* sin espacio: no pasa nada */ } }
   var pintarPendiente = false;
-  function sincronizando(on) { document.body.classList.toggle('sinc', !!on); }
+  function sincronizando(on) { if (on) document.body.classList.add('sinc'); else if (!enCurso) document.body.classList.remove('sinc'); }
   function escribiendo() { var e = document.activeElement; return e && /INPUT|SELECT|TEXTAREA/.test(e.tagName) && !$('panel').contains(e); }
   function cargar(cb) {
     sincronizando(true);
@@ -149,6 +172,7 @@ var App = (function () {
       D = JSON.parse(json);
       hoy = new Date(D.hoy);
       guardarCache(json);
+      if (D.ajustes) { AJ = D.ajustes; pinActivo = AJ.pinActivo; guardar('mf-aj', JSON.stringify(AJ)); }
       sincronizando(false);
       $('cargando').style.display = 'none';
       if (escribiendo()) pintarPendiente = true; else pintar();   // no borrar lo que la persona está escribiendo
@@ -1102,6 +1126,7 @@ var App = (function () {
     tarjetas.forEach(function (c) { deudaCRC += c.saldoCRC || 0; deudaUSD += c.saldoUSD || 0; });
     var h = '<div class="cab"><div><div class="sobretitulo">Gastos de ' + nombreMes(mes).toLowerCase() + '</div><h1 class="titulo">Tarjetas</h1></div>' + botonOjo() + '</div>';
     h += '<div class="suave" style="margin-top:-8px">Deuda total ' + din(deudaCRC, 'CRC') + ' + ' + din(deudaUSD, 'USD') + '</div>';
+    var reservas = D.sobresDesde ? SB().reservado : {};
     tarjetas.forEach(function (c) {
       var g = res.porCuenta[c.nombre] || { CRC: 0, USD: 0, cuotasTC: { CRC: 0, USD: 0 } };
       var uso = c.limiteCRC ? (c.saldoCRC || 0) / c.limiteCRC : null;
@@ -1119,6 +1144,8 @@ var App = (function () {
         '<div class="fila chico suave"><span>' + (uso !== null ? 'Usado ' + Math.round(uso * 100) + '% de ' + din(c.limiteCRC, 'CRC') : '') + '</span>' +
         (dias !== null ? '<span class="' + (dias <= 3 ? 'naranja fuerte' : '') + '">Pagar ' + (dias === 0 ? 'hoy' : 'en ' + dias + ' día' + (dias === 1 ? '' : 's')) + '</span>' : '') + '</div>' +
         '<div class="fila chico"><span class="suave">Compras de este mes</span><span class="fuerte">' + din(g.CRC, 'CRC') + (g.USD ? ' + ' + din(g.USD, 'USD') : '') + '</span></div>' +
+        (reservas[c.nombre] && (reservas[c.nombre].CRC > 0.005 || reservas[c.nombre].USD > 0.005) ? '<div class="fila chico"><span class="suave">Reservado en sobres para pagarla</span><span class="fuerte verde">' +
+          [reservas[c.nombre].CRC > 0.005 ? din(reservas[c.nombre].CRC, 'CRC') : '', reservas[c.nombre].USD > 0.005 ? din(reservas[c.nombre].USD, 'USD') : ''].filter(String).join(' + ') + '</span></div>' : '') +
         (tcs.length ? '<div style="border-top:1px solid var(--linea);padding-top:10px;display:flex;flex-direction:column;gap:8px"><div class="suave chico fuerte">TASA CERO</div>' + tcs.map(function (x) {
           return '<div class="fila chico"><span>' + esc(x.t.descripcion) + '<br><span class="suave">' + x.e.restantes + ' de ' + x.t.meses + ' cuotas por pagar</span></span><span style="text-align:right"><b>' + din(x.e.cuota, x.t.moneda) + '</b>/mes<br><span class="suave">falta ' + din(x.e.saldo, x.t.moneda) + '</span></span></div>';
         }).join('') + '</div>' : '') +
@@ -1154,6 +1181,8 @@ var App = (function () {
     h += '<div class="hero"><div style="display:flex;align-items:center;gap:6px"><span class="et" style="font-size:13px;font-weight:600">Dinero en sobres</span>' + botonOjo() + '</div>' +
       '<div style="display:flex;gap:18px;align-items:baseline;flex-wrap:wrap"><span class="grande">' + din(sb.total.CRC, 'CRC') + '</span>' + (sb.total.USD ? '<span class="medio">' + din(sb.total.USD, 'USD') + '</span>' : '') + '</div>' +
       '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Por asignar' + (nPend ? ' (' + nPend + ')' : '') + '</span><b style="color:var(--acento)">' + din(sb.porAsignar.CRC, 'CRC') + (sb.porAsignar.USD ? ' + ' + din(sb.porAsignar.USD, 'USD') : '') + '</b></div>' +
+      (sb.reservadoTotal > 0.005 || sb.reservadoUSD > 0.005 ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Reservado para pagar tarjetas</span><b>' +
+        [sb.reservadoTotal > 0.005 ? din(sb.reservadoTotal, 'CRC') : '', sb.reservadoUSD > 0.005 ? din(sb.reservadoUSD, 'USD') : ''].filter(String).join(' + ') + '</b></div>' : '') +
       '<div class="rapidos"><button class="principal" onclick="App.ir(\'porasignar\')">' + ico('flechas') + (nPend ? 'Asignar (' + nPend + ')' : 'Por asignar') + '</button>' +
       '<button onclick="App.formMover()">' + ico('flechas') + 'Mover</button><button onclick="App.ir(\'limpiar\')">' + ico('recargar') + 'Limpiar</button></div></div>';
     h += '<div class="caja sinpad">' + sb.lista.map(function (s, i) {
@@ -1166,15 +1195,16 @@ var App = (function () {
         '<span class="fuerte' + (neg ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></span>' +
         barra(avance, !s.meta && s.pct >= 0.85) + '<span class="chico suave">' + det + '</span></button>';
     }).join('') + '</div>';
-    h += '<div class="suave chico" style="text-align:center">Saldos desde el ' + fechaCorta(D.sobresDesde) + '. Las compras con tarjeta se descuentan al asignar el pago de la tarjeta.</div>';
+    h += '<div class="suave chico" style="text-align:center">Saldos desde el ' + fechaCorta(D.sobresDesde) + '. Las compras con tarjeta bajan el sobre al asignarlas; lo reservado paga la tarjeta.</div>';
     $('p-sobres').innerHTML = h;
   }
 
   // ---- lista de pendientes
-  function iconoPend(p) { return p.sentido === 'entra' ? '<span class="ico" style="background:rgba(61,214,140,.15);color:var(--positivo)">' + ico('sube') + '</span>' : '<span class="ico">' + ico(p.mov.tipo === 'Pago de tarjeta' ? 'tarjeta' : 'bolsa') + '</span>'; }
+  function iconoPend(p) { return p.sentido === 'entra' ? '<span class="ico" style="background:rgba(61,214,140,.15);color:var(--positivo)">' + ico('sube') + '</span>' : '<span class="ico">' + ico(p.mov.tipo === 'Pago de tarjeta' || p.tarjeta ? 'tarjeta' : 'bolsa') + '</span>'; }
   function itemPend(p) {
     var m = p.mov;
-    var det = fechaCorta(m.fecha) + ' · ' + (m.tipo === 'Pago de tarjeta' ? 'pago de ' + etiquetaCuenta(m.cuenta) : p.sentido === 'entra' ? '¿a qué sobre va?' : '¿de qué sobre salió?') + (p.asignado ? ' · falta ' + txt(p.falta, m.moneda) : '');
+    var det = fechaCorta(m.fecha) + ' · ' + (m.tipo === 'Pago de tarjeta' ? 'pago de ' + etiquetaCuenta(m.cuenta) + (p.reservadoUsado ? ' · ' + txt(p.reservadoUsado, m.moneda) + ' ya reservado' : '') :
+      p.tarjeta ? etiquetaCuenta(m.cuenta) + ' · ¿de qué sobre?' : p.sentido === 'entra' ? '¿a qué sobre va?' : '¿de qué sobre salió?') + (p.asignado && !p.reservadoUsado ? ' · falta ' + txt(p.falta, m.moneda) : '');
     return '<button class="item" onclick="App.formAsignar(' + m.fila + ')">' + iconoPend(p) +
       '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(m.comercio || m.tipo) + '</span><span class="det" style="display:block">' + esc(det) + '</span></span>' +
       '<span class="monto"><b class="' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="display:block">' + (p.sentido === 'entra' ? '+' : '−') + din(p.falta, m.moneda) + '</b></span></button>';
@@ -1190,7 +1220,7 @@ var App = (function () {
       if (sale.length) h += '<div class="seccion-t">SALIÓ DINERO</div><div class="caja sinpad">' + sale.map(itemPend).join('') + '</div>';
     }
     if (D.fondos && FD().pendientes.length) h += '<div class="seccion-t">FONDOS: ¿A QUÉ SUBCUENTA?</div><div class="caja sinpad">' + FD().pendientes.map(itemFondoPend).join('') + '</div>';
-    h += '<div class="suave chico" style="text-align:center">Las compras con tarjeta no aparecen aquí: se asignan cuando pagás la tarjeta.</div>';
+    h += '<div class="suave chico" style="text-align:center">Las compras con tarjeta bajan el sobre en el momento y quedan reservadas para pagar la tarjeta. Con «Recordar», las próximas del mismo comercio se asignan solas.</div>';
     $('p-porasignar').innerHTML = h;
   }
 
@@ -1207,7 +1237,7 @@ var App = (function () {
     var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0];
     if (!p) return toast('Este movimiento ya está asignado.');
     var primero = sobreTarjetas() || ((SB().lista.filter(function (s) { return s.moneda === m.moneda; })[0] || {}).nombre) || '';
-    asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: 'sobre', filas: [{ sobre: primero, monto: p.falta }] };
+    asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: 'sobre', tarjeta: !!p.tarjeta, reservado: p.reservadoUsado || 0, filas: [{ sobre: primero, monto: p.falta }] };
     var h = '<div class="suave chico">' + esc(m.tipo) + ' · ' + fechaCorta(m.fecha) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</div>' +
       '<h2>' + esc(m.comercio || m.tipo) + '</h2><div class="grande ' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="font-size:28px;font-weight:800">' + (p.sentido === 'entra' ? '+' : '−') + din(p.falta, m.moneda) + '</div>' +
       (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + '<div id="as-cuerpo"></div>';
@@ -1229,6 +1259,7 @@ var App = (function () {
             (asig.filas.length > 1 ? '<button class="x" aria-label="Quitar" onclick="App.asigQuitar(' + i + ')">×</button>' : '') + '</div>';
         }).join('') +
         '<button class="btn sec chico" style="justify-content:center;margin-top:6px" onclick="App.asigAgregar()">+ Otro sobre</button>' +
+        (asig.reservado ? '<div class="fila chico" style="margin-top:8px"><span class="suave">Ya cubierto con compras reservadas</span><b class="verde">' + txt(asig.reservado, m.moneda) + ' ✓</b></div>' : '') +
         '<div class="fila" style="margin-top:8px"><span class="suave">Falta asignar</span><b id="as-falta" style="color:' + (Math.abs(asig.falta - suma) < 0.01 ? 'var(--positivo)' : 'var(--acento)') + '">' + txt(asig.falta - suma, m.moneda) + (Math.abs(asig.falta - suma) < 0.01 ? ' ✓' : '') + '</b></div>';
     } else if (asig.sentido === 'entra') {
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿A DÓNDE VA ESTE DINERO?</div>' +
@@ -1238,7 +1269,9 @@ var App = (function () {
         radio('ninguno', 'Dejar en la cuenta (sin sobre)');
     } else {
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿DE QUÉ SOBRE SALIÓ?</div>' +
-        '<label class="campo compacto" style="margin-top:4px"><span>Sobre</span><select id="as-sobre">' + opcionesSobre(m.moneda, null, true) + '</select></label>';
+        '<label class="campo compacto" style="margin-top:4px"><span>Sobre</span><select id="as-sobre">' + opcionesSobre(m.moneda, null, true) +
+        '<option value="">' + (asig.tarjeta ? '— Ninguno (se decide al pagar la tarjeta) —' : '— Sin sobre —') + '</option></select></label>' +
+        (asig.tarjeta ? '<div class="suave chico">El sobre baja ahora y el monto queda reservado para pagar ' + esc(etiquetaCuenta(m.cuenta)) + '.</div>' : '');
     }
     if (m.tipo !== 'Pago de tarjeta' && asig.modo !== 'repartir') {
       h += '<label class="campo compacto"><span>Monto</span><input id="as-monto" data-dinero inputmode="decimal" value="' + esc(String(Math.round(asig.falta * 100) / 100).replace('.', ',')) + '"></label>';
@@ -1272,13 +1305,15 @@ var App = (function () {
       if (!monto || monto <= 0) return toast('Escribí el monto.');
       if (monto > asig.falta + 0.01) return toast('El monto es mayor que lo que falta asignar (' + txt(asig.falta, m.moneda) + ').');
       var sobre = asig.modo === 'tarjetas' ? sobreTarjetas() : asig.modo === 'ninguno' ? '' : val('as-sobre');
+      if (!sobre && asig.sentido === 'sale') asig.modo = 'ninguno';
       filas.push({ sobre: sobre, monto: asig.sentido === 'entra' ? monto : -monto });
     }
-    var tipo = m.tipo === 'Pago de tarjeta' ? 'Pago tarjeta' : asig.modo === 'ninguno' ? 'Sin sobre' : asig.sentido === 'entra' ? 'Asignación' : 'Gasto';
+    var tipo = m.tipo === 'Pago de tarjeta' ? 'Pago tarjeta' : asig.modo === 'ninguno' ? 'Sin sobre' : asig.sentido === 'entra' ? 'Asignación' : asig.tarjeta ? 'Compra con tarjeta' : 'Gasto';
     var lista = filas.map(function (f) { return { fecha: fechaSobre(m), sobre: f.sobre, monto: f.monto, tipo: tipo, movimiento: m.fila, grupo: g, nota: m.comercio || '' }; });
     var recordar = $('as-recordar') && $('as-recordar').checked && lista[0].sobre;
     var b = $('as-ok');
     srv('guardarSobresMov', [lista], function () {
+      local(lista);
       if (recordar) srv('guardarReglaSobre', [m.comercio, lista[0].sobre], function () {});
       listo('✅ Asignado');
     }, b);
@@ -1349,6 +1384,7 @@ var App = (function () {
     });
     var ajuste = rep.ajuste;
     srv('guardarSobresMov', [lista], function () {
+      local(lista);
       var fin = function () { rep = null; pantalla = 'sobres'; listo('✅ Repartido en ' + lista.length + ' sobres'); };
       if (guardarSiempre) srv('guardarReparto', [base, ajuste], fin); else fin();
     }, $('rep-ok'));
@@ -1369,8 +1405,9 @@ var App = (function () {
     if (de === a) return toast('Elegí dos sobres distintos.');
     if (!monto || monto <= 0) return toast('Escribí el monto.');
     var g = grupoNuevo(), f = new Date().toISOString(), nota = val('mv-nota').trim() || ('De ' + de + ' a ' + a);
-    srv('guardarSobresMov', [[{ fecha: f, sobre: de, monto: -monto, tipo: 'Mover', grupo: g, nota: nota }, { fecha: f, sobre: a, monto: monto, tipo: 'Mover', grupo: g, nota: nota }]],
-      function () { listo('✅ Movido ' + txt(monto, 'CRC') + ' a ' + a); }, $('mv-ok'));
+    var mv = [{ fecha: f, sobre: de, monto: -monto, tipo: 'Mover', grupo: g, nota: nota }, { fecha: f, sobre: a, monto: monto, tipo: 'Mover', grupo: g, nota: nota }];
+    srv('guardarSobresMov', [mv],
+      function () { local(mv); listo('✅ Movido ' + txt(monto, 'CRC') + ' a ' + a); }, $('mv-ok'));
   }
 
   // ---- limpiar sobres (fin de mes)
@@ -1405,7 +1442,7 @@ var App = (function () {
     if (!lista.length) return toast('Elegí al menos un sobre.');
     lista.push({ fecha: f, sobre: limpiar.destino, monto: Math.round(total * 100) / 100, tipo: 'Limpiar', grupo: g, nota: 'Limpiar sobres (' + (lista.length) + ' sobres)' });
     var dest = limpiar.destino;
-    srv('guardarSobresMov', [lista], function () { limpiar = null; pantalla = 'sobres'; listo('✅ ' + txt(total, 'CRC') + ' pasaron a ' + dest); }, $('lp-ok'));
+    srv('guardarSobresMov', [lista], function () { local(lista); limpiar = null; pantalla = 'sobres'; listo('✅ ' + txt(total, 'CRC') + ' pasaron a ' + dest); }, $('lp-ok'));
   }
 
   // ---- un sobre (editar y ver su mes)
@@ -1521,7 +1558,8 @@ var App = (function () {
   }
   function guardarSubcuenta(fila) {
     var m = movPorFila(fila);
-    srv('marcarMovimiento', [fila, 'Subcuenta', val('sc-sel'), { monto: m.monto }], function () { listo('✅ Asignado a ' + val('sc-sel')); }, $('sc-ok'));
+    var sc = val('sc-sel');
+    srv('marcarMovimiento', [fila, 'Subcuenta', sc, { monto: m.monto }], function () { m.subcuenta = sc; listo('✅ Asignado a ' + val('sc-sel')); }, $('sc-ok'));
   }
   function formFondo(i) {
     var f = i === undefined ? null : FD().lista[i];
@@ -1771,7 +1809,8 @@ var App = (function () {
   function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); }
   function cerrar() { $('velo').classList.remove('abierto'); }
   function val(id) { var e = $(id); return e ? e.value : ''; }
-  function listo(msg) { cerrar(); toast(msg); cargar(); }
+  function listo(msg) { cerrar(); toast(msg); if (D) pintar(); cargar(); }   // se ve al instante; la recarga confirma por detrás
+  function local(lista) { D.sobresMov = (D.sobresMov || []).concat(lista.map(function (x) { return Object.assign({ fila: 0 }, x); })); }
 
   function formMovimiento(fila) {
     var m = fila ? D.movimientos.filter(function (x) { return x.fila === fila; })[0] : null;
@@ -1909,7 +1948,7 @@ var App = (function () {
 
   function revisarCorreos(boton) {
     toast('Revisando el correo…', 10000);
-    srv('revisarCorreosAhora', [], function (msg) { toast(msg, 5000); AJ = null; cargar(); }, boton);
+    srv('revisarCorreosAhora', [], function (msg) { toast(msg, 5000); cargar(); }, boton);
   }
 
   // ------------------------------------------------------------ CONFIGURACIÓN
@@ -1924,6 +1963,8 @@ var App = (function () {
   }
   function pAjustes() {
     var cab = '<div class="cab"><div style="display:flex;gap:10px;align-items:center"><button class="btn-icono" aria-label="Volver" onclick="App.volver()">' + ico('atras') + '</button><h1 class="titulo">Configuración</h1></div></div>';
+    if (!AJ && D.ajustes) AJ = D.ajustes;
+    if (!AJ) AJ = leerJSONSeguro('mf-aj');
     if (!AJ) {
       $('p-ajustes').innerHTML = cab + '<div class="caja vacio"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div>';
       srv('obtenerAjustes', [], function (a) { AJ = a; pinActivo = a.pinActivo; if (pantalla === 'ajustes') pintar(); });
@@ -2265,6 +2306,19 @@ var App = (function () {
     });
   }
 
+  // ---- al tocar: destello en el dedo y el botón se ilumina (se nota en cualquier teléfono)
+  document.addEventListener('pointerdown', function (ev) {
+    var el = ev.target.closest && ev.target.closest('button, a, .item, .tile, label.op, label.check, .chip, select, [role=button]');
+    if (!el || el.disabled) return;
+    el.classList.add('tocado');
+    setTimeout(function () { el.classList.remove('tocado'); }, 220);
+    var r = document.createElement('span');
+    r.className = 'onda';
+    r.style.left = ev.clientX + 'px'; r.style.top = ev.clientY + 'px';
+    document.body.appendChild(r);
+    setTimeout(function () { r.remove(); }, 500);
+  }, { passive: true });
+
   function iniciar() {
     $('logoCarga').innerHTML = LOGO;
     try { history.replaceState({ mf: 0 }, ''); } catch (e) { /* nada */ }
@@ -2294,7 +2348,7 @@ var App = (function () {
     tema: setTema, privado: setPrivado, recordatorios: setRecordatorios, pruebaRecordatorio: pruebaRecordatorio,
     formPIN: formPIN, guardarPIN: guardarPIN, tecla: tecla,
     usarHuella: usarHuella, alternarHuella: alternarHuella, activarHuella: activarHuella,
-    recargar: function () { AJ = null; cargar(function () { toast('Datos actualizados'); }); },
+    recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     volver: volver, abrirItem: abrirItem, presionar: presionar, soltar: soltar, cancelarPresion: cancelarPresion,
     formAccesos: formAccesos, guardarAccesos: guardarAccesos, exportarCSV: exportarCSV,
