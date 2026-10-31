@@ -460,8 +460,8 @@ var Calc = (function () {
   function deudaTarjeta(d, c) {
     var r = { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0, base: { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0 }, fecha: c.fechaSaldo || null,
       compras: 0, sube: { CRC: 0, USD: 0 }, baja: { CRC: 0, USD: 0 }, vivo: !!c.fechaSaldo };
-    if (!c.fechaSaldo) return r;
-    var desde = new Date(c.fechaSaldo);
+    var desde = c.fechaSaldo ? new Date(c.fechaSaldo) : null;
+    if (!desde || isNaN(desde)) { r.vivo = false; return r; }
     // la fecha del saldo es un día: cuenta lo de después de ese día
     var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
     (d.movimientos || []).forEach(function (m) {
