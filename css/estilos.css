@@ -586,3 +586,13 @@ details.pleg .pl-c > .tc-fila { padding: 13px 16px; }
 .mes-a-mes .nf { white-space: nowrap; }
 @media (max-width: 380px) { .mes-a-mes { grid-template-columns: 62px repeat(3, minmax(0, 1fr)); } }
 .mes-a-mes { gap: 7px 10px; font-size: 11.5px; }
+/* v2.2 · Me deben y deuda de tarjetas */
+.cobro-sug { background: color-mix(in srgb, var(--positivo) 12%, var(--tarjeta)); border: 1px solid color-mix(in srgb, var(--positivo) 35%, transparent); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.cobro-sug b { color: var(--positivo); font-size: 14px; }
+.cobro-sug span { font-size: 13px; color: var(--suave); }
+.cobro-sug .chips { margin-top: 6px; }
+.et-sobre.otro { background: color-mix(in srgb, #5B8DEF 18%, transparent); color: #7FA6F2; }
+.campos-op { width: 100%; margin-top: 4px; }
+.op { flex-wrap: wrap; }
+.tj .monto .naranja { color: var(--naranja-txt); }
+.op > span:not(.suave) { flex: 1 1 0; min-width: 0; }

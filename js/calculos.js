@@ -116,8 +116,8 @@ var Calc = (function () {
       if (!enMes(m.fecha, mes)) return;
       r.movimientos.push(m);
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
-      if (m.tipo === 'Ingreso') { r.ingresos[mon] += m.monto; return; }
-      if (m.tipo !== 'Gasto') return;
+      if (m.tipo === 'Ingreso') { if (!esCobro(m)) r.ingresos[mon] += m.monto; return; }
+      if (m.tipo !== 'Gasto' || m.para) return;     // v2.2: lo comprado para otra persona no es gasto mío
       r.gastos[mon] += m.monto;
       if (!m.categoria) r.porRevisar++;
       var cat = m.categoria || 'Sin categoría';
@@ -191,7 +191,9 @@ var Calc = (function () {
   }
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
+  function esCobro(m) { return /^Pago de /.test(m.cobro || ''); }
   function sentidoSobre(d, m) {
+    if (m.para && m.tipo !== 'Ingreso') return null;   // v2.2: comprado para otra persona: no toca sobres
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
     if (m.tipo === 'Inversión' || m.tipo === 'Pago de tarjeta' || m.tipo === 'Gasto') return 'sale';
     return null;
@@ -453,6 +455,55 @@ var Calc = (function () {
     };
   }
 
+  // ---------------- v2.2: deuda real de una tarjeta y "Me deben" ----------------
+  /** Saldo puesto a una fecha + compras con la tarjeta desde ese día − pagos a la tarjeta desde ese día. */
+  function deudaTarjeta(d, c) {
+    var r = { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0, base: { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0 }, fecha: c.fechaSaldo || null,
+      compras: 0, sube: { CRC: 0, USD: 0 }, baja: { CRC: 0, USD: 0 }, vivo: !!c.fechaSaldo };
+    if (!c.fechaSaldo) return r;
+    var desde = new Date(c.fechaSaldo);
+    // la fecha del saldo es un día: cuenta lo de después de ese día
+    var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
+    (d.movimientos || []).forEach(function (m) {
+      if (m.cuenta !== c.nombre || !m.fecha || new Date(m.fecha) < corte) return;
+      var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
+      if (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') { r.sube[mon] += m.monto; r.compras++; }
+      else if (m.tipo === 'Pago de tarjeta' || m.tipo === 'Ingreso') r.baja[mon] += m.monto;   // pagos y devoluciones
+    });
+    r.CRC = r.base.CRC + r.sube.CRC - r.baja.CRC;
+    r.USD = r.base.USD + r.sube.USD - r.baja.USD;
+    return r;
+  }
+  /** Compras hechas para otras personas que todavía no te pagaron, y posibles pagos (ingresos por el mismo monto). */
+  function meDeben(d) {
+    var pend = (d.movimientos || []).filter(function (m) { return m.para && m.tipo !== 'Ingreso' && !m.cobro; })
+      .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    var total = { CRC: 0, USD: 0 }, personas = {};
+    pend.forEach(function (m) {
+      var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
+      total[mon] += m.monto;
+      var k = m.para.trim().toLowerCase();
+      personas[k] = personas[k] || { nombre: m.para.trim(), CRC: 0, USD: 0, movs: [] };
+      personas[k][mon] += m.monto; personas[k].movs.push(m);
+    });
+    var sugerencias = [];
+    (d.movimientos || []).forEach(function (ing) {
+      if (ing.tipo !== 'Ingreso' || ing.cobro || ing.fila < 0) return;
+      var f = new Date(ing.fecha), txt = ((ing.comercio || '') + ' ' + (ing.nota || '')).toLowerCase();
+      Object.keys(personas).forEach(function (k) {
+        var p = personas[k], previas = p.movs.filter(function (m) { return m.moneda === ing.moneda && new Date(m.fecha) <= f && (f - new Date(m.fecha)) < 150 * 86400000; });
+        if (!previas.length) return;
+        var una = previas.filter(function (m) { return Math.abs(m.monto - ing.monto) < 0.5; })[0];
+        var suma = previas.reduce(function (s, m) { return s + m.monto; }, 0);
+        var deudas = una ? [una] : Math.abs(suma - ing.monto) < 0.5 ? previas : null;
+        var porNombre = k.length >= 3 && txt.indexOf(k) >= 0;
+        if (deudas) sugerencias.push({ ingreso: ing, persona: p.nombre, deudas: deudas, porNombre: porNombre });
+      });
+    });
+    sugerencias.sort(function (a, b) { return (b.porNombre ? 1 : 0) - (a.porNombre ? 1 : 0) || new Date(b.ingreso.fecha) - new Date(a.ingreso.fecha); });
+    return { lista: pend, total: total, personas: Object.keys(personas).map(function (k) { return personas[k]; }), sugerencias: sugerencias };
+  }
+
   function pct(n, dec) { return n === null || n === undefined ? '—' : (n * 100).toFixed(dec === undefined ? 2 : dec).replace('.', ',') + '%'; }
 
   return {
@@ -461,7 +512,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.1.0';
+  var VERSION_WEB = '2.2.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -170,7 +170,8 @@ var App = (function () {
       if (m.fila) { var o = movF(m.fila); if (o) Object.assign(o, datos); }
       else if (!movF(it.temp)) D.movimientos.push(Object.assign({ fila: it.temp, subcuenta: '', viaje: '' }, datos));
     },
-    marcarMovimiento: function (args) { var o = movF(args[0]); if (o) o[args[1] === 'Subcuenta' ? 'subcuenta' : 'viaje'] = args[2]; },
+    marcarMovimiento: function (args) { var o = movF(args[0]); if (o) o[{ 'Subcuenta': 'subcuenta', 'Viaje': 'viaje', 'Para otra persona': 'para', 'Cobro': 'cobro', 'Nota': 'nota' }[args[1]] || 'x'] = args[2]; },
+    actualizarSaldoCuenta: function (args) { var c = D.cuentas.filter(function (x) { return x.fila === args[0]; })[0]; if (c) { c.saldoCRC = args[1]; c.saldoUSD = args[2]; c.fechaSaldo = args[3]; } },
     guardarAbonoTC: function (args, it) {
       var x = args[0];
       var t = D.tasaCero.filter(function (z) { return z.descripcion === x.compra && (!x.tarjeta || z.tarjeta === x.tarjeta); })[0];
@@ -343,7 +344,7 @@ var App = (function () {
     document.querySelectorAll('.pantalla').forEach(function (s) { s.classList.toggle('activa', s.id === 'p-' + pantalla); });
     ({
       inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
-      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
+      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
     formatearMontos();
   }
@@ -364,6 +365,7 @@ var App = (function () {
     ['fondos', 'Fondos de inversión', 'Pequeño', false],
     ['prestamo', 'Cuota de la casa', 'Pequeño', false],
     ['sobres', 'Sobres (los más usados)', 'Ancho', false],
+    ['medeben', 'Me deben', 'Pequeño · solo si alguien te debe', true],
     ['accesos', 'Accesos rápidos', 'Fila de íconos (incluye Más)', true],
     ['ultimos', 'Últimos movimientos', 'Ancho', true]
   ];
@@ -425,6 +427,11 @@ var App = (function () {
       if (!D.prestamo || !D.prestamo.proximoVenc) return '';
       var dd = C.diasEntre(hoy, new Date(D.prestamo.proximoVenc));
       return wChico("App.ir('prestamo')", '🏠 Cuota de la casa', din(D.prestamo.estimado.total, 'CRC'), enDias(dd), dd <= 3 ? 'rojo' : 'acento');
+    }
+    if (k === 'medeben') {
+      var md = C.meDeben(D);
+      if (!md.lista.length) return '';
+      return wChico("App.ir('medeben')", '🤝 Me deben', md.personas.length + ' persona' + (md.personas.length === 1 ? '' : 's'), md.total.CRC ? din(md.total.CRC, 'CRC') : din(md.total.USD, 'USD'), 'acento');
     }
     if (k === 'sobres') {
       if (sinServidorSobres()) return '';
@@ -488,6 +495,7 @@ var App = (function () {
     ahorros: ['Ahorros', 'M5 9a7 6 0 0 1 14 0v6H5zM9 15v4M15 15v4', 'M11 5h2v2h-2z', 'ir:patrimonio'],
     prestamo: ['Préstamo', 'M3 11l9-7 9 7M5 10v10h14V10', 'M10 20v-5h4v5z', 'ir:prestamo'],
     inversiones: ['Fondos', 'M4 20V4M4 20h16M7 15l4-4 3 3 5-6', 'M18 7.5a1.5 1.5 0 1 0 0.01 0z', 'ir:fondos'],
+    medeben: ['Me deben', 'M7 11a3 3 0 1 0 0.01 0zM2 20c0-3 2.5-5 5-5s5 2 5 5', 'M16 8l4 4-4 4M20 12h-7', 'ir:medeben'],
     viajes: ['Viajes', 'M10.5 21l1.5-1v-5l8 3v-2l-8-5V5.5a1.5 1.5 0 0 0-3 0V11l-8 5v2l8-3v5l1.5 1z', 'M17 3.5a1.5 1.5 0 1 0 0.01 0z', 'ir:viajes'],
     sobres: ['Sobres', 'M3 6h18v12H3zM3 7l9 6 9-6', 'M17 15.5a2 2 0 1 0 0.01 0z', 'ir:sobres'],
     calculadora: ['Calculadora', 'M5 2h14v20H5zM8 5h8v4H8z', 'M8 13h2v2H8zM14 13h2v2h-2zM8 17h2v2H8zM14 17h2v2h-2z', 'ir:calculadora'],
@@ -504,7 +512,7 @@ var App = (function () {
     agregar: ['Agregar', 'M12 7v10M7 12h10', '', 'agregar']
   };
   var SECCIONES = [
-    ['MIS CUENTAS', ['tarjetas', 'ahorros', 'prestamo', 'inversiones']],
+    ['MIS CUENTAS', ['tarjetas', 'ahorros', 'prestamo', 'inversiones', 'medeben']],
     ['PLANIFICAR', ['sobres', 'viajes', 'calculadora', 'tasacero', 'recurrentes']],
     ['ANÁLISIS', ['reportes', 'patrimonio', 'categorias', 'exportar']],
     ['AJUSTES', ['configuracion', 'hoja', 'bancos', 'agregar']]
@@ -948,6 +956,7 @@ var App = (function () {
       if (!c.activa) return;
       var crc = c.saldoCRC || 0, usd = c.saldoUSD || 0;
       if (c.tipo === 'Préstamo' && D.prestamo && D.prestamo.saldo && !crc) crc = D.prestamo.saldo;
+      if (c.tipo === 'Tarjeta de crédito') { var dtp = C.deudaTarjeta(D, c); crc = Math.max(0, dtp.CRC); usd = Math.max(0, dtp.USD); }
       if (!crc && !usd) return;
       var txtS = [crc ? din(crc, 'CRC') : '', usd ? din(usd, 'USD') : ''].filter(String).join(' + ');
       var linea = '<div class="fila" style="font-size:14px"><span>' + esc(c.nombre) + '<br><span class="suave chico">' + esc(c.tipo) + '</span></span><b>' + txtS + '</b></div>';
@@ -1360,7 +1369,7 @@ var App = (function () {
     var cta = m.cuenta ? cuentaPorNombre(m.cuenta) : null;
     var extra = [cta && cta.ultimos4 ? '••' + esc(cta.ultimos4) : '', hora(m.fecha)].filter(String);
     if (!et && m.cuenta && !(cta && cta.ultimos4)) extra.unshift(esc(m.cuenta));
-    var et = etiquetaSobre(m);
+    var et = m.para && m.tipo !== 'Ingreso' ? '<span class="et-sobre otro">🤝 ' + esc(m.para) + (m.cobro ? ' · pagado' : '') + '</span>' : C.esCobro(m) ? '<span class="et-sobre otro">🤝 ' + esc(m.cobro) + '</span>' : etiquetaSobre(m);
     return '<button class="item mov" onclick="App.formMovimiento(' + m.fila + ')"><span class="ico-cat" style="background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span>' +
       '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || m.tipo) + '</span>' +
       '<span class="det" style="display:block">' + desc + (et ? ' ' + et : extra.length ? ' · ' + extra.join(' · ') : '') + '</span></span>' +
@@ -1458,37 +1467,123 @@ var App = (function () {
   }
   var tarjetaAbierta = null;
   function alternarTarjeta(f) { tarjetaAbierta = tarjetaAbierta === f ? -1 : f; pintar(); }
+  // ------------------------------------------------------------ ME DEBEN (v2.2)
+  function sugerenciasCobro() {
+    var no = leerJSONSeguro('mf-md-no') || [];
+    return C.meDeben(D).sugerencias.filter(function (s) { return no.indexOf(s.ingreso.fila + '|' + s.persona) < 0; });
+  }
+  function textoDeudas(s) { return s.deudas.length === 1 ? '«' + esc(nombreBonito(s.deudas[0].comercio) || 'compra') + '»' : s.deudas.length + ' compras'; }
+  function bannerCobro(m) {
+    if (m.tipo !== 'Ingreso') return '';
+    var s = sugerenciasCobro().filter(function (x) { return x.ingreso.fila === m.fila; })[0];
+    if (!s) return '';
+    return '<div class="cobro-sug"><b>🤝 ¿Es el pago de ' + esc(s.persona) + '?</b><span>' + textoDeudas(s) + ' · ' + din(s.ingreso.monto, s.ingreso.moneda) + '</span>' +
+      '<div class="chips"><button class="chip on" onclick="App.cobrar(' + m.fila + ',\'' + esc(s.persona).replace(/'/g, "\\'") + '\',true)">Sí, ya me pagó</button><button class="chip" onclick="App.noCobro(' + m.fila + ',\'' + esc(s.persona).replace(/'/g, "\\'") + '\')">No</button></div></div>';
+  }
+  function cobrar(ingFila, persona, desdeAsignar) {
+    var s = C.meDeben(D).sugerencias.filter(function (x) { return x.ingreso.fila === ingFila && x.persona === persona; })[0];
+    if (!s) return toast('Ya no encuentro esa deuda.');
+    var hoyTxt = fechaCorta(new Date().toISOString());
+    s.deudas.forEach(function (d0) { encolar('marcarMovimiento', [d0.fila, 'Cobro', 'Pagado ' + hoyTxt + ' · ingreso fila ' + ingFila, { monto: d0.monto }], 'Cobrado a ' + persona + ': ' + (d0.comercio || 'compra')); });
+    encolar('marcarMovimiento', [ingFila, 'Cobro', 'Pago de ' + persona, { monto: s.ingreso.monto }], 'Ingreso es pago de ' + persona);
+    hecho('✅ ' + persona + ' ya te pagó. Ese ingreso no cuenta como tuyo.');
+    if (desdeAsignar) setTimeout(function () { formAsignar(ingFila); toast('Ahora asigná esa plata a un sobre (por ejemplo, el de pagar tarjetas).', 4500); }, 400);
+  }
+  function noCobro(ingFila, persona) { var no = leerJSONSeguro('mf-md-no') || []; no.push(ingFila + '|' + persona); guardar('mf-md-no', JSON.stringify(no)); if ($('velo').classList.contains('abierto')) formAsignar(ingFila); pintar(); }
+  function pMeDeben() {
+    var md = C.meDeben(D);
+    var h = cabSimple('Me deben', 'Compras para otras personas');
+    if (!md.lista.length) {
+      h += '<div class="vacio-lindo"><div class="dibujo">🤝</div><b>Nadie te debe nada</b><span>Cuando asignes una compra como <b>Para otra persona</b>, aparece aquí hasta que te paguen.</span></div>';
+      $('p-medeben').innerHTML = h; return;
+    }
+    h += '<div class="caja" style="gap:4px"><div class="suave chico">Te deben en total</div><div class="fuerte" style="font-size:26px">' + [md.total.CRC ? din(md.total.CRC, 'CRC') : '', md.total.USD ? din(md.total.USD, 'USD') : ''].filter(String).join(' + ') + '</div>' +
+      '<div class="suave chico">' + md.personas.length + ' persona' + (md.personas.length === 1 ? '' : 's') + ' · ' + md.lista.length + ' compra' + (md.lista.length === 1 ? '' : 's') + '</div></div>';
+    sugerenciasCobro().slice(0, 3).forEach(function (s) {
+      h += '<div class="cobro-sug"><b>Llegó ' + din(s.ingreso.monto, s.ingreso.moneda) + ' · ' + esc(nombreBonito(s.ingreso.comercio) || 'Ingreso') + '</b><span>¿Es el pago de ' + esc(s.persona) + ' (' + textoDeudas(s) + ')?</span>' +
+        '<div class="chips"><button class="chip on" onclick="App.cobrar(' + s.ingreso.fila + ',\'' + esc(s.persona).replace(/'/g, "\\'") + '\')">Sí, ya me pagó</button><button class="chip" onclick="App.noCobro(' + s.ingreso.fila + ',\'' + esc(s.persona).replace(/'/g, "\\'") + '\')">No</button></div></div>';
+    });
+    md.personas.forEach(function (p) {
+      h += '<div class="seccion">' + esc(p.nombre) + ' · ' + [p.CRC ? txt(p.CRC, 'CRC') : '', p.USD ? txt(p.USD, 'USD') : ''].filter(String).join(' + ') + '</div><div class="caja sinpad">' + p.movs.map(function (m) {
+        return '<button class="item" onclick="App.formDeuda(' + m.fila + ')"><span class="ico-cat" style="background:color-mix(in srgb, #5B8DEF 18%, transparent)">🤝</span><span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || 'Compra') + '</span>' +
+          '<span class="det" style="display:block">' + fechaCorta(m.fecha) + (m.nota ? ' · ' + esc(m.nota) : '') + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</span></span><span class="monto"><b>' + din(m.monto, m.moneda) + '</b><span class="origen">pendiente</span></span></button>';
+      }).join('') + '</div>';
+    });
+    h += '<div class="suave chico" style="text-align:center">Estas compras suman a la deuda de la tarjeta, pero no son gasto tuyo. Cuando te paguen, el ingreso tampoco cuenta como tuyo.</div>';
+    $('p-medeben').innerHTML = h;
+  }
+  function formDeuda(fila) {
+    var m = movPorFila(fila); if (!m) return;
+    abrir('<div class="suave chico">' + fechaCorta(m.fecha) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</div><h2>' + esc(nombreBonito(m.comercio) || 'Compra') + '</h2>' +
+      '<div style="font-size:26px;font-weight:800">' + din(m.monto, m.moneda) + '</div><div class="suave">Te la debe <b>' + esc(m.para) + '</b>' + (m.nota ? ' · ' + esc(m.nota) : '') + '</div>' +
+      '<div class="acciones"><button class="btn" onclick="App.deudaPagada(' + fila + ')">✅ Ya me pagó</button>' +
+      '<button class="btn sec" onclick="App.deudaEraMia(' + fila + ')">Era mía (quitar de Me deben)</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>' +
+      '<div class="suave chico" style="margin-top:10px">Si te pagó por SINPE y ya llegó el correo, mejor esperá la pregunta "¿Es el pago de…?" para que ese ingreso tampoco cuente como tuyo.</div>');
+  }
+  function deudaPagada(fila) { var m = movPorFila(fila); encolar('marcarMovimiento', [fila, 'Cobro', 'Pagado ' + fechaCorta(new Date().toISOString()) + ' · a mano', { monto: m.monto }], 'Cobrado a ' + m.para + ': ' + (m.comercio || 'compra')); hecho('✅ Marcada como pagada'); }
+  function deudaEraMia(fila) { var m = movPorFila(fila); encolar('marcarMovimiento', [fila, 'Para otra persona', '', { monto: m.monto }], 'Era mía: ' + (m.comercio || 'compra')); hecho('Listo: ahora es gasto tuyo y queda por asignar a un sobre.'); }
+
+  function formSaldoTarjeta(fila) {
+    var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
+    var dt = C.deudaTarjeta(D, c), r = function (n) { return n ? String(Math.round(n * 100) / 100).replace('.', ',') : ''; };
+    abrir('<h2>Actualizar saldo · ' + esc(c.nombre) + '</h2><div class="suave">Poné lo que debés según el estado de cuenta o la app del banco. Desde esa fecha la app suma las compras y resta los pagos sola.</div>' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Deuda en colones</span><input id="st-crc" data-dinero inputmode="decimal" value="' + r(dt.CRC) + '" placeholder="0"></label>' +
+      '<label class="campo compacto"><span>Deuda en dólares</span><input id="st-usd" data-dinero inputmode="decimal" value="' + r(dt.USD) + '" placeholder="0"></label></div>' +
+      '<label class="campo compacto"><span>¿A qué fecha?</span><input id="st-fecha" type="date" value="' + localInput() + '"></label>' +
+      '<div class="suave chico" style="margin-top:6px">Las compras y pagos del mismo día de la fecha ya deberían estar en ese saldo; se cuentan los de los días siguientes.</div>' +
+      '<div class="acciones"><button class="btn" id="st-ok" onclick="App.guardarSaldoTarjeta(' + fila + ')">Guardar saldo</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarSaldoTarjeta(fila) {
+    var crc = C.leerNumero(val('st-crc')) || 0, usd = C.leerNumero(val('st-usd')) || 0, f = desdeInput(val('st-fecha'));
+    if (!f) return toast('Elegí la fecha.');
+    var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0];
+    encolar('actualizarSaldoCuenta', [fila, crc, usd, f], 'Saldo de ' + (c ? c.nombre : 'tarjeta') + ' · ' + txt(crc, 'CRC') + (usd ? ' + ' + txt(usd, 'USD') : ''));
+    hecho('✅ Saldo guardado. Desde ahora se mueve solo.');
+  }
   function pTarjetas(res) {
     var tarjetas = D.cuentas.filter(function (c) { return c.tipo === 'Tarjeta de crédito' && c.activa; });
     var tc = D.tipoCambio || 0;
     var reservas = D.sobresDesde ? SB().reservado : {};
     var resDe = function (c, mon) { return Math.max(0, (reservas[c.nombre + '|' + mon] || 0)); };
     var datos = tarjetas.map(function (c) {
-      var f = c.diaPago ? C.proximaFecha(c.diaPago, hoy) : null;
-      return { c: c, dias: f ? C.diasEntre(hoy, f) : 999, uso: c.limiteCRC ? (c.saldoCRC || 0) / c.limiteCRC : null, rC: resDe(c, 'CRC'), rU: resDe(c, 'USD') };
+      var f = c.diaPago ? C.proximaFecha(c.diaPago, hoy) : null, dt = C.deudaTarjeta(D, c);
+      return { c: c, dt: dt, dias: f ? C.diasEntre(hoy, f) : 999, uso: c.limiteCRC ? Math.max(0, dt.CRC) / c.limiteCRC : null, rC: resDe(c, 'CRC'), rU: resDe(c, 'USD') };
     }).sort(function (x, y) { return x.dias - y.dias; });
     var deuC = 0, deuU = 0, cubC = 0, cubU = 0;
-    datos.forEach(function (x) { deuC += x.c.saldoCRC || 0; deuU += x.c.saldoUSD || 0; cubC += Math.min(x.rC, x.c.saldoCRC || 0); cubU += Math.min(x.rU, x.c.saldoUSD || 0); });
+    datos.forEach(function (x) { deuC += Math.max(0, x.dt.CRC); deuU += Math.max(0, x.dt.USD); cubC += Math.min(x.rC, Math.max(0, x.dt.CRC)); cubU += Math.min(x.rU, Math.max(0, x.dt.USD)); });
     var deudaEq = deuC + deuU * tc, cubEq = cubC + cubU * tc, pctCub = deudaEq > 0 ? cubEq / deudaEq : 0;
     var h = '<div class="cab"><div><div class="sobretitulo">' + nombreMes(mes) + '</div><h1 class="titulo">Tarjetas</h1></div><div class="mesnav">' + botonOjo().replace('class="ojo"', 'class="btn-icono"') + botonMas() + '</div></div>';
     if (datos.length) {
-      h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Por pagar este ciclo</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span class="suave chico">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
+      h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Deuda total hoy</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span class="suave chico">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
         (D.sobresDesde ? '<div style="text-align:right"><div class="suave chico">Cubierto por sobres</div><div class="fuerte verde-pos" style="font-size:21px">' + Math.round(pctCub * 100) + '%</div></div>' : '') + '</div>' +
         (D.sobresDesde ? '<div class="barra"><i style="width:' + Math.min(100, pctCub * 100).toFixed(1) + '%;background:var(--positivo)"></i></div>' : '') + '</div>';
     }
     h += '<div class="caja sinpad">' + datos.map(function (x) {
       var c = x.c, ab = tarjetaAbierta === c.fila, g = res.porCuenta[c.nombre] || { CRC: 0, USD: 0, cuotasTC: { CRC: 0, USD: 0 } };
       var urg = x.dias <= 3, lleno = x.uso !== null && x.uso >= 0.75;
-      var saldo2 = c.saldoUSD ? '+ ' + din(c.saldoUSD, 'USD') : x.uso !== null ? 'usado ' + Math.round(x.uso * 100) + '%' : '';
+      var dt = x.dt, cambio = '';
+      if (dt.vivo) {
+        var difC = dt.sube.CRC - dt.baja.CRC, difU = dt.sube.USD - dt.baja.USD, desde = ' desde ' + fechaCorta(dt.fecha).replace(/ \d{4}$/, '');
+        cambio = Math.abs(difC) < 0.005 && Math.abs(difU) < 0.005 ? '<span class="suave chico">sin cambios' + desde + '</span>'
+          : '<span class="chico ' + (difC + difU > 0 ? 'naranja' : 'verde-pos') + '">' + [Math.abs(difC) >= 0.005 ? (difC > 0 ? '+' : '−') + din(Math.abs(difC), 'CRC') : '', Math.abs(difU) >= 0.005 ? (difU > 0 ? '+' : '−') + din(Math.abs(difU), 'USD') : ''].filter(String).join(' ') + desde + '</span>';
+      }
+      var saldo2 = (dt.USD ? '<span class="suave chico">+ ' + din(dt.USD, 'USD') + '</span>' : '') + (cambio || (!dt.vivo ? '<span class="suave chico">saldo sin fecha</span>' : ''));
       var fila = '<button class="tj" onclick="App.alternarTarjeta(' + c.fila + ')" aria-expanded="' + ab + '"><span class="mini-plastico" style="background:linear-gradient(135deg,' + colorBanco(c.banco) + ',color-mix(in srgb,' + colorBanco(c.banco) + ' 70%, white))">' + esc(c.ultimos4 || '') + '</span>' +
         '<span class="cuerpo"><span class="nombre">' + esc(c.nombre) + '</span>' + (x.dias < 999 ? '<span class="pill' + (urg ? ' alerta' : '') + '">pagar ' + enDias(x.dias) + '</span>' : '') + '</span>' +
-        '<span class="monto"><b>' + din(c.saldoCRC || 0, 'CRC') + '</b><span class="suave chico">' + saldo2 + '</span></span></button>' +
+        '<span class="monto"><b>' + din(dt.CRC, 'CRC') + '</b>' + saldo2 + '</span></button>' +
         (x.uso !== null ? '<div class="tj-barra"><div class="barra' + (lleno ? ' alerta' : '') + '" style="height:5px"><i style="width:' + Math.max(1.5, Math.min(100, x.uso * 100)).toFixed(1) + '%' + (lleno ? ';background:var(--rojo)' : '') + '"></i></div></div>' : '');
       if (ab) {
-        var faltaC = Math.max(0, (c.saldoCRC || 0) - x.rC), faltaU = Math.max(0, (c.saldoUSD || 0) - x.rU);
+        var faltaC = Math.max(0, dt.CRC - x.rC), faltaU = Math.max(0, dt.USD - x.rU);
+        var dosMon = function (o) { return [o.CRC || !o.USD ? din(o.CRC, 'CRC') : '', o.USD ? din(o.USD, 'USD') : ''].filter(String).join(' + '); };
         var tcs = D.tasaCero.filter(function (t) { return t.tarjeta === c.nombre; }).map(function (t) { return { t: t, e: C.estadoTasaCero(t, hoy) }; }).filter(function (y) { return y.e.restantes > 0; });
         var linea = function (a, b, cls) { return '<div class="fila chico"><span class="suave">' + a + '</span><span class="fuerte ' + (cls || '') + '">' + b + '</span></div>'; };
         fila += '<div class="tj-det">' +
+          (dt.vivo ? linea('Saldo al ' + fechaCorta(dt.fecha) + ' (estado de cuenta)', dosMon(dt.base)) +
+            linea('+ ' + dt.compras + ' compra' + (dt.compras === 1 ? '' : 's') + ' desde entonces', '+' + dosMon(dt.sube), 'naranja') +
+            linea('− Pagos desde entonces', '−' + dosMon(dt.baja), 'verde-pos') +
+            '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea('Deuda hoy', dosMon(dt))
+            : '<div class="aviso-tasa" style="margin:0 0 4px">Este saldo no se mueve solo. Tocá <b>↻ Actualizar saldo</b> y poné lo que debés hoy: desde ahí la app suma las compras y resta los pagos.</div>') +
+          (c.limiteCRC ? linea('Disponible', din(c.limiteCRC - Math.max(0, dt.CRC), 'CRC'), 'verde-pos') : '') +
           linea('Compras del mes', din(g.CRC, 'CRC') + (g.USD ? ' + ' + din(g.USD, 'USD') : '')) +
           (g.cuotasTC.CRC || g.cuotasTC.USD ? linea('Cuotas tasa cero del mes', din(g.cuotasTC.CRC, 'CRC') + (g.cuotasTC.USD ? ' + ' + din(g.cuotasTC.USD, 'USD') : '')) : '') +
           (D.sobresDesde ? linea('Reservado en sobres', [x.rC > 0.005 || !x.rU ? din(x.rC, 'CRC') : '', x.rU > 0.005 ? din(x.rU, 'USD') : ''].filter(String).join(' + '), 'verde-pos') +
@@ -1500,6 +1595,7 @@ var App = (function () {
           }).join('') : '') +
           '<div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.verComprasDe(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')">Ver compras</button>' +
           '<button class="chip" onclick="App.formMovimiento(0,{tipo:\'Pago de tarjeta\',cuenta:\'' + esc(c.nombre).replace(/'/g, "\\'") + '\'})">Registrar pago</button>' +
+          '<button class="chip on" onclick="App.formSaldoTarjeta(' + c.fila + ')">↻ Actualizar saldo</button>' +
           '<button class="chip" onclick="App.formCuenta(' + c.fila + ')">Editar</button></div></div>';
       }
       return '<div class="tj-fila' + (ab ? ' abierta' : '') + '">' + fila + '</div>';
@@ -1595,7 +1691,7 @@ var App = (function () {
     asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: 'sobre', tarjeta: !!p.tarjeta, reservado: p.reservadoUsado || 0, filas: [{ sobre: primero, monto: p.falta }] };
     var h = '<div class="suave chico">' + esc(m.tipo) + ' · ' + fechaCorta(m.fecha) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</div>' +
       '<h2>' + esc(m.comercio || m.tipo) + '</h2><div class="grande ' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="font-size:28px;font-weight:800">' + (p.sentido === 'entra' ? '+' : '−') + din(p.falta, m.moneda) + '</div>' +
-      (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + '<div id="as-cuerpo"></div>';
+      (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + bannerCobro(m) + '<div id="as-cuerpo"></div>';
     abrir(h);
     pintarAsignar();
   }
@@ -1623,12 +1719,18 @@ var App = (function () {
         radio('repartir', 'Repartir en varios sobres') +
         radio('ninguno', 'Dejar en la cuenta (sin sobre)');
     } else {
-      h += '<div class="suave chico fuerte" style="margin-top:10px">¿DE QUÉ SOBRE SALIÓ?</div>' +
-        '<label class="campo compacto" style="margin-top:4px"><span>Sobre</span><select id="as-sobre">' + opcionesSobre(m.moneda, null, true) +
-        '<option value="">' + (asig.tarjeta ? '— Ninguno (se decide al pagar la tarjeta) —' : '— Sin sobre —') + '</option></select></label>' +
-        (asig.tarjeta ? '<div class="suave chico">El sobre baja ahora y el monto queda reservado para pagar ' + esc(etiquetaCuenta(m.cuenta)) + '.</div>' : '');
+      var personas = C.meDeben(D).personas.map(function (x) { return x.nombre; });
+      D.movimientos.forEach(function (x) { if (x.para && personas.indexOf(x.para) < 0) personas.push(x.para); });
+      h += '<div class="suave chico fuerte" style="margin-top:10px">¿CÓMO QUERÉS CONTARLA?</div>' +
+        radio('sobre', '<span><b>✉ De un sobre</b><br><span class="suave chico">' + (asig.tarjeta ? 'El sobre baja ahora y queda reservado para pagar la tarjeta' : 'La plata sale del sobre que elijás') + '</span></span>',
+          asig.modo === 'sobre' ? '<select id="as-sobre" onclick="event.stopPropagation()">' + opcionesSobre(m.moneda, asig.filas[0].sobre, true) + '</select>' : '') +
+        radio('ninguno', '<span><b>💳 Mía, sin sobre</b><br><span class="suave chico">Cuenta como gasto tuyo, pero no toca ningún sobre' + (asig.tarjeta ? '; se decide al pagar la tarjeta' : '') + '</span></span>') +
+        radio('otro', '<span><b>🤝 Para otra persona</b><br><span class="suave chico">No es gasto tuyo ni toca sobres. Queda en «Me deben»</span></span>',
+          asig.modo === 'otro' ? '<div class="campos-op" onclick="event.stopPropagation()"><label class="campo compacto"><span>¿Quién te la debe?</span><input id="as-para" list="as-personas" placeholder="Ej. Mamá" autocomplete="off"></label>' +
+            '<datalist id="as-personas">' + personas.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+            '<label class="campo compacto"><span>Nota (opcional)</span><input id="as-nota" placeholder="Ej. Regalo de cumpleaños"></label></div>' : '');
     }
-    if (m.tipo !== 'Pago de tarjeta' && asig.modo !== 'repartir') {
+    if (m.tipo !== 'Pago de tarjeta' && asig.modo !== 'repartir' && asig.modo !== 'otro') {
       h += '<label class="campo compacto"><span>Monto</span><input id="as-monto" data-dinero inputmode="decimal" value="' + esc(String(Math.round(asig.falta * 100) / 100).replace('.', ',')) + '"></label>';
       if ((asig.modo === 'sobre' || asig.sentido === 'sale') && m.comercio) h += '<label class="check"><input type="checkbox" id="as-recordar"> Recordar para «' + esc(m.comercio) + '»</label>';
     }
@@ -1649,6 +1751,13 @@ var App = (function () {
   function guardarAsignar() {
     var m = movPorFila(asig.fila), g = grupoNuevo(), filas = [];
     if (asig.modo === 'repartir') { cerrar(); return irReparto(asig.fila); }
+    if (asig.modo === 'otro') {
+      var para = val('as-para').trim(), nota = val('as-nota').trim();
+      if (!para) return toast('Escribí quién te la debe.');
+      encolar('marcarMovimiento', [m.fila, 'Para otra persona', para, { monto: m.monto }], 'Para ' + para + ': ' + (m.comercio || 'compra') + ' · ' + txt(m.monto, m.moneda));
+      if (nota) encolar('marcarMovimiento', [m.fila, 'Nota', nota, { monto: m.monto }], 'Nota: ' + nota);
+      return hecho('🤝 Anotado en «Me deben»: ' + para);
+    }
     if (m.tipo === 'Pago de tarjeta') {
       var suma = 0;
       asig.filas.forEach(function (f) { var v = C.leerNumero(f.monto) || 0; if (v > 0) { suma += v; filas.push({ sobre: f.sobre, monto: -v }); } });
@@ -2286,6 +2395,7 @@ var App = (function () {
       moneda: val('c-moneda'), limiteCRC: C.leerNumero(val('c-limc')), limiteUSD: C.leerNumero(val('c-limu')),
       diaCorte: parseInt(val('c-corte'), 10) || null, diaPago: parseInt(val('c-pago'), 10) || null,
       saldoCRC: C.leerNumero(val('c-salc')), saldoUSD: C.leerNumero(val('c-salu')), notas: val('c-notas').trim(),
+      saldoCambio: !fila || (function (o) { return !o || (o.saldoCRC || 0) !== (C.leerNumero(val('c-salc')) || 0) || (o.saldoUSD || 0) !== (C.leerNumero(val('c-salu')) || 0); })(D.cuentas.filter(function (x) { return x.fila === fila; })[0]),
       activa: $('c-activa') ? $('c-activa').checked : true
     };
     if (!c.nombre) return toast('Falta el nombre.');
@@ -2486,13 +2596,13 @@ var App = (function () {
     var problemas = [];
     if (cola.length && ultimoErrorCola) problemas.push(['amarillo', cola.length + ' cambio' + (cola.length === 1 ? '' : 's') + ' sin enviar: ' + ultimoErrorCola]);
     if (horas === null || horas > 48) problemas.push(['amarillo', 'Los correos no se revisan solos hace rato. Revisá que el servidor tenga el activador cada 10 minutos.']);
-    if (String(AJ.version || '0') < '1.9') problemas.push(['amarillo', 'El servidor tiene una versión vieja (' + esc(AJ.version) + '). Pegá el Codigo.gs nuevo.']);
+    if (String(AJ.version || '0') < '2.2') problemas.push(['amarillo', 'El servidor tiene una versión vieja (' + esc(AJ.version) + '). Pegá el Codigo.gs nuevo.']);
     var pill = problemas.length ? '<span class="pill alerta">● Revisar</span>' : '<span class="pill ok">● Todo bien</span>';
     var fila = function (a, b, accion) { return '<' + (accion ? 'button onclick="' + accion + '"' : 'div') + ' class="est-fila"><span class="suave">' + a + '</span><b>' + b + '</b></' + (accion ? 'button' : 'div') + '>'; };
     return '<div class="caja estado"><div class="fila"><h3>Estado de la app</h3>' + pill + '</div>' +
       fila('Cambios por enviar', cola.length ? cola.length + ' ›' : '0 ✓', 'App.formCola()') +
       fila('Correos revisados', (ult ? (horas < 1 ? 'hace ' + Math.max(1, Math.round(horas * 60)) + ' min' : horas < 48 ? 'hace ' + Math.round(horas) + ' h' : fechaCorta(ult.toISOString())) : 'todavía no') + ' ↻', 'App.revisarCorreos()') +
-      fila('Servidor', esc(AJ.version) + (String(AJ.version || '0') < '1.9' ? ' ⚠' : ' ✓')) +
+      fila('Servidor', esc(AJ.version) + (String(AJ.version || '0') < '2.2' ? ' ⚠' : ' ✓')) +
       fila('Tipo de cambio', txt(D.tipoCambio, 'CRC', true)) +
       problemas.map(function (p) { return '<div class="est-aviso">⚠️ ' + p[1] + '</div>'; }).join('') + '</div>';
   }
@@ -2938,7 +3048,7 @@ var App = (function () {
     tema: setTema, temaAuto: setTemaAuto, letra: setLetra, alternarTema: alternarTema, privado: setPrivado,
     formRapido: formRapido, rapTecla: rapTecla, rapTipo: rapTipo, rapMoneda: rapMoneda, rapCuenta: rapCuenta, rapFrecuente: rapFrecuente, rapDetalles: rapDetalles, rapGuardar: rapGuardar, rapPegar: rapPegar,
     leerMensajeBanco: leerMensajeBanco, formAcciones: formAcciones, formInicio: formInicio, moverWidget: moverWidget, alternarWidget: alternarWidget, restaurarInicio: restaurarInicio,
-    vistaTC: setVistaTC, limpiarCalc: function () { limpiarCalc(); calcVista = 'datos'; window.scrollTo(0, 0); pintar(); toast('Calculadora limpia'); }, claseCalc: claseCalc, alEscribirTasa: alEscribirTasa, buscarAjuste: buscarAjuste, pleg: function (id, abierto) { plegAbierto[id] = abierto; }, grupoAj: function (id, abierto) { grupoAj[id] = abierto; },
+    vistaTC: setVistaTC, formSaldoTarjeta: formSaldoTarjeta, guardarSaldoTarjeta: guardarSaldoTarjeta, cobrar: cobrar, noCobro: noCobro, formDeuda: formDeuda, deudaPagada: deudaPagada, deudaEraMia: deudaEraMia, limpiarCalc: function () { limpiarCalc(); calcVista = 'datos'; window.scrollTo(0, 0); pintar(); toast('Calculadora limpia'); }, claseCalc: claseCalc, alEscribirTasa: alEscribirTasa, buscarAjuste: buscarAjuste, pleg: function (id, abierto) { plegAbierto[id] = abierto; }, grupoAj: function (id, abierto) { grupoAj[id] = abierto; },
     alternarBuscar: alternarBuscar, formFiltros: formFiltros, aplicarFiltros: aplicarFiltros, limpiarFiltros: limpiarFiltros, verComprasDe: verComprasDe, alternarTarjeta: alternarTarjeta, recordatorios: setRecordatorios, pruebaRecordatorio: pruebaRecordatorio,
     formPIN: formPIN, guardarPIN: guardarPIN, tecla: tecla,
     usarHuella: usarHuella, alternarHuella: alternarHuella, activarHuella: activarHuella,
