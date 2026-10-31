@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '1.8.0';
+  var VERSION_WEB = '1.9.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -97,15 +97,13 @@ var App = (function () {
   function trabajando(accion, on) {
     if (accion === 'ping' || accion === 'estadoAcceso') return;
     enCurso = Math.max(0, enCurso + (on ? 1 : -1));
-    var e = $('ocupado');
+    var e = null;   // v1.9: sin avisos ni barras; el botón muestra su circulito cuando hace falta
     if (on) {
       if (e) e.textContent = TEXTO_ACCION[accion] || 'Guardando…';
-      document.body.classList.add('sinc');
       clearTimeout(avisoTimer);
       avisoTimer = setTimeout(function () { if (enCurso && e) e.classList.add('ver'); }, 250);
     } else if (!enCurso) {
       clearTimeout(avisoTimer);
-      document.body.classList.remove('sinc');
       if (e) e.classList.remove('ver');
     }
   }
@@ -123,7 +121,9 @@ var App = (function () {
       body: JSON.stringify({ clave: c.clave, sesion: token, accion: accion, args: args || [] })
     }).then(function (r) { return r.text(); }, function (e) {
       clearTimeout(t);
-      throw new Error(e && e.name === 'AbortError' ? 'Google tardó demasiado en responder. Intentá de nuevo.' : 'Sin conexión con Google. Revisá tu internet y la URL /exec.');
+      var err = new Error(e && e.name === 'AbortError' ? 'Google tardó demasiado en responder. Intentá de nuevo.' : 'Sin conexión con Google. Revisá tu internet y la URL /exec.');
+      err.red = true;
+      throw err;
     }).then(function (texto) {
       clearTimeout(t);
       var j;
@@ -147,6 +147,91 @@ var App = (function () {
     if (b.dataset.html !== undefined) b.innerHTML = b.dataset.html;
     if (bien) { b.classList.add('hecho'); setTimeout(function () { b.classList.remove('hecho'); }, 900); }
   }
+  // ------------------------------------------------------------ LOCAL PRIMERO (v1.9)
+  // Lo de todos los días se aplica al instante en el teléfono y se manda a Google por detrás, en orden y con reintentos.
+  var cola = leerJSONSeguro('mf-cola') || [];
+  var envios = 0, enviando = false, ultimoErrorCola = guardado('mf-cola-error', '');
+  function movF(f) { return D.movimientos.filter(function (x) { return x.fila === f; })[0]; }
+  var APLICAR = {
+    guardarSobresMov: function (args) { D.sobresMov = (D.sobresMov || []).concat(args[0].map(function (x) { return Object.assign({ fila: 0 }, x); })); },
+    eliminarGrupoSobres: function (args) { D.sobresMov = (D.sobresMov || []).filter(function (x) { return x.grupo !== args[0]; }); },
+    guardarReglaSobre: function () { /* solo afecta correos futuros */ },
+    guardarReparto: function (args) {
+      D.sobres.forEach(function (s) {
+        var x = (args[0] || []).filter(function (y) { return y.nombre === s.nombre; })[0];
+        if (x && !s.asignadoAuto) s.asignado = x.monto;
+        s.ajuste = s.nombre === args[1];
+      });
+    },
+    guardarMovimiento: function (args, it) {
+      var m = args[0];
+      var datos = { fecha: m.fecha, comercio: m.comercio, lugar: m.lugar, monto: m.monto, moneda: m.moneda, tipo: m.tipo, cuenta: m.cuenta,
+        categoria: m.categoria, sobre: m.sobre, origen: m.origen, autorizacion: m.autorizacion, nota: m.nota };
+      if (m.fila) { var o = movF(m.fila); if (o) Object.assign(o, datos); }
+      else if (!movF(it.temp)) D.movimientos.push(Object.assign({ fila: it.temp, subcuenta: '', viaje: '' }, datos));
+    },
+    marcarMovimiento: function (args) { var o = movF(args[0]); if (o) o[args[1] === 'Subcuenta' ? 'subcuenta' : 'viaje'] = args[2]; },
+    guardarAbonoTC: function (args, it) {
+      var x = args[0];
+      var t = D.tasaCero.filter(function (z) { return z.descripcion === x.compra && (!x.tarjeta || z.tarjeta === x.tarjeta); })[0];
+      if (!t) return;
+      t.abonos = t.abonos || [];
+      var datos = { fecha: x.fecha, compra: x.compra, tarjeta: x.tarjeta, monto: x.monto, moneda: x.moneda, origen: x.origen, gasto: x.gasto !== false, movimiento: x.movimiento || null, nota: x.nota };
+      if (x.fila) { var ab = t.abonos.filter(function (z) { return z.fila === x.fila; })[0]; if (ab) Object.assign(ab, datos); }
+      else if (!t.abonos.some(function (z) { return z.fila === it.temp; })) t.abonos.push(Object.assign({ fila: it.temp }, datos));
+    }
+  };
+  function guardarCola() { guardar('mf-cola', JSON.stringify(cola)); actualizarBadges(); }
+  /** Aplica en el teléfono y deja en la cola para Google. desc = lo que se ve en "Por enviar". */
+  function encolar(accion, args, desc) {
+    var it = { id: grupoNuevo(), accion: accion, args: args, desc: desc || '', creado: Date.now(), temp: -(Date.now() % 1e9) - Math.floor(Math.random() * 1000) };
+    cola.push(it); guardarCola();
+    if (APLICAR[accion] && D) { try { APLICAR[accion](args, it); } catch (e) { /* nada */ } guardarCache(JSON.stringify(D)); }
+    setTimeout(enviarCola, 0);
+    return it;
+  }
+  function reaplicarCola() { cola.forEach(function (it) { if (APLICAR[it.accion]) { try { APLICAR[it.accion](it.args, it); } catch (e) { /* nada */ } } }); }
+  function enviarCola() {
+    if (enviando || !cola.length || !conexion().url) return;
+    if (navigator.onLine === false) { ultimoErrorCola = 'Sin internet.'; actualizarBadges(); return; }
+    enviando = true;
+    var it = cola[0];
+    llamar(it.accion, it.args).then(function () {
+      cola.shift(); guardarCola(); enviando = false; envios++;
+      ultimoErrorCola = ''; guardar('mf-cola-error', null);
+      if (cola.length) enviarCola(); else cargar();
+    }, function (e) {
+      enviando = false;
+      var msg = e && e.message ? e.message : String(e);
+      if (e && e.red) { ultimoErrorCola = msg; guardar('mf-cola-error', msg); actualizarBadges(); return; }
+      if (msg.indexOf('PIN_REQUERIDO') >= 0) { token = null; guardar('mf-ses', null, sessionStorage); bloquear(); return; }
+      if (msg.indexOf('CLAVE_INVALIDA') >= 0) { mostrarConexion('La clave ya no es válida. Escribí la clave actual.'); return; }
+      // Google lo rechazó: se quita de la cola y la recarga lo deshace en la pantalla
+      cola.shift(); guardarCola(); envios++;
+      toast('⚠️ No se guardó «' + it.desc + '»: ' + msg.replace(/ Recarg.*$/, '') + ' Se deshizo.', 8000);
+      if (cola.length) enviarCola(); else cargar();
+    });
+  }
+  window.addEventListener('online', function () { enviarCola(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') enviarCola(); });
+  setInterval(enviarCola, 30000);
+  function badgeCola() { return '<span class="badge-cola"' + (cola.length ? '' : ' hidden') + ' onclick="event.stopPropagation();App.formCola()">' + cola.length + '</span>'; }
+  function actualizarBadges() {
+    document.querySelectorAll('.badge-cola').forEach(function (b) { b.textContent = cola.length; b.hidden = !cola.length; });
+    var lista = $('cola-lista'); if (lista && $('velo').classList.contains('abierto')) formCola();
+  }
+  function hace(t) { var s = Math.round((Date.now() - t) / 1000); return s < 60 ? 'hace un momento' : s < 3600 ? 'hace ' + Math.round(s / 60) + ' min' : 'hace ' + Math.round(s / 3600) + ' h'; }
+  function formCola() {
+    abrir('<h2>' + (cola.length ? 'Por enviar a Google (' + cola.length + ')' : 'Todo está en Google ✓') + '</h2>' +
+      '<div class="suave chico" id="cola-lista">' + (cola.length ? 'Ya están aplicados en el teléfono. Se envían solos cuando haya internet.' : 'No queda nada pendiente.') + '</div>' +
+      (cola.length ? '<div class="caja sinpad" style="margin-top:10px;background:var(--fondo)">' + cola.map(function (it) {
+        return '<div class="item" style="cursor:default"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(it.desc || it.accion) + '</span><span class="det" style="display:block">' + hace(it.creado) + '</span></span></div>';
+      }).join('') + '</div>' + (ultimoErrorCola ? '<div class="suave chico" style="margin-top:8px">⚠️ Último intento: ' + esc(ultimoErrorCola) + '</div>' : '') : '') +
+      '<div class="acciones">' + (cola.length ? '<button class="btn" onclick="App.reintentarCola()">Reintentar ahora</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  /** Cierra el formulario y muestra el resultado al instante (lo de la cola ya está aplicado). */
+  function hecho(msg) { cerrar(); toast(msg); if (D) pintar(); }
+
   function srv(fn, args, ok, boton, mal) {
     ocupar(boton);
     llamar(fn, args).then(function (x) { liberar(boton, true); ok(x); }, function (e) {
@@ -164,19 +249,23 @@ var App = (function () {
   function leerCache() { try { var t = localStorage.getItem('mf-cache'); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
   function guardarCache(json) { try { localStorage.setItem('mf-cache', json); } catch (e) { /* sin espacio: no pasa nada */ } }
   var pintarPendiente = false;
-  function sincronizando(on) { if (on) document.body.classList.add('sinc'); else if (!enCurso) document.body.classList.remove('sinc'); }
+  function sincronizando() { /* v1.9: la descarga es silenciosa */ }
   function escribiendo() { var e = document.activeElement; return e && /INPUT|SELECT|TEXTAREA/.test(e.tagName) && !$('panel').contains(e); }
   function cargar(cb) {
     sincronizando(true);
+    var n0 = envios;
     srv('obtenerDatos', [], function (json) {
+      if (n0 !== envios && D) { if (cb) cb(); return; }   // llegó algo a Google mientras tanto: viene otra recarga más fresca
       D = JSON.parse(json);
       hoy = new Date(D.hoy);
-      guardarCache(json);
+      reaplicarCola();   // lo que todavía no llegó a Google se sigue viendo
+      guardarCache(JSON.stringify(D));
       if (D.ajustes) { AJ = D.ajustes; pinActivo = AJ.pinActivo; guardar('mf-aj', JSON.stringify(AJ)); }
       sincronizando(false);
       $('cargando').style.display = 'none';
       if (escribiendo()) pintarPendiente = true; else pintar();   // no borrar lo que la persona está escribiendo
       if (cb) cb();
+      if (cola.length) enviarCola();
     }, null, function () { sincronizando(false); });
   }
 
@@ -254,7 +343,7 @@ var App = (function () {
     return '<button class="ojo" aria-label="' + (o ? 'Mostrar montos' : 'Ocultar montos') + '" onclick="App.privado(' + (!o) + ')">' + ico(o ? 'ojoNo' : 'ojo') + '</button>';
   }
   function pInicio(res, sob) {
-    var h = cabMes('Resumen', '<button class="btn-icono" aria-label="Configuración" onclick="App.ir(\'ajustes\')">' + ico('ajustes') + '</button>');
+    var h = cabMes('Resumen', '<button class="btn-icono" style="position:relative" aria-label="Configuración" onclick="App.ir(\'ajustes\')">' + ico('ajustes') + badgeCola() + '</button>');
     h += '<div class="hero"><div style="display:flex;align-items:center;gap:6px"><span class="et" style="font-size:13px;font-weight:600">Gastado este mes</span>' + botonOjo() + '</div>' +
       '<div style="display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap"><div><div class="grande">' + din(res.total.CRC, 'CRC') + '</div><div class="et">en colones</div></div>' +
       '<div><div class="medio">' + din(res.total.USD, 'USD') + '</div><div class="et">en dólares</div></div></div>' +
@@ -368,7 +457,7 @@ var App = (function () {
     return '<button class="tile' + (k === 'agregar' ? ' prox' : '') + '"' + eventos + ' aria-label="' + esc(it[0]) + (fijado ? ' (en Inicio)' : '') + '">' +
       '<span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="b" d="' + it[1] + '"/>' +
       (it[2] ? '<path class="a" d="' + it[2] + '"/>' : '') + '</svg>' + (fijado ? '<span class="pin"></span>' : '') + '</span>' +
-      '<span class="n">' + esc(it[0]) + '</span></button>';
+      (k === 'configuracion' ? badgeCola() : '') + '<span class="n">' + esc(it[0]) + '</span></button>';
   }
   function abrirItem(k) {
     var accion = ITEMS[k][3];
@@ -713,7 +802,8 @@ var App = (function () {
       fecha: desdeInput(val('ab-fecha')), compra: t.descripcion, tarjeta: t.tarjeta, monto: monto, moneda: t.moneda,
       origen: val('ab-origen'), gasto: $('ab-gasto').checked, movimiento: abCtx.movFila || '', nota: val('ab-nota').trim()
     };
-    srv('guardarAbonoTC', [a], function () { listo(e.saldo - monto <= 0.01 ? '🎉 ¡' + t.descripcion + ' quedó pagada!' : '✅ Abono guardado. La cuota se recalculó.'); }, $('ab-ok'));
+    encolar('guardarAbonoTC', [a], 'Abono a ' + t.descripcion + ' · ' + txt(monto, t.moneda));
+    hecho(e.saldo - monto <= 0.01 ? '🎉 ¡' + t.descripcion + ' quedó pagada!' : '✅ Abono guardado. La cuota se recalculó.');
   }
   function borrarAbonoTC() {
     var b = $('ab-borrar');
@@ -1233,6 +1323,7 @@ var App = (function () {
     }).join('');
   }
   function formAsignar(fila) {
+    if (fila < 0) return toast('Se está guardando en Google; en unos segundos lo podés asignar.');
     var m = movPorFila(fila); if (!m) return;
     var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0];
     if (!p) return toast('Este movimiento ya está asignado.');
@@ -1312,11 +1403,10 @@ var App = (function () {
     var lista = filas.map(function (f) { return { fecha: fechaSobre(m), sobre: f.sobre, monto: f.monto, tipo: tipo, movimiento: m.fila, grupo: g, nota: m.comercio || '' }; });
     var recordar = $('as-recordar') && $('as-recordar').checked && lista[0].sobre;
     var b = $('as-ok');
-    srv('guardarSobresMov', [lista], function () {
-      local(lista);
-      if (recordar) srv('guardarReglaSobre', [m.comercio, lista[0].sobre], function () {});
-      listo('✅ Asignado');
-    }, b);
+    var destino = lista.map(function (x) { return x.sobre || 'sin sobre'; }).join(', ');
+    encolar('guardarSobresMov', [lista], 'Asignar ' + (m.comercio || m.tipo) + ' → ' + destino + ' · ' + txt(Math.abs(lista.reduce(function (s, x) { return s + x.monto; }, 0)), m.moneda));
+    if (recordar) encolar('guardarReglaSobre', [m.comercio, lista[0].sobre], 'Recordar ' + m.comercio + ' → ' + lista[0].sobre);
+    hecho('✅ Asignado' + (lista.length === 1 && lista[0].sobre ? ' a ' + lista[0].sobre : ''));
   }
 
   // ---- repartir un ingreso
@@ -1383,11 +1473,10 @@ var App = (function () {
       return { nombre: f.nombre, monto: f.nombre === rep.ajuste ? (s ? s.asignado : 0) : f.monto };
     });
     var ajuste = rep.ajuste;
-    srv('guardarSobresMov', [lista], function () {
-      local(lista);
-      var fin = function () { rep = null; pantalla = 'sobres'; listo('✅ Repartido en ' + lista.length + ' sobres'); };
-      if (guardarSiempre) srv('guardarReparto', [base, ajuste], fin); else fin();
-    }, $('rep-ok'));
+    encolar('guardarSobresMov', [lista], 'Repartir ' + (m.comercio || 'ingreso') + ' en ' + lista.length + ' sobres · ' + txt(rep.monto, rep.moneda));
+    if (guardarSiempre) encolar('guardarReparto', [base, ajuste], 'Guardar reparto de siempre');
+    var n = lista.length; rep = null; pantalla = 'sobres';
+    hecho('✅ Repartido en ' + n + ' sobres');
   }
 
   // ---- mover entre sobres
@@ -1406,8 +1495,8 @@ var App = (function () {
     if (!monto || monto <= 0) return toast('Escribí el monto.');
     var g = grupoNuevo(), f = new Date().toISOString(), nota = val('mv-nota').trim() || ('De ' + de + ' a ' + a);
     var mv = [{ fecha: f, sobre: de, monto: -monto, tipo: 'Mover', grupo: g, nota: nota }, { fecha: f, sobre: a, monto: monto, tipo: 'Mover', grupo: g, nota: nota }];
-    srv('guardarSobresMov', [mv],
-      function () { local(mv); listo('✅ Movido ' + txt(monto, 'CRC') + ' a ' + a); }, $('mv-ok'));
+    encolar('guardarSobresMov', [mv], 'Mover ' + de + ' → ' + a + ' · ' + txt(monto, 'CRC'));
+    hecho('✅ Movido ' + txt(monto, 'CRC') + ' a ' + a);
   }
 
   // ---- limpiar sobres (fin de mes)
@@ -1442,7 +1531,9 @@ var App = (function () {
     if (!lista.length) return toast('Elegí al menos un sobre.');
     lista.push({ fecha: f, sobre: limpiar.destino, monto: Math.round(total * 100) / 100, tipo: 'Limpiar', grupo: g, nota: 'Limpiar sobres (' + (lista.length) + ' sobres)' });
     var dest = limpiar.destino;
-    srv('guardarSobresMov', [lista], function () { local(lista); limpiar = null; pantalla = 'sobres'; listo('✅ ' + txt(total, 'CRC') + ' pasaron a ' + dest); }, $('lp-ok'));
+    encolar('guardarSobresMov', [lista], 'Limpiar sobres → ' + dest + ' · ' + txt(total, 'CRC'));
+    limpiar = null; pantalla = 'sobres';
+    hecho('✅ ' + txt(total, 'CRC') + ' pasaron a ' + dest);
   }
 
   // ---- un sobre (editar y ver su mes)
@@ -1497,8 +1588,9 @@ var App = (function () {
     if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Tocá otra vez'; return; }
     var grupos = {}; (SB().porMov[fila] || []).forEach(function (x) { if (x.grupo) grupos[x.grupo] = 1; });
     var lista = Object.keys(grupos), i = 0;
-    var sig = function () { if (i >= lista.length) return listo('Asignación deshecha. Quedó por asignar.'); srv('eliminarGrupoSobres', [lista[i++]], sig, b); };
-    sig();
+    var mm = movPorFila(fila);
+    lista.forEach(function (g) { encolar('eliminarGrupoSobres', [g], 'Deshacer asignación de ' + ((mm && mm.comercio) || 'movimiento')); });
+    hecho('Asignación deshecha. Quedó por asignar.');
   }
 
   // ------------------------------------------------------------ FONDOS DE INVERSIÓN (v1.7)
@@ -1559,7 +1651,8 @@ var App = (function () {
   function guardarSubcuenta(fila) {
     var m = movPorFila(fila);
     var sc = val('sc-sel');
-    srv('marcarMovimiento', [fila, 'Subcuenta', sc, { monto: m.monto }], function () { m.subcuenta = sc; listo('✅ Asignado a ' + val('sc-sel')); }, $('sc-ok'));
+    encolar('marcarMovimiento', [fila, 'Subcuenta', sc, { monto: m.monto }], 'Subcuenta ' + sc + ' · ' + txt(m.monto, m.moneda));
+    hecho('✅ Asignado a ' + sc);
   }
   function formFondo(i) {
     var f = i === undefined ? null : FD().lista[i];
@@ -1720,10 +1813,8 @@ var App = (function () {
   }
   function marcarViaje(fila, valor, boton) {
     var m = movPorFila(fila);
-    srv('marcarMovimiento', [fila, 'Viaje', valor, { monto: m.monto }], function () {
-      m.viaje = valor;   // se ve al instante; la recarga confirma
-      listo(valor === 'Fuera' ? 'Compra sacada del viaje' : '✅ ' + valor.replace('+', '') + (valor.charAt(0) === '+' ? ' · agregada al viaje' : ''));
-    }, boton);
+    encolar('marcarMovimiento', [fila, 'Viaje', valor, { monto: m.monto }], 'Viaje: ' + (m.comercio || 'compra') + ' · ' + (valor === 'Fuera' ? 'fuera' : valor.replace('+', '')));
+    hecho(valor === 'Fuera' ? 'Compra sacada del viaje' : '✅ ' + valor.replace('+', '') + (valor.charAt(0) === '+' ? ' · agregada al viaje' : ''));
   }
   function formAgregarViaje(fila) {
     var v = viajePorFila(fila);
@@ -1809,10 +1900,15 @@ var App = (function () {
   function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); }
   function cerrar() { $('velo').classList.remove('abierto'); }
   function val(id) { var e = $(id); return e ? e.value : ''; }
-  function listo(msg) { cerrar(); toast(msg); if (D) pintar(); cargar(); }   // se ve al instante; la recarga confirma por detrás
-  function local(lista) { D.sobresMov = (D.sobresMov || []).concat(lista.map(function (x) { return Object.assign({ fila: 0 }, x); })); }
+  function listo(msg) {
+    cerrar(); toast(msg);
+    if (D) { guardarCache(JSON.stringify(D)); pintar(); }   // 1.8.1: la copia del teléfono queda al día en el mismo instante
+    cargar();
+  }   // se ve al instante; la recarga confirma por detrás
+  function local(lista) { D.sobresMov = (D.sobresMov || []).concat(lista.map(function (x) { return Object.assign({ fila: 0 }, x); })); guardarCache(JSON.stringify(D)); }
 
   function formMovimiento(fila) {
+    if (fila && fila < 0) return toast('Se está guardando en Google; en unos segundos lo podés abrir.');
     var m = fila ? D.movimientos.filter(function (x) { return x.fila === fila; })[0] : null;
     m = m || { tipo: 'Gasto', moneda: 'CRC', fecha: new Date().toISOString(), origen: 'Manual' };
     var cuentas = D.cuentas.filter(function (c) { return c.activa || c.nombre === m.cuenta; }).map(function (c) { return c.nombre; });
@@ -1854,11 +1950,14 @@ var App = (function () {
       origen: orig ? orig.origen : 'Manual', autorizacion: orig ? orig.autorizacion : '',
       recordarRegla: $('f-regla').checked
     };
-    srv('guardarMovimiento', [m], function () { listo('✅ Movimiento guardado'); }, $('f-guardar'));
+    encolar('guardarMovimiento', [m], (fila ? 'Editar ' : 'Nuevo: ') + (m.comercio || m.tipo) + ' · ' + txt(monto, m.moneda));
+    hecho('✅ Movimiento guardado');
   }
   function borrarMov(fila) {
     var b = $('f-borrar');
     if (!b.dataset.ok) { b.dataset.ok = '1'; b.textContent = 'Tocá otra vez para confirmar'; return; }
+    if (cola.length) { enviarCola(); return toast('Primero se terminan de enviar ' + cola.length + ' cambio' + (cola.length === 1 ? '' : 's') + ' a Google. Probá en unos segundos.'); }
+    if (fila < 0) return toast('Se está guardando en Google; en unos segundos lo podés borrar.');
     var orig = D.movimientos.filter(function (x) { return x.fila === fila; })[0];
     srv('eliminarMovimiento', [fila, { monto: orig.monto }], function () { listo('Movimiento eliminado'); }, b);
   }
@@ -1982,6 +2081,9 @@ var App = (function () {
       opcion('ojo', 'Ocultar montos', 'Muestra ****** en vez de las cantidades. También con el ojo 👁 de Inicio', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')) + '</div>';
 
     var prep = guardado('mf-preparado', '');
+    h += '<div class="seccion">Sincronización</div><div class="caja sinpad">' +
+      opcion('recargar', cola.length ? cola.length + ' cambio' + (cola.length === 1 ? '' : 's') + ' por enviar a Google' : 'Todo está en Google ✓',
+        cola.length ? 'Ya se ven en el teléfono; se envían solos' + (ultimoErrorCola ? ' · último intento: ' + esc(ultimoErrorCola) : '') : 'Lo que guardás se ve al instante y se envía por detrás', '', 'App.formCola()') + '</div>';
     if (D.sobresDesde) {
       var esp = D.sobreEspecial || {}, nom = function (x) { return x ? esc(x) : 'ninguno'; };
       h += '<div class="seccion">Sobres</div><div class="caja sinpad">' +
@@ -2362,6 +2464,7 @@ var App = (function () {
     repGuardarCheck: function (v) { rep.guardar = v; }, formMover: formMover, guardarMover: guardarMover,
     limpiarSel: function (n, v) { limpiar.sel[n] = v; pintar(); }, limpiarDestino: function (n) { limpiar.destino = n; pintar(); },
     guardarLimpiar: guardarLimpiar, deshacerSobres: deshacerSobres, formSobresDesde: formSobresDesde, guardarSobresDesde: guardarSobresDesde, formSobresEspeciales: formSobresEspeciales, guardarSobresEspeciales: guardarSobresEspeciales,
+    formCola: formCola, reintentarCola: function () { ultimoErrorCola = ''; toast('Enviando…'); enviarCola(); setTimeout(actualizarBadges, 300); },
     formSubcuenta: formSubcuenta, guardarSubcuenta: guardarSubcuenta, formFondo: formFondo, guardarFondo: guardarFondo,
     formActualizarFondo: formActualizarFondo, vistaFondo: vistaFondo, guardarActualizarFondo: guardarActualizarFondo,
     verViaje: verViaje, formViaje: formViaje, guardarViaje: guardarViaje, borrarViaje: borrarViaje, formLimiteViaje: formLimiteViaje,

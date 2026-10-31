@@ -351,3 +351,10 @@ body.sinc .progreso { opacity: 1; animation: barrer 1.1s ease-in-out infinite; }
 .onda { position: fixed; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--acento); opacity: .45; pointer-events: none; z-index: 70; animation: onda .45s ease-out forwards; }
 @keyframes onda { to { transform: scale(7); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .onda { display: none; } }
+
+/* v1.9 · sin barras; número de cambios por enviar */
+.progreso, .ocupado-aviso { display: none !important; }
+.badge-cola { position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; background: var(--acento); color: #121417;
+  font-size: 11px; font-weight: 800; line-height: 19px; text-align: center; border: 2px solid var(--fondo); cursor: pointer; z-index: 2; }
+.badge-cola[hidden] { display: none; }
+.tile .badge-cola { top: -2px; right: calc(50% - 36px); }
