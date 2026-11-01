@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.3.1';
+  var VERSION_WEB = '2.3.2';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -1361,7 +1361,8 @@ var App = (function () {
     var nombres = [];
     filas.forEach(function (x) { if (nombres.indexOf(x.sobre) < 0) nombres.push(x.sobre); });
     if (!nombres.length && m.sobre) nombres = [m.sobre];
-    if (!nombres.length) return (sb.cubierto[m.fila] ? '<span class="et-sobre ok">✉ Cubierto</span>' : '');
+    if (!nombres.length) return sb.cubierto[m.fila] ? '<span class="et-sobre ok">✉ Cubierto</span>' :
+      (sb.porMov[m.fila] || []).length ? '<span class="et-sobre otro">💳 Sin sobre</span>' : '';
     return '<span class="et-sobre ok">✉ ' + esc(nombres[0]) + (nombres.length > 1 ? ' +' + (nombres.length - 1) : '') + '</span>';
   }
   function itemMov(m) {
@@ -1708,9 +1709,11 @@ var App = (function () {
     if (m.tipo === 'Pago de tarjeta') {
       var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0);
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿DE QUÉ SOBRES SALIÓ?</div>' +
-        (sobreTarjetas() ? '<div class="chips" style="margin:6px 0"><button class="chip" onclick="App.asigTodo()">Todo de ' + esc(sobreTarjetas()) + '</button></div>' : '') +
+        '<div class="chips" style="margin:6px 0">' + (sobreTarjetas() ? '<button class="chip" onclick="App.asigTodo()">Todo de ' + esc(sobreTarjetas()) + '</button>' : '') +
+        '<button class="chip" onclick="App.asigTodo(\'\')">💳 Todo sin sobre</button></div>' +
         asig.filas.map(function (f, i) {
-          return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(m.moneda, f.sobre, true) + '</select>' +
+          return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(m.moneda, f.sobre, true) +
+            '<option value=""' + (f.sobre === '' ? ' selected' : '') + '>💳 Sin sobre</option></select>' +
             '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '" oninput="App.asigFila(' + i + ',\'monto\',this.value)">' +
             (asig.filas.length > 1 ? '<button class="x" aria-label="Quitar" onclick="App.asigQuitar(' + i + ')">×</button>' : '') + '</div>';
         }).join('') +
@@ -1744,7 +1747,7 @@ var App = (function () {
     formatearMontos();
   }
   function asigModo(v) { asig.modo = v; pintarAsignar(); }
-  function asigTodo() { asig.filas = [{ sobre: sobreTarjetas(), monto: asig.falta }]; pintarAsignar(); }
+  function asigTodo(s) { asig.filas = [{ sobre: s === '' ? '' : sobreTarjetas(), monto: asig.falta }]; pintarAsignar(); }
   function asigFila(i, k, v) { asig.filas[i][k] = v; if (k === 'sobre') return; var m = movPorFila(asig.fila); var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0); var e = $('as-falta'); if (e) { var ok = Math.abs(asig.falta - suma) < 0.01; e.textContent = txt(asig.falta - suma, m.moneda) + (ok ? ' ✓' : ''); e.style.color = ok ? 'var(--positivo)' : 'var(--acento)'; } }
   function asigAgregar() {
     var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0);
@@ -1955,7 +1958,8 @@ var App = (function () {
     if (m.fecha && new Date(m.fecha) < new Date(D.sobresDesde)) return '';
     var sb = SB(), filas = sb.porMov[m.fila] || [], pend = sb.pendientes.filter(function (p) { return p.mov.fila === m.fila; })[0];
     var h = '<div class="caja" style="margin-top:14px;background:var(--fondo);gap:6px"><b style="font-size:14px">Sobres</b>';
-    if (filas.length) h += filas.map(function (x) { return '<div class="fila chico"><span>' + esc(x.sobre || 'Sin sobre') + '</span><span>' + (x.monto >= 0 ? '+' : '−') + esc(txt(Math.abs(x.monto), m.moneda)) + '</span></div>'; }).join('');
+    if (sb.cubierto[m.fila]) h += '<div class="fila chico"><span>✓ Cubierto con lo reservado de tus compras</span><b class="verde">' + esc(txt(sb.cubierto[m.fila], m.moneda)) + '</b></div>';
+    if (filas.length) h += filas.map(function (x) { return '<div class="fila chico"><span>' + esc(x.sobre || '💳 Sin sobre') + '</span><span>' + (x.monto >= 0 ? '+' : '−') + esc(txt(Math.abs(x.monto), m.moneda)) + '</span></div>'; }).join('');
     else if (m.sobre && !pend) h += '<div class="fila chico"><span>' + esc(m.sobre) + ' (por regla)</span><span>' + esc(txt(m.monto, m.moneda)) + '</span></div>';
     if (pend) h += '<button class="btn sec chico" style="justify-content:center" onclick="App.formAsignar(' + m.fila + ')">' + (filas.length ? 'Asignar lo que falta (' + esc(txt(pend.falta, m.moneda)) + ')' : 'Asignar a sobres') + '</button>';
     if (filas.length) h += '<button class="btn sec chico peligro" style="justify-content:center" id="sb-deshacer" onclick="App.deshacerSobres(' + m.fila + ')">Deshacer la asignación</button>';
