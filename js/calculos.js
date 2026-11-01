@@ -511,6 +511,37 @@ var Calc = (function () {
     return !/^total(es)?\b/i.test(n) && !/^los movimientos/i.test(n) && !/no se descuentan/i.test(n) && !/^nota\b/i.test(n);
   }
 
+  /**
+   * v2.5: fechas de pago del salario. cfg = { frecuencia: 'bisemanal'|'semanal'|'quincenal'|'mensual', fecha (un pago conocido, ISO),
+   * dias: [d1, d2] (quincenal), dia (mensual), finde: 'antes'|'despues'|'igual' }. Devuelve fechas (00:00) entre desde y hasta.
+   */
+  function fechasSalario(cfg, desde, hasta) {
+    var loc = function (x) { var s = String(x); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) : soloFecha(new Date(x)); };
+    var out = [], d0 = loc(desde), d1 = loc(hasta);
+    if (!cfg || !cfg.frecuencia) return out;
+    var ajustar = function (f) {
+      var g = new Date(f.getFullYear(), f.getMonth(), f.getDate()), dw = g.getDay();
+      if (cfg.finde === 'antes') { if (dw === 6) g.setDate(g.getDate() - 1); else if (dw === 0) g.setDate(g.getDate() - 2); }
+      else if (cfg.finde === 'despues') { if (dw === 6) g.setDate(g.getDate() + 2); else if (dw === 0) g.setDate(g.getDate() + 1); }
+      return g;
+    };
+    var meter = function (f) { var g = ajustar(f); if (g >= d0 && g <= d1 && !out.some(function (x) { return +x === +g; })) out.push(g); };
+    if (cfg.frecuencia === 'bisemanal' || cfg.frecuencia === 'semanal') {
+      if (!cfg.fecha) return out;
+      var paso = cfg.frecuencia === 'semanal' ? 7 : 14, a = loc(cfg.fecha);
+      var k = Math.floor((d0 - a) / 86400000 / paso) - 1, f = new Date(a.getFullYear(), a.getMonth(), a.getDate() + k * paso);
+      for (var i = 0; i < 400 && f <= new Date(d1.getTime() + 3 * 86400000); i++) { meter(f); f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + paso); }
+    } else {
+      var dias = cfg.frecuencia === 'quincenal' ? (cfg.dias || []) : [cfg.dia];
+      dias = dias.map(Number).filter(function (x) { return x >= 1 && x <= 31; });
+      for (var y = d0.getFullYear(), m = d0.getMonth() - 1; new Date(y, m, 1) <= new Date(d1.getFullYear(), d1.getMonth() + 1, 1); m++) {
+        dias.forEach(function (dd) { var ult = new Date(y, m + 1, 0).getDate(); meter(new Date(y, m, Math.min(dd, ult))); });
+      }
+    }
+    return out.sort(function (a, b) { return a - b; });
+  }
+  function esSalario(m) { return m && m.tipo === 'Ingreso' && /salario|planilla|aguinaldo/i.test((m.comercio || '') + ' ' + (m.categoria || '')); }
+
   function pct(n, dec) { return n === null || n === undefined ? '—' : (n * 100).toFixed(dec === undefined ? 2 : dec).replace('.', ',') + '%'; }
 
   return {
@@ -519,7 +550,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

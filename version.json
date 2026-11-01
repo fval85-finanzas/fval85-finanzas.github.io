@@ -1,0 +1,26 @@
+{
+ "web": "2.5.0",
+ "servidor": "2.5.0",
+ "sha256": "ec2f873030b3b72aed8fc164d53dbcca3863312ed8780e86b99bd34e934c436e",
+ "novedades": "Super y Otros, avisos en la barra, salario bisemanal, editar Inicio, actualizar con un botón.",
+ "manifiesto": {
+  "timeZone": "America/Costa_Rica",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+   "https://www.googleapis.com/auth/spreadsheets",
+   "https://mail.google.com/",
+   "https://www.googleapis.com/auth/script.send_mail",
+   "https://www.googleapis.com/auth/script.external_request",
+   "https://www.googleapis.com/auth/script.scriptapp",
+   "https://www.googleapis.com/auth/userinfo.email",
+   "https://www.googleapis.com/auth/script.projects",
+   "https://www.googleapis.com/auth/script.deployments"
+  ],
+  "webapp": {
+   "executeAs": "USER_DEPLOYING",
+   "access": "ANYONE_ANONYMOUS"
+  }
+ }
+}

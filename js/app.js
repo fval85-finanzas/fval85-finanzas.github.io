@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.4.1';
+  var VERSION_WEB = '2.5.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -135,6 +135,7 @@ var App = (function () {
 
   /** Botón "ocupado": círculo girando y texto mientras habla con Google (no se puede tocar dos veces). */
   function ocupar(b) {
+    if (b && b.classList.contains('opcion') && b.closest('#p-ajustes')) { if (b.classList.contains('trab')) return; b.classList.remove('listo-ok', 'listo-mal'); b.classList.add('trab', 'ocupado'); b.disabled = true; return; }   // v2.5: aro alrededor del ícono
     if (!b || b.classList.contains('ocupado')) return;
     b.disabled = true; b.classList.add('ocupado');
     b.dataset.html = b.innerHTML;
@@ -142,6 +143,7 @@ var App = (function () {
     b.innerHTML = '<span class="giro"></span>' + (grande ? 'Guardando…' : '');
   }
   function liberar(b, bien) {
+    if (b && b.classList.contains('opcion') && b.closest('#p-ajustes')) { b.classList.remove('trab', 'ocupado'); b.disabled = false; b.classList.add(bien ? 'listo-ok' : 'listo-mal'); setTimeout(function () { b.classList.remove('listo-ok', 'listo-mal'); }, 1800); return; }
     if (!b || !b.classList.contains('ocupado')) return;
     b.classList.remove('ocupado'); b.disabled = false;
     if (b.dataset.html !== undefined) b.innerHTML = b.dataset.html;
@@ -156,6 +158,7 @@ var App = (function () {
     guardarSobresMov: function (args) { D.sobresMov = (D.sobresMov || []).concat(args[0].map(function (x) { return Object.assign({ fila: 0 }, x); })); },
     eliminarGrupoSobres: function (args) { D.sobresMov = (D.sobresMov || []).filter(function (x) { return x.grupo !== args[0]; }); },
     guardarReglaSobre: function () { /* solo afecta correos futuros */ },
+    guardarPreferencias: function (args) { if (D && D.ajustes) D.ajustes.prefs = Object.assign({}, D.ajustes.prefs || {}, args[0]); if (AJ && AJ !== D.ajustes) AJ.prefs = Object.assign({}, AJ.prefs || {}, args[0]); },
     guardarReparto: function (args) {
       D.sobres.forEach(function (s) {
         var x = (args[0] || []).filter(function (y) { return y.nombre === s.nombre; })[0];
@@ -272,6 +275,10 @@ var App = (function () {
       if (cb) cb();
       if (cola.length) enviarCola();
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
+      intentarRepartoSalario();
+      var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
+      if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); if (irA === 'revisar') ir('movimientos', 'revisar'); else ir(irA); }
+      if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
     }, null, function () { sincronizando(false); });
   }
 
@@ -303,6 +310,8 @@ var App = (function () {
     irDirecto(p, chip);
   }
   function irDirecto(p, chip) {
+    if (p !== 'lista') pantallaEncendida(false);
+    if (editIni && p !== 'inicio') { guardar('mf-inicio', JSON.stringify(editIni)); editIni = null; }   // v2.5: salir de editar Inicio guarda
     if (PRINCIPALES.indexOf(pantalla) >= 0 && PRINCIPALES.indexOf(p) < 0) origen = pantalla;
     if (p === 'calculadora') { calcVista = 'datos'; if (pantalla !== 'calculadora' && !calcConservar) limpiarCalc(); calcConservar = false; }
     if (p !== pantalla) { plegAbierto = {}; if (p === 'tarjetas') tarjetaAbierta = null; }
@@ -349,7 +358,7 @@ var App = (function () {
     document.querySelectorAll('.pantalla').forEach(function (s) { s.classList.toggle('activa', s.id === 'p-' + pantalla); });
     ({
       inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
-      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
+      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
     formatearMontos();
   }
@@ -374,12 +383,16 @@ var App = (function () {
     ['accesos', 'Accesos rápidos', 'Fila de íconos (incluye Más)', true],
     ['ultimos', 'Últimos movimientos', 'Ancho', true]
   ];
+  // v2.5: tamaños por widget (Chico = media fila, Mediano = fila entera, Grande = fila entera y más grande)
+  var TAMANOS = { queda: 'SML', sobreBajo: 'SML', proxPago: 'SML', tasaCero: 'SML', fondos: 'SML', prestamo: 'SML', medeben: 'SML', viaje: 'M', sobres: 'ML', accesos: 'M', ultimos: 'ML' };
+  var TAM_INICIAL = { queda: 'L', sobreBajo: 'S', proxPago: 'S', tasaCero: 'S', fondos: 'S', prestamo: 'S', medeben: 'S' };
+  var NOM_TAM = { S: 'Chico', M: 'Mediano', L: 'Grande' };
   function widgetsInicio() {
     var guardados = leerJSONSeguro('mf-inicio');
     var base = WIDGETS.map(function (w) { return { k: w[0], on: w[3] }; });
-    if (!Array.isArray(guardados)) return base;
-    var lista = guardados.filter(function (x) { return x && WIDGETS.some(function (w) { return w[0] === x.k; }); });
-    base.forEach(function (b) { if (!lista.some(function (x) { return x.k === b.k; })) lista.push(b); });   // widgets nuevos de versiones futuras
+    var lista = !Array.isArray(guardados) ? base : guardados.filter(function (x) { return x && WIDGETS.some(function (w) { return w[0] === x.k; }); });
+    if (Array.isArray(guardados)) base.forEach(function (b) { if (!lista.some(function (x) { return x.k === b.k; })) lista.push(b); });   // widgets nuevos de versiones futuras
+    lista.forEach(function (w) { var ok = TAMANOS[w.k] || 'M'; if (!w.t || ok.indexOf(w.t) < 0) w.t = TAM_INICIAL[w.k] && ok.indexOf(TAM_INICIAL[w.k]) >= 0 ? TAM_INICIAL[w.k] : ok.charAt(0) === 'S' && ok.length === 1 ? 'S' : (ok.indexOf('M') >= 0 ? 'M' : ok.charAt(0)); });
     return lista;
   }
   function proximosPagos() {
@@ -396,7 +409,7 @@ var App = (function () {
   function wChico(onclick, titulo, nombre, valor, cls) {
     return '<button class="widget" onclick="' + onclick + '"><span class="w-t">' + titulo + '</span><span class="w-n">' + nombre + '</span><span class="w-v ' + (cls || '') + '">' + valor + '</span></button>';
   }
-  function widget(k, res) {
+  function widget(k, res, tam) {
     if (k === 'queda') {
       var ing = res.ingresos.CRC, q = res.queda.CRC, pct = ing ? res.total.CRC / ing : 0;
       return '<div class="widget ancho grande-w"><div class="fila"><span class="w-t">' + (ing ? 'Te quedan este mes' : 'Gastado este mes') + '</span>' + botonOjo() + '</div>' +
@@ -440,24 +453,26 @@ var App = (function () {
     }
     if (k === 'sobres') {
       if (sinServidorSobres()) return '';
-      var sbI = SB(), lst = sbI.lista.filter(function (s) { return s.moneda === 'CRC'; }).sort(function (a, b) { return (b.pct || 0) - (a.pct || 0); }).slice(0, 4);
+      var sbI = SB(), lst = sbI.lista.filter(function (s) { return s.moneda === 'CRC'; }).sort(function (a, b) { return (b.pct || 0) - (a.pct || 0); }).slice(0, tam === 'L' ? 8 : 4);
       if (!lst.length) return '';
       return '<div class="caja ancho"><div class="fila"><h3>Sobres · ' + din(sbI.total.CRC, 'CRC') + '</h3><a href="#" onclick="App.ir(\'sobres\');return false" class="enlace">Ver todos</a></div>' + lst.map(function (s) {
         return '<div style="display:flex;flex-direction:column;gap:4px"><div class="fila" style="font-size:14px"><span>' + esc(nomSobre(s.nombre)) + '</span><span class="fuerte' + (s.saldo < 0 ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></div>' + barra(s.pct, s.pct >= 0.85) + '</div>';
       }).join('') + '</div>';
     }
     if (k === 'accesos') {
-      return '<div class="ancho"><div class="accesos fila-accesos">' + accesos().slice(0, 4).concat(['mas']).map(function (x) { return tile(x, false); }).join('') + '</div></div>';
+      return '<div class="ancho"><div class="accesos fila-accesos">' + accesos().slice(0, MAX_ACCESOS).concat(['mas']).map(function (x) {
+        return editIni && x !== 'mas' ? '<span class="tile-ed">' + tile(x, false) + '<button class="wi-x" aria-label="Quitar ' + esc(ITEMS[x][0]) + '" onclick="App.iniQuitarAcceso(\'' + x + '\')">×</button></span>' : tile(x, false);
+      }).join('') + '</div></div>';
     }
     if (k === 'ultimos') {
       if (!res.movimientos.length) return '<div class="caja vacio ancho">No hay movimientos en ' + nombreMes(mes).toLowerCase() + '.<br>Tocá el + amarillo para agregar uno.</div>';
       return '<div class="caja sinpad ancho"><div class="fila" style="padding:14px 16px 4px"><h3>Últimos movimientos</h3><a href="#" onclick="App.ir(\'movimientos\');return false" class="enlace">Ver todos</a></div>' +
-        res.movimientos.slice(0, 4).map(itemMov).join('') + '</div>';
+        res.movimientos.slice(0, tam === 'L' ? 8 : 4).map(itemMov).join('') + '</div>';
     }
     return '';
   }
   function avisosInicio(res) {
-    var h = '';
+    var h = tarjetasVersion() + tarjetaSalario();
     var linea = function (icono, texto, accion, alerta) {
       return '<button class="linea-aviso' + (alerta ? ' alerta' : '') + '" onclick="' + accion + '"><span class="li-ic">' + icono + '</span><span class="li-t">' + texto + '</span><span class="enlace">Ver ›</span></button>';
     };
@@ -467,17 +482,92 @@ var App = (function () {
     return h ? '<div class="ancho avisos">' + h + '</div>' : '';
   }
   function pInicio(res) {
-    var h = cabMes('Resumen');
-    var ws = widgetsInicio().filter(function (w) { return w.on; });
+    var h = cabMes('Resumen'), ed = !!editIni;
+    var ws = (editIni || widgetsInicio()).filter(function (w) { return w.on; });
     var cuerpo = '', avisosPuestos = false;
+    var avisos = function () { var a = avisosInicio(res); return a ? '<div class="wi wi-M wi-fijo">' + a + '</div>' : ''; };
     ws.forEach(function (w) {
-      if (!avisosPuestos && (w.k === 'accesos' || w.k === 'ultimos' || w.k === 'sobres')) { cuerpo += avisosInicio(res); avisosPuestos = true; }
-      cuerpo += widget(w.k, res);
+      if (!avisosPuestos && (w.k === 'accesos' || w.k === 'ultimos' || w.k === 'sobres')) { cuerpo += avisos(); avisosPuestos = true; }
+      var html = widget(w.k, res, w.t), def = WIDGETS.filter(function (x) { return x[0] === w.k; })[0];
+      if (!html && !ed) return;
+      if (!html) html = '<div class="widget wi-vacio"><span class="w-t">' + esc(def[1]) + '</span><span class="w-v chico-v suave">' + esc(def[2]) + '</span></div>';
+      var tams = TAMANOS[w.k] || 'M';
+      cuerpo += '<div class="wi wi-' + w.t + '" data-k="' + w.k + '">' + html +
+        (ed ? '<div class="wi-capa"></div><button class="wi-x" aria-label="Quitar ' + esc(def[1]) + '" onclick="App.iniQuitar(\'' + w.k + '\')">×</button>' +
+          '<button class="wi-mover" aria-label="Mover" data-k="' + w.k + '">⠿</button>' +
+          (tams.length > 1 ? '<button class="wi-tam" onclick="App.iniTam(\'' + w.k + '\')">' + NOM_TAM[w.t] + ' ⤢</button>' : '') : '') + '</div>';
     });
-    if (!avisosPuestos) cuerpo += avisosInicio(res);
-    h += '<div class="widgets">' + cuerpo + '</div>';
+    if (!avisosPuestos) cuerpo += avisos();
+    h += (ed ? '<div class="ayuda-edit">Arrastrá ⠿ para mover · × para quitar · Tamaño para cambiar</div>' : '') + '<div class="widgets' + (ed ? ' editando' : '') + '">' + cuerpo + '</div>';
+    h += ed ? '<div class="barra-edit"><button onclick="App.iniAgregarW()">＋ Widget</button><button onclick="App.iniAgregarA()">＋ Acceso</button><button class="ok" onclick="App.iniListo()">Listo</button></div><div style="height:90px"></div>'
+      : '<button class="enlace-editar" onclick="App.editarInicio()">✏ Editar Inicio</button>';
     $('p-inicio').innerHTML = h;
+    if (ed) activarArrastre();
   }
+  // ---- v2.5: editar Inicio ahí mismo (mantener presionado)
+  var editIni = null, presIni = null, suprimirClick = false;
+  function editarInicio() { if (pantalla !== 'inicio') ir('inicio'); editIni = widgetsInicio(); pintar(); vibrar(); }
+  function vibrar() { if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) { /* nada */ } } }
+  function iniQuitar(k) { editIni.forEach(function (w) { if (w.k === k) w.on = false; }); pintar(); }
+  function iniTam(k) { editIni.forEach(function (w) { if (w.k === k) { var o = TAMANOS[k] || 'M'; w.t = o.charAt((o.indexOf(w.t) + 1) % o.length); } }); pintar(); }
+  function iniListo() { guardar('mf-inicio', JSON.stringify(editIni)); editIni = null; pintar(); toast('✅ Inicio guardado'); }
+  function iniAgregarW() {
+    var fuera = editIni.filter(function (w) { return !w.on; });
+    abrir('<h2>Agregar widget</h2>' + (fuera.length ? '<div class="caja sinpad">' + fuera.map(function (w) {
+      var d = WIDGETS.filter(function (x) { return x[0] === w.k; })[0];
+      return '<button class="opcion" onclick="App.iniActivar(\'' + w.k + '\')"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(d[1]) + '</span><span class="det" style="display:block">' + esc(d[2]) + '</span></span><b class="acento" style="font-size:22px">＋</b></button>';
+    }).join('') + '</div>' : '<div class="caja vacio">Ya están todos en Inicio.</div>') +
+      '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button><button class="btn sec" onclick="App.iniFabrica()">Volver a lo de fábrica</button></div>');
+  }
+  function iniActivar(k) {
+    var i = -1; editIni.forEach(function (w, j) { if (w.k === k) i = j; });
+    var w = editIni.splice(i, 1)[0]; w.on = true;
+    var u = -1; editIni.forEach(function (x, j) { if (x.k === 'ultimos' && x.on) u = j; });
+    editIni.splice(u >= 0 ? u : editIni.length, 0, w);
+    cerrar(); pintar(); toast('Agregado: ' + WIDGETS.filter(function (x) { return x[0] === k; })[0][1]);
+  }
+  function iniFabrica() { guardar('mf-inicio', null); editIni = widgetsInicio(); cerrar(); pintar(); toast('Inicio como venía de fábrica'); }
+  function iniAgregarA() { guardar('mf-inicio', JSON.stringify(editIni)); editIni = null; ir('mas'); toast('Mantené presionado un ícono para agregarlo a Inicio', 4000); }
+  function activarArrastre() {
+    Array.prototype.forEach.call(document.querySelectorAll('#p-inicio .wi-mover'), function (h) {
+      h.addEventListener('pointerdown', function (e) {
+        e.preventDefault(); var nodo = h.closest('.wi'), cont = nodo.parentNode;
+        nodo.classList.add('arrastrando'); try { h.setPointerCapture(e.pointerId); } catch (x) { /* nada */ }
+        var mover = function (ev) {
+          nodo.style.visibility = 'hidden'; var bajo = document.elementFromPoint(ev.clientX, ev.clientY); nodo.style.visibility = '';
+          var otro = bajo && bajo.closest && bajo.closest('#p-inicio .wi[data-k]');
+          if (!otro || otro === nodo) return;
+          var r = otro.getBoundingClientRect(), antes = ev.clientY < r.top + r.height / 2 || (ev.clientY < r.bottom && ev.clientX < r.left + r.width / 2 && otro.classList.contains('wi-S'));
+          cont.insertBefore(nodo, antes ? otro : otro.nextSibling);
+        };
+        var soltar = function () {
+          h.removeEventListener('pointermove', mover); h.removeEventListener('pointerup', soltar); h.removeEventListener('pointercancel', soltar);
+          nodo.classList.remove('arrastrando');
+          var orden = Array.prototype.map.call(cont.querySelectorAll('.wi[data-k]'), function (n) { return n.dataset.k; });
+          editIni.sort(function (a, b) { var ia = orden.indexOf(a.k), ib = orden.indexOf(b.k); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
+        };
+        h.addEventListener('pointermove', mover); h.addEventListener('pointerup', soltar); h.addEventListener('pointercancel', soltar);
+      });
+    });
+  }
+  // mantener presionado en Inicio (widget o acceso) → editar
+  document.addEventListener('pointerdown', function (e) {
+    if (pantalla !== 'inicio' || editIni || !e.target.closest) return;
+    var w = e.target.closest('#p-inicio .wi[data-k], #p-inicio .tile');
+    if (!w) return;
+    var x0 = e.clientX, y0 = e.clientY;
+    clearTimeout(presIni);
+    presIni = setTimeout(function () {
+      presIni = null; suprimirClick = true; editarInicio();
+      var fin = function () { document.removeEventListener('pointerup', fin); setTimeout(function () { suprimirClick = false; }, 80); };
+      document.addEventListener('pointerup', fin);
+    }, 550);
+    var cancelar = function (ev) { if (ev.type !== 'pointermove' || Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 12) { clearTimeout(presIni); quitar(); } };
+    var quitar = function () { ['pointermove', 'pointerup', 'pointercancel'].forEach(function (t2) { document.removeEventListener(t2, cancelar); }); };
+    ['pointermove', 'pointerup', 'pointercancel'].forEach(function (t2) { document.addEventListener(t2, cancelar); });
+  });
+  document.addEventListener('click', function (e) { if (suprimirClick) { suprimirClick = false; e.preventDefault(); e.stopPropagation(); } }, true);
+  document.addEventListener('contextmenu', function (e) { if (pantalla === 'inicio' && e.target.closest && e.target.closest('#p-inicio .wi, #p-inicio .tile')) e.preventDefault(); });
   function formInicio() {
     var ws = widgetsInicio();
     var nombre = function (k) { return WIDGETS.filter(function (w) { return w[0] === k; })[0]; };
@@ -503,6 +593,7 @@ var App = (function () {
     medeben: ['Me deben', 'M7 11a3 3 0 1 0 0.01 0zM2 20c0-3 2.5-5 5-5s5 2 5 5', 'M16 8l4 4-4 4M20 12h-7', 'ir:medeben'],
     viajes: ['Viajes', 'M10.5 21l1.5-1v-5l8 3v-2l-8-5V5.5a1.5 1.5 0 0 0-3 0V11l-8 5v2l8-3v5l1.5 1z', 'M17 3.5a1.5 1.5 0 1 0 0.01 0z', 'ir:viajes'],
     sobres: ['Sobres', 'M3 6h18v12H3zM3 7l9 6 9-6', 'M17 15.5a2 2 0 1 0 0.01 0z', 'ir:sobres'],
+    super: ['Super y Otros', 'M3 4h2l2.4 11h11l2-8H7M9 20a1 1 0 1 0 0.01 0zM18 20a1 1 0 1 0 0.01 0z', 'M11 9h6v3h-6z', 'ir:super'],
     calculadora: ['Calculadora', 'M5 2h14v20H5zM8 5h8v4H8z', 'M8 13h2v2H8zM14 13h2v2h-2zM8 17h2v2H8zM14 17h2v2h-2z', 'ir:calculadora'],
     tasacero: ['Tasa cero', 'M3 5h18v16H3zM3 9h18M8 3v4M16 3v4', 'M12 12.5a2.5 3 0 1 0 0.01 0z', 'ir:tasacero'],
     recurrentes: ['Recurrentes', 'M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4', 'M12 11a1.5 1.5 0 1 0 0.01 0z', 'hoja:Recurrentes'],
@@ -518,12 +609,12 @@ var App = (function () {
   };
   var SECCIONES = [
     ['MIS CUENTAS', ['tarjetas', 'ahorros', 'prestamo', 'inversiones', 'medeben']],
-    ['PLANIFICAR', ['sobres', 'viajes', 'calculadora', 'tasacero', 'recurrentes']],
+    ['PLANIFICAR', ['super', 'sobres', 'viajes', 'calculadora', 'tasacero', 'recurrentes']],
     ['ANÁLISIS', ['reportes', 'patrimonio', 'categorias', 'exportar']],
     ['AJUSTES', ['configuracion', 'hoja', 'bancos', 'agregar']]
   ];
   var ACCESOS_INICIALES = ['sobres', 'prestamo', 'calculadora', 'tasacero', 'recurrentes', 'reportes', 'patrimonio'];
-  var MAX_ACCESOS = 7;
+  var MAX_ACCESOS = 4;   // v2.5: la fila de Inicio muestra 4 + Más
 
   function accesos() {
     try {
@@ -563,15 +654,26 @@ var App = (function () {
   }
   function cancelarPresion() { clearTimeout(presionTimer); }
   function alternarAcceso(k) {
-    if (k === 'mas') return;
+    if (k === 'mas' || k === 'agregar') return;
     var a = accesos(), i = a.indexOf(k);
     if (i >= 0) { a.splice(i, 1); toast(ITEMS[k][0] + ' ya no está en Inicio'); }
-    else if (a.length >= MAX_ACCESOS) { toast('En Inicio caben ' + MAX_ACCESOS + ' accesos. Quitá uno primero.'); return; }
-    else { a.push(k); toast('📌 ' + ITEMS[k][0] + ' fijado en Inicio'); }
+    else if (a.length >= MAX_ACCESOS) {   // v2.5: Inicio lleno → elegir cuál reemplazar
+      vibrar();
+      return abrir('<h2>Inicio está lleno</h2><div class="suave">¿Cuál cambiás por <b>' + esc(ITEMS[k][0]) + '</b>?</div><div class="accesos" style="margin-top:12px">' +
+        a.map(function (x) { return '<button class="tile" onclick="App.reemplazarAcceso(\'' + x + '\',\'' + k + '\')"><span class="ic"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="b" d="' + ITEMS[x][1] + '"/>' + (ITEMS[x][2] ? '<path class="a" d="' + ITEMS[x][2] + '"/>' : '') + '</svg></span><span class="n">' + esc(ITEMS[x][0]) + '</span></button>'; }).join('') +
+        '</div><div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    }
+    else { a.push(k); toast('✅ ' + ITEMS[k][0] + ' agregado a Inicio'); }
     guardar('mf-accesos', JSON.stringify(a));
     if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) { /* nada */ } }
     pintar();
   }
+  function reemplazarAcceso(viejo, nuevo) {
+    var a = accesos(), i = a.indexOf(viejo); if (i < 0) return;
+    a[i] = nuevo; guardar('mf-accesos', JSON.stringify(a)); cerrar(); vibrar(); pintar();
+    toast('✅ ' + ITEMS[nuevo][0] + ' en Inicio · ' + ITEMS[viejo][0] + ' volvió a Más');
+  }
+  function iniQuitarAcceso(k) { var a = accesos(), i = a.indexOf(k); if (i >= 0) { a.splice(i, 1); guardar('mf-accesos', JSON.stringify(a)); } pintar(); }
   function formAccesos() {
     var a = accesos();
     var lista = [];
@@ -589,9 +691,10 @@ var App = (function () {
     cerrar(); pintar(); toast('✅ Accesos actualizados');
   }
   function pMas() {
-    var h = cabSimple('Más', 'Mantené presionado un ícono para fijarlo en Inicio');
+    var h = cabSimple('Más', 'Mantené presionado un ícono para agregarlo a Inicio'), fij = accesos();
     SECCIONES.forEach(function (s) {
-      h += '<div class="seccion-t">' + s[0] + '</div><div class="accesos">' + s[1].map(function (k) { return tile(k, true); }).join('') + '</div>';
+      var ks = s[1].filter(function (k) { return fij.indexOf(k) < 0; });   // v2.5: lo que ya está en Inicio no se repite aquí
+      if (ks.length) h += '<div class="seccion-t">' + s[0] + '</div><div class="accesos">' + ks.map(function (k) { return tile(k, true); }).join('') + '</div>';
     });
     $('p-mas').innerHTML = h;
   }
@@ -2074,6 +2177,12 @@ var App = (function () {
     if (!m || !p) return toast('Este ingreso ya está asignado.');
     var r = C.reparto(D, p.falta, m.moneda);
     rep = { fila: fila, monto: p.falta, moneda: m.moneda, ajuste: r.ajuste, filas: r.filas.map(function (f) { return { nombre: f.nombre, monto: f.monto }; }), siempre: r.siempre, guardar: false };
+    var ant = C.esSalario(m) ? repartoAnteriorSalario(m) : null;   // v2.5: el salario empieza con lo que repartiste la vez anterior
+    if (ant) {
+      rep.ajuste = null; rep.salario = ant.fecha;
+      rep.filas.forEach(function (f) { f.monto = Math.round((ant.por[f.nombre] || 0) * 100) / 100; });
+      rep.siempre = rep.filas.reduce(function (a, f) { return a + f.monto; }, 0);
+    }
     ir('reparto');
   }
   function repSuma() { return rep.filas.reduce(function (a, f) { return a + (Number(f.monto) || 0); }, 0); }
@@ -2088,7 +2197,7 @@ var App = (function () {
     var h = cabSimple('Repartir', esc((m && m.comercio) || 'Ingreso') + ' · ' + fechaCorta(m && m.fecha), 'App.ir(\'porasignar\')');
     var dif = rep.monto - rep.siempre;
     h += '<div class="hero"><span class="et" style="font-size:13px;font-weight:600">Entró</span><div class="grande">' + din(rep.monto, mon) + '</div>' +
-      '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Tu reparto de siempre</span><b>' + din(rep.siempre, mon) + '</b></div>' +
+      '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">' + (rep.salario ? 'Tu reparto del salario anterior (' + fechaCorta(rep.salario) + ')' : 'Tu reparto de siempre') + '</span><b>' + din(rep.siempre, mon) + '</b></div>' +
       '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Diferencia' + (rep.ajuste ? ' → ' + esc(rep.ajuste) : '') + '</span><b style="color:var(--acento)">' + (dif >= 0 ? '+' : '−') + din(Math.abs(dif), mon) + '</b></div></div>';
     h += '<label class="campo compacto" style="margin-top:0"><span>Sobre de ajuste (recibe o cubre la diferencia)</span><select onchange="App.repAjuste(this.value)"><option value="">— Ninguno —</option>' +
       rep.filas.map(function (f) { return '<option' + (f.nombre === rep.ajuste ? ' selected' : '') + '>' + esc(f.nombre) + '</option>'; }).join('') + '</select></label>';
@@ -2099,10 +2208,12 @@ var App = (function () {
     }).join('') + '</div>';
     var falta = rep.monto - repSuma();
     h += '<div class="fila"><span class="suave">Por repartir</span><b id="rep-falta" style="color:' + (Math.abs(falta) < 0.01 ? 'var(--positivo)' : 'var(--acento)') + '">' + txt(falta, mon) + (Math.abs(falta) < 0.01 ? ' ✓' : '') + '</b></div>' +
+      (rep.salario ? '<button class="btn sec chico" style="margin-top:8px" onclick="App.repCero()">Empezar de cero</button>' : '') +
       '<label class="check"><input type="checkbox" id="rep-guardar"' + (rep.guardar ? ' checked' : '') + ' onchange="App.repGuardarCheck(this.checked)"> Guardar estos montos como mi reparto de siempre</label>' +
       '<button class="btn" id="rep-ok" onclick="App.guardarRepartoMov()">Repartir</button>';
     $('p-reparto').innerHTML = h;
   }
+  function repCero() { rep.filas.forEach(function (f) { f.monto = 0; }); rep.ajuste = null; pintar(); }
   function repCambio(i, v) {
     rep.filas[i].monto = C.leerNumero(v) || 0;
     repRecalcular();
@@ -2741,6 +2852,8 @@ var App = (function () {
       }
       grupos[k].n++;
     });
+    var sal = tipo === 'Ingreso' ? salCfg() : null;
+    if (sal && sal.monto) { var ks = orden.filter(function (k) { return /^salario/.test(k); })[0]; if (ks) grupos[ks].n += 999; else { grupos.__sal = { nombre: '💰 Salario', comercio: 'Salario', categoria: '', sobre: '', cuenta: sal.cuenta || '', moneda: sal.moneda || 'CRC', monto: sal.monto, n: 999 }; orden.unshift('__sal'); } }
     return orden.map(function (k) { return grupos[k]; }).sort(function (x, y) { return y.n - x.n; }).slice(0, 8);
   }
   function formRapido(tipo) {
@@ -3009,8 +3122,15 @@ var App = (function () {
       (det ? '<span class="det" style="display:block">' + det + '</span>' : '') + '</span>' + (derecha || '') + '</' + tag + '>';
   }
   var grupoAj = {};
+  // v2.5: cada ícono de Ajustes se anima a su manera al tocarlo
+  var ANIM_GRUPO = { ap: 'menear', se: 'saltar', so: 'brincar', co: 'brincar', re: 'sonar', av: 'sonar', go: 'girar', ca: 'crecer', ac: 'subir', cu: 'voltear', in: 'crecer' };
+  function animarAjuste(el) { if (!el) return; el.classList.remove('anim'); void el.offsetWidth; el.classList.add('anim'); setTimeout(function () { el.classList.remove('anim'); }, 900); }
+  document.addEventListener('click', function (e) {
+    var s = e.target.closest && e.target.closest('#p-ajustes summary, #p-ajustes .opcion, #p-ajustes .rapido');
+    if (s) animarAjuste(s.tagName === 'SUMMARY' ? s.parentNode : s);
+  }, true);
   function grupo(id, icono, color, nombre, resumen, cuerpo) {
-    return '<details class="grupo-aj" data-g="' + id + '"' + (grupoAj[id] ? ' open' : '') + ' ontoggle="App.grupoAj(\'' + id + '\',this.open)"><summary><span class="ico-cat" style="width:36px;height:36px;font-size:16px;background:color-mix(in srgb, ' + color + ' 18%, transparent)">' + icono + '</span>' +
+    return '<details class="grupo-aj" data-g="' + id + '" data-anim="' + (ANIM_GRUPO[id] || 'crecer') + '"' + (grupoAj[id] ? ' open' : '') + ' ontoggle="App.grupoAj(\'' + id + '\',this.open)"><summary><span class="ico-cat" style="width:36px;height:36px;font-size:16px;background:color-mix(in srgb, ' + color + ' 18%, transparent)">' + icono + '</span>' +
       '<span class="cuerpo"><span class="nombre">' + nombre + '</span><span class="det">' + resumen + '</span></span><span class="flecha">›</span></summary><div class="grupo-c">' + cuerpo + '</div></details>';
   }
   function estadoApp() {
@@ -3060,14 +3180,13 @@ var App = (function () {
       };
       temasHtml += '<div class="dos" style="padding:0 16px 12px"><label class="campo"><span>De día</span>' + sel('claro', 'c', guardado('mf-tema-claro', 'crema')) + '</label><label class="campo"><span>De noche</span>' + sel('oscuro', 'o', guardado('mf-tema-oscuro', 'dorado')) + '</label></div>';
     }
-    h += grupo('ap', '🎨', '#F5B82E', 'Apariencia', esc(tema === 'auto' ? 'Automático (' + nomTema(resuelto) + ')' : nomTema(tema)) + ' · letra ' + { normal: 'normal', grande: 'grande', xg: 'más grande' }[letra],
+    h += grupo('ap', '🎨', '#F5B82E', 'Apariencia', esc(tema === 'auto' ? 'Automático (' + nomTema(resuelto) + ')' : nomTema(tema)) + ' · letra ' + { peq: 'pequeña', normal: 'normal', grande: 'grande', xg: 'más grande' }[letra],
       opcion('luna', 'Tema', 'Cambia los colores de toda la app', '') + temasHtml +
       opcion('lapiz', 'Tamaño de letra', 'Para leer sin forzar la vista', '') +
-      '<div class="chips" style="padding:0 16px 14px">' + [['normal', 'Normal'], ['grande', 'Grande'], ['xg', 'Más grande']].map(function (l) {
+      '<div class="chips" style="padding:0 16px 14px">' + [['peq', 'Pequeña'], ['normal', 'Normal'], ['grande', 'Grande'], ['xg', 'Más grande']].map(function (l) {
         return '<button class="chip' + (letra === l[0] ? ' on' : '') + '" onclick="App.letra(\'' + l[0] + '\')">' + l[1] + '</button>';
       }).join('') + '</div>' +
-      opcion('inicio', 'Tu inicio', 'Qué widgets ver en Inicio y en qué orden', '<span class="flecha">›</span>', 'App.formInicio()') +
-      opcion('cuadros', 'Accesos rápidos', 'Los íconos de la fila de Inicio', '<span class="flecha">›</span>', 'App.formAccesos()') +
+      opcion('inicio', 'Editar Inicio', 'También manteniendo presionado cualquier widget en Inicio', '<span class="flecha">›</span>', 'App.editarInicio()') +
       opcion('ojo', 'Ocultar montos', 'Muestra ****** en vez de las cantidades', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')));
 
     h += grupo('se', '🔒', '#E5484D', 'Seguridad', AJ.pinActivo ? 'PIN activo' + (huella ? ' · huella activa' : '') : 'Sin PIN',
@@ -3088,9 +3207,8 @@ var App = (function () {
       opcion('recargar', 'Revisar correos ahora', ult ? 'Última revisión: ' + fechaCorta(ult.toISOString()) + ' ' + hora(ult.toISOString()) : 'Todavía no se ha revisado', '', 'App.revisarCorreos(this)') +
       opcion('sobre', 'Bancos que se leen', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE Móvil BCR + recibos del préstamo', '') +
       '<div class="suave chico" style="padding:0 16px 14px">Para agregar un banco, escribí su correo en la pestaña <b>Config</b> de la hoja.</div>');
-    h += grupo('re', '🔔', '#FF8A3D', 'Recordatorios', AJ.recordatorios ? 'Activados' : 'Desactivados',
-      opcion('campana', 'Recordatorios por correo', 'Pagos de tarjeta (3 días antes), cuota del préstamo, TBP del día 7 y gastos sin categoría', interruptor('aj-rec', AJ.recordatorios, 'App.recordatorios(this.checked)', 'Recordatorios por correo')) +
-      opcion('correo', 'Enviar uno de prueba', 'Llega a ' + esc(AJ.correo), '', 'App.pruebaRecordatorio(this)'));
+    h += grupo('sa', '💰', '#3DD68C', 'Salario', resumenSalario(), opcion('sobre', 'Tu salario', 'Monto, cuenta y fechas de pago (bisemanal, quincenal…)', '<span class="flecha">›</span>', 'App.formSalario()'));
+    h += grupoAvisos();
     var cx = conexion();
     h += grupo('go', '☁', '#B794F6', 'Google y datos', 'Servidor ' + esc(AJ.version) + ' · ' + (cola.length ? cola.length + ' por enviar' : 'todo enviado'),
       opcion('recargar', cola.length ? cola.length + ' cambio' + (cola.length === 1 ? '' : 's') + ' por enviar a Google' : 'Todo está en Google ✓',
@@ -3102,6 +3220,7 @@ var App = (function () {
       opcion('recargar', 'Recargar datos', 'Trae los cambios que hiciste directo en la hoja', '', 'App.recargar()') +
       opcion('flechas', 'Servidor (Apps Script)', esc(cx.url.replace(/^https:\/\/script\.google\.com\/macros\/s\/(.{6}).*(.{6})\/exec$/, '…$1…$2/exec')), '', '') +
       opcion('candado', 'Cambiar URL o clave', 'Si publicaste el servidor de nuevo o cambiaste la clave', '', 'App.cambiarConexion()'));
+    h += grupoActualizaciones();
     var prep = guardado('mf-preparado', '');
     h += grupo('ca', '🧮', '#F5B82E', 'Calculadora', prep ? 'Preparado por ' + esc(prep) : 'Nombre en los PDF',
       opcion('hoja', 'Preparado por (en los PDF)', prep ? esc(prep) : 'Sin nombre · tocá para escribirlo', '', 'App.formPreparado()'));
@@ -3237,8 +3356,10 @@ var App = (function () {
     $('pinMsg').textContent = 'Verificando…';
     verificando = true;
     var largo = pinEscrito.length;
+    var pinPrueba = pinEscrito;
     llamar('verificarPIN', [pinEscrito]).then(function (tok) {
       verificando = false;
+      recordarPinLocal(pinPrueba);
       recordarLargo(largo);
       desbloqueado(tok);
     }, function (e) {
@@ -3377,14 +3498,15 @@ var App = (function () {
       '<div style="text-align:center"><div style="font-size:22px;font-weight:800">Conectar con tu hoja</div>' +
       '<div class="suave" style="margin-top:6px">Se hace una sola vez en cada teléfono.</div></div>' +
       '<div style="width:100%;max-width:420px">' +
-      '<label class="campo"><span>URL del servidor (termina en /exec)</span><input id="cx-url" type="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="' + esc(c.url) + '"></label>' +
-      '<label class="campo"><span>Clave de la app</span><input id="cx-clave" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="La que muestra verClaveApp" value="' + esc(c.clave) + '"></label>' +
+      '<label class="campo"><span>URL del servidor (termina en /exec)</span><input id="cx-url" type="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="' + (c.url ? esc(urlCorta(c.url)) + ' (guardada · dejala vacía para no cambiarla)' : 'https://script.google.com/macros/s/…/exec') + '" value=""></label>' +
+      '<label class="campo"><span>Clave de la app</span><input id="cx-clave" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="' + (c.clave ? '•••••• (guardada · dejala vacía para no cambiarla)' : 'La que muestra verClaveApp') + '" value=""></label>' +
+      (c.url ? '<button class="btn sec chico" style="margin-top:8px" onclick="App.mostrarDatosCx()">👁 Mostrar lo guardado (pide PIN)</button>' : '') +
       '<div class="suave chico" id="cx-msg" style="margin-top:10px;min-height:18px">' + esc(msg || '') + '</div>' +
       '<div class="acciones"><button class="btn" id="cx-ok" onclick="App.conectar()">Conectar</button></div></div>';
     $('conexion').classList.add('ver');
   }
   function conectar() {
-    var c = { url: val('cx-url').trim(), clave: val('cx-clave').trim() };
+    var g = conexion(), c = { url: val('cx-url').trim() || g.url, clave: val('cx-clave').trim() || g.clave };
     if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(c.url)) { $('cx-msg').textContent = 'La URL debe empezar con https://script.google.com/ y terminar en /exec.'; return; }
     if (!c.clave) { $('cx-msg').textContent = 'Falta la clave.'; return; }
     var b = $('cx-ok'); b.disabled = true; $('cx-msg').textContent = 'Probando la conexión…';
@@ -3400,7 +3522,91 @@ var App = (function () {
       $('cx-msg').textContent = m.indexOf('CLAVE_INVALIDA') >= 0 ? 'La clave no es correcta.' : m;
     });
   }
-  function cambiarConexion() { mostrarConexion(''); }
+  function cambiarConexion() { protegerConexion(function () { mostrarConexion(''); }); }
+  function urlCorta(u) { return String(u || '').replace(/^https:\/\/script\.google\.com\/macros\/s\/(.{6}).*(.{6})\/exec$/, '…$1…$2/exec'); }
+  function mostrarDatosCx() {
+    pedirPinSeguro('Mostrar la URL y la clave', function () {
+      var c = conexion(); $('cx-url').value = c.url; $('cx-clave').value = c.clave; $('cx-clave').type = 'text';
+    });
+  }
+  // ---- v2.5: la conexión (URL /exec y clave) solo se cambia con PIN o huella; funciona aunque el servidor no responda
+  function protegerConexion(seguir) {
+    var c = conexion();
+    if (!c.url) return seguir();   // primera vez en este teléfono: no hay nada que proteger
+    var hayPin = (AJ && AJ.pinActivo) || guardado('mf-pinactivo', 'no') === 'si';
+    if (!hayPin) {
+      return capaSegura('<h2>🔒 Protegé la conexión</h2><div class="suave">Para cambiar la URL o la clave hace falta un PIN. Creá uno primero y después volvé aquí.</div>' +
+        '<div class="acciones"><button class="btn" onclick="App.cerrarCapaSegura();App.formPIN(\'activar\')">Crear PIN</button><button class="btn sec" onclick="App.cerrarCapaSegura()">Cancelar</button></div>');
+    }
+    pedirPinSeguro('Cambiar URL o clave', seguir);
+  }
+  function capaSegura(html) {
+    var c = $('capa-segura');
+    if (!c) { c = document.createElement('div'); c.id = 'capa-segura'; c.className = 'capa-segura'; document.body.appendChild(c); }
+    c.innerHTML = '<div class="panel">' + html + '</div>'; c.classList.add('ver');
+  }
+  function cerrarCapaSegura() { var c = $('capa-segura'); if (c) { c.classList.remove('ver'); c.innerHTML = ''; } }
+  var pinSeguroOk = null;
+  function bloqueoPin() { var b = leerJSONSeguro('mf-pinint') || {}; return b.hasta && b.hasta > Date.now() ? b.hasta : 0; }
+  function pedirPinSeguro(motivo, ok) {
+    pinSeguroOk = ok;
+    var hasta = bloqueoPin();
+    capaSegura('<h2>🔒 ' + esc(motivo) + '</h2><div class="suave">Escribí tu PIN' + (huellaLocal() ? ' o usá tu huella' : '') + '.</div>' +
+      '<label class="campo"><span>PIN</span><input id="ps-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off"' + (hasta ? ' disabled' : '') + ' onkeydown="if(event.key===\'Enter\')App.verificarPinSeguro()"></label>' +
+      '<div class="suave chico" id="ps-msg" style="min-height:18px;margin-top:8px">' + (hasta ? 'Demasiados intentos. Esperá hasta las ' + hora(new Date(hasta).toISOString()) + '.' : '') + '</div>' +
+      '<div class="acciones"><button class="btn" id="ps-ok" onclick="App.verificarPinSeguro()"' + (hasta ? ' disabled' : '') + '>Continuar</button>' +
+      (huellaLocal() ? '<button class="btn sec" onclick="App.huellaSegura()">☝ Usar huella</button>' : '') +
+      '<button class="btn sec" onclick="App.cerrarCapaSegura()">Cancelar</button></div>');
+    setTimeout(function () { var i = $('ps-pin'); if (i && !hasta) i.focus(); }, 80);
+  }
+  function pinSeguroBien() { guardar('mf-pinint', null); var f = pinSeguroOk; pinSeguroOk = null; cerrarCapaSegura(); if (f) f(); }
+  function pinSeguroMal(msg) {
+    var b = leerJSONSeguro('mf-pinint') || { n: 0 }; b.n = (b.n || 0) + 1;
+    if (b.n >= 5) { b.hasta = Date.now() + 5 * 60000; b.n = 0; }
+    guardar('mf-pinint', JSON.stringify(b));
+    var hasta = bloqueoPin();
+    $('ps-msg').textContent = hasta ? 'Demasiados intentos. Esperá 5 minutos.' : (msg || 'PIN incorrecto');
+    if (hasta) { $('ps-pin').disabled = true; $('ps-ok').disabled = true; }
+    $('ps-pin').value = '';
+  }
+  function verificarPinSeguro() {
+    if (bloqueoPin()) return;
+    var pin = val('ps-pin');
+    if (!/^\d{4,6}$/.test(pin)) { $('ps-msg').textContent = 'El PIN tiene de 4 a 6 números.'; return; }
+    var b = $('ps-ok'); b.disabled = true; $('ps-msg').textContent = 'Verificando…';
+    llamar('verificarPIN', [pin]).then(function (tok) {
+      token = tok; guardar('mf-ses', tok, sessionStorage); recordarPinLocal(pin); b.disabled = false; pinSeguroBien();
+    }, function (e) {
+      b.disabled = false;
+      if (e && e.red || /conexi|Google tard|Respuesta inesperada|CLAVE_INVALIDA/.test(e && e.message || '')) {   // sin servidor: se revisa con la copia cifrada del teléfono
+        return verificarPinLocal(pin).then(function (si) { if (si) pinSeguroBien(); else pinSeguroMal(guardado('mf-pinloc', '') ? 'PIN incorrecto' : 'Sin conexión y este teléfono todavía no tiene el PIN guardado. Usá la huella o probá con internet.'); });
+      }
+      pinSeguroMal(e && e.message);
+    });
+  }
+  function huellaSegura() {
+    var h = huellaLocal(); if (!h) return;
+    navigator.credentials.get({ publicKey: {
+      challenge: aleatorio(32), rpId: location.hostname, timeout: 60000, userVerification: 'required',
+      allowCredentials: [{ type: 'public-key', id: deB64(h.cred), transports: ['internal', 'hybrid'] }]
+    } }).then(function () { pinSeguroBien(); }, function (e) { if (e && e.name !== 'NotAllowedError') $('ps-msg').textContent = e.message || String(e); });
+  }
+  // El PIN nunca se guarda: solo una huella digital (PBKDF2 con sal) para poder revisarlo sin internet
+  function derivarPin(pin, sal) {
+    if (!window.crypto || !crypto.subtle) return Promise.reject(new Error('sin crypto'));
+    return crypto.subtle.importKey('raw', new TextEncoder().encode(String(pin)), 'PBKDF2', false, ['deriveBits']).then(function (k) {
+      return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: sal, iterations: 150000, hash: 'SHA-256' }, k, 256);
+    }).then(function (bits) { return aB64(bits); });
+  }
+  function recordarPinLocal(pin) {
+    var sal = aleatorio(16);
+    derivarPin(pin, sal).then(function (h) { guardar('mf-pinloc', JSON.stringify({ s: aB64(sal), h: h })); }, function () { /* sin crypto: no se guarda */ });
+  }
+  function verificarPinLocal(pin) {
+    var x = leerJSONSeguro('mf-pinloc');
+    if (!x || !x.s || !x.h) return Promise.resolve(false);
+    return derivarPin(pin, deB64(x.s)).then(function (h) { return h === x.h; }, function () { return false; });
+  }
 
   // ------------------------------------------------------------ arranque
   function arrancar() {
@@ -3458,6 +3664,636 @@ var App = (function () {
     arrancar();
   }
 
+  // ==================================================================== v2.5
+  var SERVIDOR_MIN = '2.5.0';
+  function cmpVer(a, b) { var x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number); for (var i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; }
+  function PREFS() { return (AJ && AJ.prefs) || (D && D.ajustes && D.ajustes.prefs) || leerJSONSeguro('mf-prefs') || {}; }
+  function guardarPrefs(parcial, desc) {
+    var p = Object.assign({}, PREFS(), parcial);
+    if (AJ) AJ.prefs = p;
+    if (D && D.ajustes) D.ajustes.prefs = p;
+    guardar('mf-prefs', JSON.stringify(p));
+    encolar('guardarPreferencias', [parcial], desc || 'Guardar ajustes');
+    cfgSW();
+  }
+  function miNombre() { var n = guardado('mf-mi-nombre', ''); if (n) return n; var c = (AJ && AJ.correo) || ''; c = c.split('@')[0].replace(/[._\d]+/g, ' ').trim().split(' ')[0] || 'Yo'; return c.charAt(0).toUpperCase() + c.slice(1); }
+
+  // ---------------------------------------------------------------- SALARIO
+  var FREC = [['bisemanal', 'Cada 2 semanas'], ['semanal', 'Cada semana'], ['quincenal', 'Quincenal (2 días del mes)'], ['mensual', 'Mensual']];
+  function salCfg() { return PREFS().salario || null; }
+  function proximosSalarios(n) {
+    var c = salCfg(); if (!c || !c.activo) return [];
+    var h0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    return C.fechasSalario(c, h0, new Date(h0.getTime() + 120 * 86400000)).slice(0, n || 4);
+  }
+  function salarioPendiente() {
+    var c = salCfg(); if (!c || !c.activo || !D) return null;
+    var h0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    var f = C.fechasSalario(c, new Date(h0.getTime() - 3 * 86400000), h0).pop();
+    if (!f) return null;
+    var desde = new Date(f.getTime() - 3 * 86400000);
+    if (D.movimientos.some(function (m) { return C.esSalario(m) && new Date(m.fecha) >= desde; })) return null;
+    var pos = leerJSONSeguro('mf-sal-pos');
+    if (pos && pos.f === f.toDateString() && pos.hasta > Date.now()) return null;
+    return { fecha: f, monto: Number(c.monto) || 0, cuenta: c.cuenta || '', moneda: c.moneda || 'CRC' };
+  }
+  function tarjetaSalario() {
+    var s = salarioPendiente(); if (!s) return '';
+    return '<div class="aviso-sal"><div style="display:flex;gap:12px;align-items:center;text-align:left"><span style="font-size:28px">💰</span><div style="flex:1;min-width:0"><b>Hoy es día de salario</b><div class="suave chico">Normalmente entran ' + din(s.monto, s.moneda) + (s.cuenta ? ' a ' + esc(etiquetaCuenta(s.cuenta)) : '') + '</div></div></div>' +
+      '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.salarioLlego()">✓ Sí, llegó</button><button class="btn sec" onclick="App.formSalarioOtro()">Otro monto</button></div>' +
+      '<button class="enlace-editar" style="margin:6px auto 0" onclick="App.salarioManana()">Todavía no · recordarme mañana</button></div>';
+  }
+  function salarioManana() { var s = salarioPendiente(); if (!s) return; guardar('mf-sal-pos', JSON.stringify({ f: s.fecha.toDateString(), hasta: new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1).getTime() })); pintar(); toast('Te lo recuerdo mañana'); }
+  function formSalarioOtro() {
+    var s = salarioPendiente() || { monto: (salCfg() || {}).monto || 0, moneda: 'CRC' };
+    abrir('<h2>💰 ¿Cuánto entró?</h2><label class="campo"><span>Monto</span><input id="sl-monto" class="monto" data-dinero inputmode="decimal" value="' + esc(String(s.monto || '').replace('.', ',')) + '"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.salarioLlego(true)">Guardar y repartir</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function salarioLlego(otro) {
+    var c = salCfg() || {}, monto = otro ? C.leerNumero(val('sl-monto')) : Number(c.monto);
+    if (!monto || monto <= 0) return toast('Escribí el monto.');
+    var cat = (D.categorias || []).filter(function (x) { return /salario/i.test(x); })[0] || '';
+    var m = { fecha: new Date().toISOString(), comercio: 'Salario', lugar: '', monto: monto, moneda: c.moneda || 'CRC', tipo: 'Ingreso', cuenta: c.cuenta || '', categoria: cat, sobre: '', origen: 'Manual', autorizacion: 'SAL-' + Date.now(), nota: '' };
+    encolar('guardarMovimiento', [m], 'Salario · ' + txt(monto, m.moneda));
+    guardar('mf-sal-reparto', m.autorizacion);
+    if (otro) cerrar();
+    pintar(); toast('💰 Salario anotado. En unos segundos se abre el reparto.', 4000);
+  }
+  function intentarRepartoSalario() {
+    var aut = guardado('mf-sal-reparto', ''); if (!aut || !D) return;
+    var m = D.movimientos.filter(function (x) { return x.autorizacion === aut && x.fila > 0; })[0];
+    if (!m) return;
+    guardar('mf-sal-reparto', null);
+    if (SB().pendientes.some(function (p) { return p.mov.fila === m.fila; })) irReparto(m.fila);
+  }
+  function resumenSalario() {
+    var c = salCfg(); if (!c || !c.activo) return 'Sin configurar';
+    var p = proximosSalarios(1)[0];
+    return (FREC.filter(function (x) { return x[0] === c.frecuencia; })[0] || [0, ''])[1] + (p ? ' · próximo ' + fechaCorta(p.toISOString()) : '');
+  }
+  function formSalario() {
+    var c = salCfg() || { activo: true, frecuencia: 'bisemanal', finde: 'antes', moneda: 'CRC' };
+    var cuentas = D.cuentas.filter(function (x) { return x.activa && x.tipo !== 'Tarjeta de crédito' && x.tipo !== 'Préstamo'; }).map(function (x) { return x.nombre; });
+    abrir('<h2>💰 Tu salario</h2><div class="suave">Para avisarte el día de pago y repartirlo completo en tus sobres.</div>' +
+      '<label class="campo"><span>Monto normal</span><input id="sa-monto" data-dinero inputmode="decimal" value="' + esc(String(c.monto || '').replace('.', ',')) + '"></label>' +
+      '<label class="campo"><span>Cuenta donde entra</span><select id="sa-cuenta">' + opciones(cuentas, c.cuenta, '— Elegí —') + '</select></label>' +
+      '<label class="campo"><span>¿Cada cuánto te pagan?</span><select id="sa-frec" onchange="App.salPrev()">' + FREC.map(function (f) { return '<option value="' + f[0] + '"' + (c.frecuencia === f[0] ? ' selected' : '') + '>' + f[1] + '</option>'; }).join('') + '</select></label>' +
+      '<div id="sa-b"><label class="campo"><span>Fecha de un pago que ya recibiste</span><input id="sa-fecha" type="date" value="' + esc(c.fecha || '') + '" onchange="App.salPrev()"></label></div>' +
+      '<div id="sa-q" class="dos"><label class="campo"><span>Primer día</span><input id="sa-d1" type="number" min="1" max="31" inputmode="numeric" value="' + esc(String((c.dias || [15])[0] || '')) + '" oninput="App.salPrev()"></label><label class="campo"><span>Segundo día</span><input id="sa-d2" type="number" min="1" max="31" inputmode="numeric" value="' + esc(String((c.dias || [15, 30])[1] || '')) + '" oninput="App.salPrev()"></label></div>' +
+      '<div id="sa-m"><label class="campo"><span>Día del mes</span><input id="sa-dia" type="number" min="1" max="31" inputmode="numeric" value="' + esc(String(c.dia || '')) + '" oninput="App.salPrev()"></label></div>' +
+      '<label class="campo"><span>Si cae sábado o domingo</span><select id="sa-finde" onchange="App.salPrev()"><option value="antes"' + (c.finde === 'antes' ? ' selected' : '') + '>Se paga el viernes antes</option><option value="despues"' + (c.finde === 'despues' ? ' selected' : '') + '>Se paga el lunes después</option><option value="igual"' + (c.finde === 'igual' ? ' selected' : '') + '>Ese mismo día</option></select></label>' +
+      '<div class="caja" style="margin-top:12px;gap:4px"><b style="font-size:14px">Próximos pagos</b><div id="sa-prev" class="suave chico"></div></div>' +
+      '<label class="check"><input type="checkbox" id="sa-activo"' + (c.activo !== false ? ' checked' : '') + '> Avisarme el día de pago en Inicio</label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarSalario()">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    salPrev();
+  }
+  function leerSalForm() {
+    var f = val('sa-frec');
+    return { activo: $('sa-activo') ? $('sa-activo').checked : true, monto: C.leerNumero(val('sa-monto')) || 0, cuenta: val('sa-cuenta'), moneda: 'CRC', frecuencia: f,
+      fecha: val('sa-fecha'), dias: [Number(val('sa-d1')) || 0, Number(val('sa-d2')) || 0], dia: Number(val('sa-dia')) || 0, finde: val('sa-finde') };
+  }
+  function salPrev() {
+    var c = leerSalForm();
+    $('sa-b').style.display = c.frecuencia === 'bisemanal' || c.frecuencia === 'semanal' ? '' : 'none';
+    $('sa-q').style.display = c.frecuencia === 'quincenal' ? '' : 'none';
+    $('sa-m').style.display = c.frecuencia === 'mensual' ? '' : 'none';
+    var h0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    var l = C.fechasSalario(c, h0, new Date(h0.getTime() + 100 * 86400000)).slice(0, 5);
+    var dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+    $('sa-prev').innerHTML = l.length ? l.map(function (d) { return dias[d.getDay()] + ' ' + fechaCorta(d.toISOString()); }).join(' · ') : 'Completá los datos para ver las fechas.';
+  }
+  function guardarSalario() {
+    var c = leerSalForm();
+    if (!c.monto) return toast('Escribí el monto.');
+    if ((c.frecuencia === 'bisemanal' || c.frecuencia === 'semanal') && !c.fecha) return toast('Poné la fecha de un pago que ya recibiste.');
+    if (c.frecuencia === 'quincenal' && (!c.dias[0] || !c.dias[1])) return toast('Poné los dos días del mes.');
+    if (c.frecuencia === 'mensual' && !c.dia) return toast('Poné el día del mes.');
+    guardarPrefs({ salario: c }, 'Salario: ' + (FREC.filter(function (x) { return x[0] === c.frecuencia; })[0] || [0, ''])[1]);
+    cerrar(); pintar(); toast('✅ Salario guardado');
+  }
+  /** Reparto del salario: empieza con lo que repartiste la vez anterior */
+  function repartoAnteriorSalario(m) {
+    var sb = SB(), prev = D.movimientos.filter(function (x) { return C.esSalario(x) && x.fila > 0 && x.fila !== m.fila && (sb.porMov[x.fila] || []).some(function (f) { return f.sobre && f.monto > 0; }); })
+      .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); })[0];
+    if (!prev) return null;
+    var por = {}; (sb.porMov[prev.fila] || []).forEach(function (f) { if (f.sobre && f.monto > 0) por[f.sobre] = (por[f.sobre] || 0) + f.monto; });
+    return { fecha: prev.fecha, por: por };
+  }
+
+  // ---------------------------------------------------------------- AVISOS (A + C)
+  var TIPOS_AVISO = [['asignar', '✉', 'Por asignar a sobres', ''], ['revisar', '⚠', 'Por revisar', 'sin categoría'], ['salario', '💰', 'Día de salario', 'según tus fechas de pago'],
+    ['tarjeta', '💳', 'Pago de tarjeta', '2 días antes'], ['negativo', '🔴', 'Sobre en negativo', ''], ['super', '🛒', 'Super y Otros', '“¿este sirve?” y cambios en tus listas'], ['version', '⬆', 'Versión nueva de la app', '']];
+  function avCfg() { var a = PREFS().avisos || {}; a.tipos = a.tipos || {}; a.silencio = a.silencio || { d: 22, h: 7 }; a.correo = a.correo || { activo: false, hora: 20, siempre: false }; return a; }
+  function avisosTel() { return guardado('mf-avisos-tel', 'no') === 'si' && typeof Notification !== 'undefined' && Notification.permission === 'granted'; }
+  function grupoAvisos() {
+    var a = avCfg(), tel = avisosTel();
+    var horas = function (id, v, fn) { var h = '<select id="' + id + '" onchange="' + fn + '">'; for (var i = 0; i < 24; i++) h += '<option value="' + i + '"' + (Number(v) === i ? ' selected' : '') + '>' + (i === 0 ? '12 a.m.' : i < 12 ? i + ' a.m.' : i === 12 ? '12 p.m.' : (i - 12) + ' p.m.') + '</option>'; return h + '</select>'; };
+    return grupo('av', '🔔', '#FF8A3D', 'Avisos', (tel ? 'En el teléfono' : 'Teléfono apagado') + ' · ' + (a.correo.activo ? 'correo ' + (a.correo.hora > 12 ? a.correo.hora - 12 + ' p.m.' : a.correo.hora + ' a.m.') : 'sin correo'),
+      opcion('campana', 'Avisos en el teléfono', 'Chrome revisa sola 1 o 2 veces al día y te avisa en la barra', interruptor('av-tel', tel, 'App.avisosTelefono(this.checked)', 'Avisos en el teléfono')) +
+      TIPOS_AVISO.map(function (t) {
+        return '<div class="opcion"><span class="ico" style="width:36px;height:36px;border-radius:10px;background:var(--fondo);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:17px">' + t[1] + '</span><span class="cuerpo"><span class="nombre" style="display:block">' + t[2] + '</span>' + (t[3] ? '<span class="det" style="display:block">' + t[3] + '</span>' : '') + '</span>' +
+          interruptor('av-' + t[0], a.tipos[t[0]] !== false, 'App.avisoTipo(\'' + t[0] + '\',this.checked)', t[2]) + '</div>';
+      }).join('') +
+      '<div class="dos" style="padding:4px 16px 12px"><label class="campo compacto"><span>Silencio desde</span>' + horas('av-sd', a.silencio.d, 'App.avisoSilencio()') + '</label><label class="campo compacto"><span>hasta</span>' + horas('av-sh', a.silencio.h, 'App.avisoSilencio()') + '</label></div>' +
+      opcion('correo', 'Resumen por correo', 'A ' + esc(AJ.correo) + ', a la hora que elijás', interruptor('av-correo', a.correo.activo, 'App.avisoCorreo(this.checked)', 'Resumen por correo')) +
+      (a.correo.activo ? '<div class="dos" style="padding:0 16px 12px"><label class="campo compacto"><span>Hora</span>' + horas('av-hora', a.correo.hora, 'App.avisoCorreoHora()') + '</label>' +
+        '<label class="campo compacto"><span>Cuándo</span><select id="av-siempre" onchange="App.avisoCorreoHora()"><option value="algo"' + (!a.correo.siempre ? ' selected' : '') + '>Solo si hay algo</option><option value="siempre"' + (a.correo.siempre ? ' selected' : '') + '>Todos los días</option></select></label></div>' : '') +
+      opcion('campana', 'Probar un aviso ahora', 'En la barra del teléfono' + (a.correo.activo ? ' y por correo' : ''), '', 'App.probarAviso(this)'));
+  }
+  function avisoTipo(k, on) { var a = avCfg(); a.tipos[k] = !!on; guardarPrefs({ avisos: a }, 'Avisos: ' + k + (on ? ' encendido' : ' apagado')); }
+  function avisoSilencio() { var a = avCfg(); a.silencio = { d: Number(val('av-sd')), h: Number(val('av-sh')) }; guardarPrefs({ avisos: a }, 'Avisos: horas de silencio'); }
+  function avisoCorreo(on) { var a = avCfg(); a.correo.activo = !!on; a.urlApp = location.href.split(/[?#]/)[0]; guardarPrefs({ avisos: a }, 'Resumen por correo ' + (on ? 'encendido' : 'apagado')); pintar(); }
+  function avisoCorreoHora() { var a = avCfg(); a.correo.hora = Number(val('av-hora')); a.correo.siempre = val('av-siempre') === 'siempre'; guardarPrefs({ avisos: a }, 'Resumen por correo a las ' + a.correo.hora + ' h'); }
+  function avisosTelefono(on) {
+    if (!on) { guardar('mf-avisos-tel', 'no'); cfgSW(); toast('Avisos del teléfono apagados'); return pintar(); }
+    if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) { toast('Este navegador no permite avisos. Usá el resumen por correo.', 5000); return pintar(); }
+    Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') { toast('Sin permiso para avisar. Activalo en Ajustes del teléfono → Apps → Chrome → Notificaciones.', 6000); return pintar(); }
+      llamar('activarAvisosTelefono').then(function (llave) {
+        guardar('mf-avisos-llave', llave); guardar('mf-avisos-tel', 'si'); cfgSW();
+        return navigator.serviceWorker.ready.then(function (reg) {
+          if (!reg.periodicSync) return 'no';
+          return navigator.permissions.query({ name: 'periodic-background-sync' }).then(function (st) {
+            if (st.state !== 'granted') return 'no';
+            return reg.periodicSync.register('mf-avisos', { minInterval: 6 * 3600 * 1000 }).then(function () { return 'si'; });
+          });
+        }).catch(function () { return 'no'; });
+      }).then(function (auto) {
+        toast(auto === 'si' ? '🔔 Listo: te aviso en la barra' : '🔔 Avisos activados. Para la revisión automática, instalá la app (Agregar a pantalla de inicio).', 6000);
+        pintar();
+      }, function (e) { toast('⚠️ ' + (e.message || e)); pintar(); });
+    });
+  }
+  /** El service worker no puede leer localStorage: le dejamos lo necesario en una caché propia. */
+  function cfgSW() {
+    if (!('caches' in window)) return;
+    var a = avCfg();
+    var cfg = { url: conexion().url, llave: guardado('mf-avisos-llave', ''), tel: guardado('mf-avisos-tel', 'no') === 'si', tipos: a.tipos, silencio: a.silencio, version: VERSION_WEB };
+    caches.open('mf-cfg').then(function (c) { return c.put('./__cfg', new Response(JSON.stringify(cfg), { headers: { 'Content-Type': 'application/json' } })); }).catch(function () { /* nada */ });
+  }
+  function probarAviso(b) {
+    var a = avCfg();
+    if (a.correo.activo) srv('probarResumenCorreo', [], function (m) { toast(m); }, b);
+    if (avisosTel()) navigator.serviceWorker.ready.then(function (reg) {
+      reg.showNotification('✉ Así se ven los avisos', { body: 'Por ejemplo: 3 movimientos por asignar a sobres', icon: 'icons/icono-192.png', badge: 'icons/icono-192.png', tag: 'prueba', data: { url: './?ir=porasignar' }, actions: [{ action: 'abrir', title: 'Abrir' }] });
+    });
+    else if (!a.correo.activo) toast('Encendé “Avisos en el teléfono” o el resumen por correo.');
+  }
+
+  // ---------------------------------------------------------------- VERSIÓN NUEVA y ACTUALIZACIONES
+  var verNueva = null;
+  function revisarVersion() {
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (v) {
+      if (!v) return;
+      var antes = verNueva; verNueva = v;
+      if ((cmpVer(v.web, VERSION_WEB) > 0) !== (antes && cmpVer(antes.web, VERSION_WEB) > 0) && pantalla === 'inicio') pintar();
+    }).catch(function () { /* sin internet */ });
+  }
+  function tarjetasVersion() {
+    var h = '';
+    if (verNueva && cmpVer(verNueva.web, VERSION_WEB) > 0) h += '<div class="aviso-ver"><span style="font-size:24px">⬆</span><div style="flex:1;min-width:0"><b>Versión ' + esc(verNueva.web) + ' lista</b><div class="suave chico">' + esc(verNueva.novedades || '') + '</div></div><button class="btn chico" onclick="App.formActualizar()">Actualizar</button></div>';
+    if (AJ && AJ.version && cmpVer(AJ.version, SERVIDOR_MIN) < 0) h += '<div class="aviso-srv"><span style="font-size:22px">⚙</span><div style="flex:1;min-width:0"><b>Falta actualizar el servidor</b><div class="suave chico">Esta versión necesita el Codigo.gs ' + SERVIDOR_MIN + ' (tenés ' + esc(AJ.version) + '). Ajustes → Actualizaciones.</div></div></div>';
+    return h;
+  }
+  function actualizarApp() {
+    if (!('serviceWorker' in navigator)) return location.reload();
+    toast('Actualizando la app…');
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg) return location.reload();
+      return reg.update().then(function () { setTimeout(function () { location.reload(); }, 2500); });
+    }).catch(function () { location.reload(); });
+  }
+  function grupoActualizaciones() {
+    var srvNuevo = verNueva && AJ && cmpVer(verNueva.servidor, AJ.version) > 0, webNuevo = verNueva && cmpVer(verNueva.web, VERSION_WEB) > 0;
+    return grupo('ac', '⬆', '#F5B82E', 'Actualizaciones', (webNuevo || srvNuevo ? 'Hay versión nueva' : 'App ' + VERSION_WEB + ' · servidor ' + esc(AJ.version)),
+      '<div class="vers-ac"><div><small>App</small><b class="' + (webNuevo ? 'acento' : '') + '">' + VERSION_WEB + (webNuevo ? ' → ' + esc(verNueva.web) : '') + '</b></div><div><small>Servidor</small><b class="' + (srvNuevo ? 'acento' : '') + '">' + esc(AJ.version) + (srvNuevo ? ' → ' + esc(verNueva.servidor) : '') + '</b></div></div>' +
+      (verNueva && verNueva.novedades && (webNuevo || srvNuevo) ? '<div class="suave chico" style="padding:0 16px 8px">Novedades: ' + esc(verNueva.novedades) + '</div>' : '') +
+      opcion('recargar', 'Buscar actualizaciones', 'Actualiza la app y el servidor con un toque', '', 'App.formActualizar()') +
+      (AJ.actualizacion && AJ.actualizacion.anterior ? opcion('flechas', 'Volver a la versión anterior del servidor', 'Por si algo falló después de actualizar', '', 'App.volverAnterior(this)') : ''));
+  }
+  var PASOS_AC = ['Buscar versión nueva', 'Guardar cuál versión del servidor estaba', 'Instalar el servidor nuevo', 'Descargar la app nueva', 'Recargar la app'];
+  function formActualizar() {
+    abrir('<h2>⬆ Actualizaciones</h2><div class="pasos-ac" id="ac-pasos">' + PASOS_AC.map(function (p, i) { return '<div class="p" id="ac-p' + i + '"><span class="b"></span>' + p + '</div>'; }).join('') + '</div>' +
+      '<div class="barra" style="margin-top:10px"><i id="ac-barra" style="width:0%"></i></div><div class="suave chico" id="ac-msg" style="margin-top:10px;min-height:18px"></div><div id="ac-extra"></div>' +
+      '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+    correrActualizacion();
+  }
+  function pasoAc(i, estado) {
+    var e = $('ac-p' + i); if (!e) return;
+    e.className = 'p ' + estado;
+    var b = $('ac-barra'); if (b) b.style.width = Math.round(((estado === 'hecho' ? i + 1 : i) / PASOS_AC.length) * 100) + '%';
+  }
+  function msgAc(t) { var e = $('ac-msg'); if (e) e.innerHTML = t; }
+  function correrActualizacion() {
+    pasoAc(0, 'act');
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('No encuentro version.json en tu página.'); return r.json(); }).then(function (v) {
+      verNueva = v; pasoAc(0, 'hecho');
+      var srvNuevo = cmpVer(v.servidor, AJ.version) > 0, webNuevo = cmpVer(v.web, VERSION_WEB) > 0;
+      if (!srvNuevo && !webNuevo) { [1, 2, 3, 4].forEach(function (i) { pasoAc(i, 'hecho'); }); msgAc('<b class="verde">Todo al día ✓</b> · app ' + VERSION_WEB + ' · servidor ' + esc(AJ.version)); return; }
+      var srvPaso = srvNuevo ? servidorAuto() : Promise.resolve('nada');
+      return srvPaso.then(function (res) {
+        if (res === 'guiado') return;   // se queda en los pasos guiados
+        if (webNuevo) { pasoAc(3, 'act'); msgAc('Descargando la app ' + esc(v.web) + '…'); setTimeout(function () { pasoAc(3, 'hecho'); pasoAc(4, 'act'); actualizarApp(); }, 900); }
+        else { pasoAc(3, 'hecho'); pasoAc(4, 'hecho'); msgAc('<b class="verde">Servidor actualizado ✓</b>'); llamar('obtenerAjustes').then(function (x) { AJ = x; pintar(); }); }
+      });
+    }).catch(function (e) { msgAc('⚠️ ' + esc(e.message || e)); });
+  }
+  function servidorAuto() {
+    pasoAc(1, 'act');
+    var base = location.href.split(/[?#]/)[0].replace(/[^/]*$/, '');
+    var fijar = AJ.actualizacion && AJ.actualizacion.base ? Promise.resolve() : llamar('fijarUrlActualizacion', [base]);
+    return fijar.then(function () { pasoAc(1, 'hecho'); pasoAc(2, 'act'); msgAc('Instalando el servidor ' + esc(verNueva.servidor) + '… (puede tardar un minuto)'); return llamar('actualizarServidor'); })
+      .then(function (r) { pasoAc(2, 'hecho'); AJ.version = r.version; if (AJ.actualizacion) AJ.actualizacion.anterior = r.anterior; return 'ok'; })
+      .catch(function (e) { var m = e.message || String(e); pasoAc(2, 'mal'); servidorGuiado(m); return 'guiado'; });
+  }
+  function servidorGuiado(motivo) {
+    var porque = /API_DESACTIVADA/.test(motivo) ? 'Falta activar la <b>API de Google Apps Script</b> (una sola vez).' : /PERMISO_FALTA/.test(motivo) ? 'Falta el permiso nuevo: pegá también el <b>appsscript.json</b> de esta versión (una sola vez).' : 'No se pudo instalar solo: ' + esc(motivo);
+    msgAc(porque + ' Mientras tanto, actualizalo a mano:');
+    $('ac-extra').innerHTML = '<ol class="suave chico" style="margin:8px 0 0 18px;line-height:1.6">' +
+      (/API_DESACTIVADA/.test(motivo) ? '<li>Abrí <a href="https://script.google.com/home/usersettings" target="_blank" rel="noopener" class="enlace">script.google.com/home/usersettings</a> y encendé “API de Google Apps Script”. Después tocá Buscar actualizaciones otra vez.</li>' : '') +
+      '<li>Tocá “Copiar código nuevo”.</li><li>Abrí Apps Script, borrá todo en <b>Código</b> y pegá.</li><li>Guardar → Implementar → Gestionar implementaciones → ✏ → Versión: <b>Nueva</b> → Implementar.</li><li>Volvé aquí: la app lo detecta sola.</li></ol>' +
+      '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.copiarCodigo(this)">📋 Copiar código nuevo</button><a class="btn sec" href="https://script.google.com/home" target="_blank" rel="noopener">Abrir Apps Script ↗</a></div>';
+  }
+  function copiarCodigo(b) {
+    ocupar(b);
+    fetch('servidor/Codigo.gs?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (t) {
+      return navigator.clipboard.writeText(t).then(function () { liberar(b, true); toast('📋 Código copiado (' + Math.round(t.length / 1024) + ' KB). Pegalo en Apps Script.', 5000); });
+    }).catch(function (e) { liberar(b, false); toast('⚠️ No se pudo copiar: ' + (e.message || e)); });
+  }
+  function volverAnterior(b) {
+    if (!confirmarDoble(b)) return;
+    srv('volverVersionAnterior', [], function () { toast('✅ El servidor volvió a la versión anterior'); llamar('obtenerAjustes').then(function (x) { AJ = x; pintar(); }); }, b);
+  }
+  function confirmarDoble(b) { if (b.dataset.seguro === '1') return true; b.dataset.seguro = '1'; var n = b.querySelector('.nombre'); if (n) n.textContent = '¿Seguro? Tocá otra vez'; setTimeout(function () { b.dataset.seguro = ''; }, 4000); return false; }
+
+  // ---------------------------------------------------------------- SUPER Y OTROS
+  var PASILLOS = ['Frutas y verduras', 'Carnes', 'Lácteos y huevos', 'Granos y abarrotes', 'Panadería', 'Congelados', 'Bebidas', 'Limpieza', 'Cuidado personal', 'Bebé', 'Mascotas', 'Farmacia', 'Otros'];
+  var IC_PASILLO = { 'Frutas y verduras': '🥑', 'Carnes': '🥩', 'Lácteos y huevos': '🥛', 'Granos y abarrotes': '🍚', 'Panadería': '🍞', 'Congelados': '🧊', 'Bebidas': '🧃', 'Limpieza': '🧻', 'Cuidado personal': '🧴', 'Bebé': '🍼', 'Mascotas': '🐾', 'Farmacia': '💊', 'Otros': '🛒' };
+  var LISTA_BASE = [
+    ['Frutas y verduras', ['Bananos', 'Tomates', 'Cebolla', 'Papas', 'Zanahoria', 'Chile dulce', 'Culantro', 'Limones', 'Aguacate', 'Manzanas', 'Papaya']],
+    ['Carnes', ['Pollo', 'Carne molida', 'Bistec de res', 'Chuleta de cerdo', 'Pescado']],
+    ['Lácteos y huevos', ['Leche', 'Huevos', 'Queso tierno', 'Natilla', 'Mantequilla', 'Yogurt']],
+    ['Granos y abarrotes', ['Arroz', 'Frijoles', 'Azúcar', 'Sal', 'Aceite', 'Café', 'Salsa Lizano', 'Pasta', 'Atún', 'Avena', 'Harina', 'Salsa de tomate']],
+    ['Panadería', ['Pan cuadrado', 'Tortillas']],
+    ['Bebidas', ['Agua', 'Jugo', 'Refresco']],
+    ['Limpieza', ['Papel higiénico', 'Jabón de platos', 'Detergente', 'Cloro', 'Bolsas de basura', 'Toallas de papel']],
+    ['Cuidado personal', ['Pasta de dientes', 'Champú', 'Jabón de baño', 'Desodorante']],
+    ['Mascotas', ['Alimento para mascota']]
+  ];
+  var REGLAS_PASILLO = [[/banano|tomate|cebolla|papa\b|papas|zanahoria|chile|culantro|lim[oó]n|aguacate|manzana|papaya|fruta|verdura|lechuga|pepino|ayote|pi[ñn]a|naranja|fresa|mango|uva|apio|ajo|br[oó]coli|elote/, 'Frutas y verduras'],
+    [/pollo|carne|res\b|bistec|cerdo|chuleta|pescado|salchicha|jam[oó]n|tocineta|chorizo|camar[oó]n/, 'Carnes'], [/leche|huevo|queso|natilla|mantequilla|yogurt|yogur|crema/, 'Lácteos y huevos'],
+    [/arroz|frijol|az[uú]car|sal\b|aceite|caf[eé]|lizano|pasta\b|espagueti|at[uú]n|avena|harina|salsa|cereal|galleta|sardina|maicena|gelatina|consom/, 'Granos y abarrotes'], [/pan\b|pan |tortilla|queque|bollo/, 'Panadería'],
+    [/helado|congelad|hielo/, 'Congelados'], [/agua|jugo|refresco|gaseosa|cerveza|vino|soda/, 'Bebidas'], [/papel|jab[oó]n de platos|detergente|cloro|bolsa|toalla|desinfect|suavizante|escoba|esponja|limpia/, 'Limpieza'],
+    [/pasta de dientes|cepillo|champ[uú]|jab[oó]n|desodorante|crema dental|toallas? sanitaria|rasuradora|acondicionador/, 'Cuidado personal'], [/pa[ñn]al|beb[eé]|toallitas/, 'Bebé'],
+    [/mascota|perro|gato|arena/, 'Mascotas'], [/acetaminof|pastilla|medicina|vitamina|curita|alcohol/, 'Farmacia']];
+  function pasilloDe(n) { var s = sinTildes(n); for (var i = 0; i < REGLAS_PASILLO.length; i++) if (REGLAS_PASILLO[i][0].test(s)) return REGLAS_PASILLO[i][1]; return 'Otros'; }
+  var UNIDADES = ['u', 'kg', 'g', 'lb', 'L', 'ml', 'paq', 'docena'];
+  function leerTextoItem(t) {
+    t = String(t || '').trim(); if (!t) return null;
+    var U = '(kg|kilos?|g|gr|gramos?|lb|libras?|l|lt|litros?|ml|u|und|unidades?|paq|paquetes?|docenas?)';
+    var norm = function (u) { u = (u || '').toLowerCase(); return /^k/.test(u) ? 'kg' : /^(g|gr|gram)/.test(u) ? 'g' : /^(lb|lib)/.test(u) ? 'lb' : /^ml/.test(u) ? 'ml' : /^(l|lt|lit)/.test(u) ? 'L' : /^paq/.test(u) ? 'paq' : /^doc/.test(u) ? 'docena' : u ? 'u' : ''; };
+    var m = t.match(new RegExp('^(\\d+(?:[.,]\\d+)?)\\s*' + U + '?\\.?\\s+(?:de\\s+)?(.+)$', 'i')) || null, q = '', u = '', n = t;
+    if (m) { q = Number(m[1].replace(',', '.')); u = norm(m[2]) || 'u'; n = m[3]; }
+    else { m = t.match(new RegExp('^(.+?)\\s+(\\d+(?:[.,]\\d+)?)\\s*' + U + '?\\.?$', 'i')); if (m) { n = m[1]; q = Number(m[2].replace(',', '.')); u = norm(m[3]) || 'u'; } }
+    n = n.trim(); n = n.charAt(0).toUpperCase() + n.slice(1);
+    return { n: n, q: q, u: u, p: pasilloDe(n) };
+  }
+  var LISTAS = leerJSONSeguro('mf-listas') || null, LISTA = null, listaModo = 'super', listaTimer = null, fotosMem = {}, listaCola = leerJSONSeguro('mf-lista-cola') || [];
+  function cargarListas(cb) {
+    llamar('listas').then(function (l) { LISTAS = l; guardar('mf-listas', JSON.stringify(l)); if (pantalla === 'super') pintar(); if (cb) cb(); }, function (e) { if (pantalla === 'super' && !LISTAS) { LISTAS = []; pintar(); } toast('⚠️ ' + (e.message || e)); });
+  }
+  function pSuper() {
+    var h = cabSimple('Super y Otros', 'Listas de compras que podés compartir', null, botonNuevo('Nueva lista', 'App.formNuevaLista()'));
+    if (!LISTAS) { h += '<div class="caja vacio"><div class="spinner" style="margin:0 auto 10px"></div>Cargando tus listas…</div>'; $('p-super').innerHTML = h; return cargarListas(); }
+    if (!LISTAS.length) h += '<div class="vacio-lindo"><div style="font-size:46px">🛒</div><b>Todavía no tenés listas</b><div class="suave">Hacé tu lista del super con cantidades, marcala mientras comprás y compartila con quien quieras.</div><button class="btn" style="margin-top:12px" onclick="App.formNuevaLista()">Crear mi primera lista</button></div>';
+    else h += LISTAS.map(function (l) {
+      return '<button class="item lista-card" onclick="App.abrirLista(\'' + l.id + '\')"><span class="av-lista">' + esc(l.icono) + '</span><span class="cuerpo" style="flex:1;min-width:0"><b>' + esc(l.nombre) + '</b><span class="suave chico" style="display:block">' + l.total + ' cosa' + (l.total === 1 ? '' : 's') + (l.marcados ? ' · ' + l.marcados + ' en el carrito' : '') + '</span>' +
+        (l.compartida ? '<span class="verde chico fuerte" style="display:block">👥 Compartida</span>' : '') + (l.consultas ? '<span class="acento chico fuerte" style="display:block">📷 ' + l.consultas + ' “¿este sirve?”</span>' : '') + '</span><span class="flecha">›</span></button>';
+    }).join('');
+    $('p-super').innerHTML = h;
+    if (!pSuper.refrescado) { pSuper.refrescado = true; cargarListas(); }
+  }
+  function formNuevaLista() {
+    var primera = !LISTAS || !LISTAS.length;
+    abrir('<h2>Nueva lista</h2><label class="campo"><span>Nombre</span><input id="nl-nombre" placeholder="Ej. Super semanal" value="' + (primera ? 'Super semanal' : '') + '"></label>' +
+      '<div class="suave chico" style="margin-top:12px">Ícono</div><div class="chips" id="nl-ic" style="margin-top:6px">' + ['🛒', '🥑', '💊', '🏠', '🎁', '🐾', '🧴'].map(function (x, i) { return '<button class="chip' + (i ? '' : ' on') + '" onclick="App.nlIcono(this)">' + x + '</button>'; }).join('') + '</div>' +
+      '<label class="check"><input type="checkbox" id="nl-base"' + (primera ? ' checked' : '') + '> Empezar con una lista base de super (unas 50 cosas típicas; antes de crearla quitás las que no usás)</label>' +
+      '<div class="acciones"><button class="btn" onclick="App.crearListaNueva(this)">Crear</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function nlIcono(b) { Array.prototype.forEach.call(document.querySelectorAll('#nl-ic .chip'), function (c) { c.classList.toggle('on', c === b); }); }
+  function crearListaNueva(b) {
+    var nombre = val('nl-nombre').trim() || 'Lista', ic = (document.querySelector('#nl-ic .chip.on') || {}).textContent || '🛒';
+    if ($('nl-base').checked) return elegirBase(nombre, ic);
+    srv('crearLista', [nombre, ic, []], function (l) { cerrar(); LISTA = l; listaModo = 'editar'; cargarListas(); ir('lista'); }, b);
+  }
+  var baseTmp = null;
+  function elegirBase(nombre, ic) {
+    baseTmp = { nombre: nombre, ic: ic };
+    abrir('<h2>Lista base</h2><div class="suave">Desmarcá lo que no comprás. Después la editás como querás.</div>' + LISTA_BASE.map(function (g) {
+      return '<div class="seccion-t" style="margin-top:14px">' + IC_PASILLO[g[0]] + ' ' + g[0] + '</div>' + g[1].map(function (n) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="lb-it" data-p="' + esc(g[0]) + '" value="' + esc(n) + '" checked> ' + esc(n) + '</label>'; }).join('');
+    }).join('') + '<div class="acciones"><button class="btn" onclick="App.crearConBase(this)">Crear lista</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function crearConBase(b) {
+    var items = Array.prototype.filter.call(document.querySelectorAll('.lb-it'), function (x) { return x.checked; }).map(function (x) { return { n: x.value, q: '', u: '', p: x.dataset.p }; });
+    srv('crearLista', [baseTmp.nombre, baseTmp.ic, items], function (l) { cerrar(); LISTA = l; listaModo = 'editar'; cargarListas(); ir('lista'); toast('✅ Lista creada con ' + items.length + ' cosas'); }, b);
+  }
+  function abrirLista(id) {
+    var cache = leerJSONSeguro('mf-lista-' + id);
+    LISTA = cache || { id: id, nombre: '…', icono: '🛒', items: [], v: 0, cargando: true };
+    listaModo = guardado('mf-lista-modo', 'super');
+    ir('lista');
+    refrescarLista(true);
+  }
+  function reaplicarListaCola(l) { listaCola.filter(function (x) { return x.id === l.id; }).forEach(function (x) { aplicarOpLocal(l, x.op); }); return l; }
+  function refrescarLista(forzar) {
+    if (!LISTA) return;
+    var id = LISTA.id;
+    llamar('obtenerLista', [id, forzar ? 0 : LISTA.v]).then(function (r) {
+      if (!LISTA || LISTA.id !== id || r.sinCambios) return;
+      var antes = LISTA.cambio;
+      LISTA = reaplicarListaCola(r); guardar('mf-lista-' + id, JSON.stringify(r));
+      if (r.cambio && antes && r.cambio.cuando !== antes.cuando && r.cambio.txt.indexOf(miNombre() + ' ') !== 0 && avCfg().tipos.super !== false) toast('🛒 ' + r.cambio.txt, 4000);
+      if (pantalla === 'lista' && !escribiendoLista()) pintar();
+    }, function () { /* sin señal: se ve lo guardado */ });
+    enviarListaCola();
+  }
+  function escribiendoLista() { var e = document.activeElement; return e && /INPUT|TEXTAREA/.test(e.tagName); }
+  function cicloLista() {
+    clearTimeout(listaTimer);
+    listaTimer = setTimeout(function () { if (pantalla === 'lista' && !document.hidden) refrescarLista(false); if (pantalla === 'lista') cicloLista(); }, 4000);
+  }
+  function aplicarOpLocal(l, op) {
+    var it = op.item ? (l.items || []).filter(function (x) { return x.id === op.item; })[0] : null, yo = miNombre();
+    if (op.t === 'marcar' && it) { it.on = !!op.on; it.por = op.on ? yo : ''; if (op.on) it.estado = ''; }
+    else if (op.t === 'nohay' && it) { it.estado = 'nohay'; it.on = false; it.por = yo; }
+    else if (op.t === 'agregar' && op.datos) { if (!l.items.some(function (x) { return x.id === op.datos.id; })) l.items.push(Object.assign({ on: false, estado: '', foto: '', nota: '' }, op.datos)); }
+    else if (op.t === 'editar' && it) Object.assign(it, op.datos);
+    else if (op.t === 'quitar' && it) l.items.splice(l.items.indexOf(it), 1);
+    else if (op.t === 'consulta' && it) it.consulta = { foto: op.foto, msg: op.msg, por: yo, cuando: new Date().toISOString(), resp: null };
+    else if (op.t === 'responder' && it && it.consulta) { it.consulta.resp = { si: !!op.si, msg: op.msg || '', por: yo }; if (op.si) it.on = true; }
+    else if (op.t === 'editable') l.editable = !!op.on;
+    else if (op.t === 'renombrar' && op.nombre) l.nombre = op.nombre;
+    else if (op.t === 'terminar') {
+      if (op.pendientes === 'borrar' || op.pendientes === 'mover') l.items = l.items.filter(function (x) { return x.on; });
+      l.items.forEach(function (x) { x.on = false; x.por = ''; x.estado = ''; x.consulta = null; });
+    }
+  }
+  function listaOp(op, desc) {
+    if (!LISTA) return;
+    if (op.t === 'agregar' && op.datos && !op.datos.id) op.datos.id = 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+    aplicarOpLocal(LISTA, op);
+    listaCola.push({ id: LISTA.id, op: op, desc: desc || '' }); guardar('mf-lista-cola', JSON.stringify(listaCola));
+    guardar('mf-lista-' + LISTA.id, JSON.stringify(LISTA));
+    pintar(); enviarListaCola();
+  }
+  var enviandoLista = false;
+  function enviarListaCola() {
+    if (enviandoLista || !listaCola.length) return;
+    enviandoLista = true;
+    var x = listaCola[0];
+    llamar('cambiarLista', [x.id, x.op, miNombre()]).then(function (r) {
+      listaCola.shift(); guardar('mf-lista-cola', JSON.stringify(listaCola)); enviandoLista = false;
+      if (LISTA && LISTA.id === r.id) { LISTA = reaplicarListaCola(r); guardar('mf-lista-' + r.id, JSON.stringify(r)); if (pantalla === 'lista' && !escribiendoLista()) pintar(); }
+      if (listaCola.length) enviarListaCola();
+    }, function (e) {
+      enviandoLista = false;
+      if (!e.red) { listaCola.shift(); guardar('mf-lista-cola', JSON.stringify(listaCola)); toast('⚠️ ' + (e.message || e)); refrescarLista(true); }
+    });
+  }
+  function fotoSrc(fid, img) {
+    if (!fid) return;
+    if (fotosMem[fid]) { if (img) img.src = fotosMem[fid]; return; }
+    try { var s = sessionStorage.getItem('mf-foto-' + fid); if (s) { fotosMem[fid] = s; if (img) img.src = s; return; } } catch (e) { /* nada */ }
+    llamar('fotoLista', [fid]).then(function (d) { if (!d) return; fotosMem[fid] = d; try { sessionStorage.setItem('mf-foto-' + fid, d); } catch (e) { /* lleno */ } pintarFotos(); });
+  }
+  function pintarFotos() { Array.prototype.forEach.call(document.querySelectorAll('img[data-foto]'), function (i) { var f = i.getAttribute('data-foto'); if (fotosMem[f]) i.src = fotosMem[f]; else fotoSrc(f); }); }
+  function miniFoto(it, accion) {
+    return it.foto ? '<button class="mini-foto" onclick="' + accion + '"><img data-foto="' + esc(it.foto) + '" alt=""></button>'
+      : '<button class="mini-foto vacia" onclick="' + accion + '" aria-label="Agregar foto">📷</button>';
+  }
+  function qtyTxt(it) { return it.q !== '' && it.q !== null && it.q !== undefined ? String(it.q).replace('.', ',') + ' ' + (it.u || 'u') : ''; }
+  function grupos(items) {
+    var g = {}; items.forEach(function (it) { var p = it.p || pasilloDe(it.n); (g[p] = g[p] || []).push(it); });
+    return PASILLOS.filter(function (p) { return g[p]; }).map(function (p) { return [p, g[p]]; });
+  }
+  function pLista() {
+    if (!LISTA) return ir('super');
+    var L = LISTA, it = L.items || [], marc = it.filter(function (x) { return x.on; }).length;
+    var h = cabSimple(esc(L.icono) + ' ' + esc(L.nombre), it.length + ' cosa' + (it.length === 1 ? '' : 's') + (L.token ? ' · 👥 compartida' : ''), 'App.ir(\'super\')');
+    h += '<div class="chips desliza" style="margin:-6px 0 12px"><button class="chip' + (listaModo === 'super' ? ' on' : '') + '" onclick="App.modoLista(\'super\')">🛒 En el super</button><button class="chip' + (listaModo === 'editar' ? ' on' : '') + '" onclick="App.modoLista(\'editar\')">✏ Editar</button><button class="chip" onclick="App.compartirLista()">👥 Compartir</button><button class="chip" onclick="App.menuLista()">⋯</button></div>';
+    if (L.cargando && !it.length) h += '<div class="caja vacio"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div>';
+    if (L.cambio && L.cambio.txt) h += '<div class="suave chico" style="margin:-4px 0 10px">● ' + esc(L.cambio.txt) + ' · ' + hace(L.cambio.cuando) + '</div>';
+    // preguntas "¿este sirve?" que me toca responder (o que esperan respuesta)
+    it.filter(function (x) { return x.consulta && !x.consulta.resp; }).forEach(function (x) {
+      var mia = x.consulta.por === miNombre();
+      h += '<div class="consulta-card"><div class="fila"><b>📷 ' + (mia ? 'Preguntaste' : esc(x.consulta.por) + ' pregunta') + ': ¿este sirve?</b><span class="suave chico">' + hace(x.consulta.cuando) + '</span></div><div class="suave chico">' + esc(x.n) + (qtyTxt(x) ? ' · ' + esc(qtyTxt(x)) : '') + '</div>' +
+        '<div class="dos" style="margin-top:8px"><div><div class="suave chico">EL QUE PEDISTE</div>' + (x.foto ? '<img class="foto-c" data-foto="' + esc(x.foto) + '" alt="">' : '<div class="foto-c vacia">sin foto</div>') + '</div><div><div class="suave chico">EL QUE HAY</div>' + (x.consulta.foto ? '<img class="foto-c" data-foto="' + esc(x.consulta.foto) + '" alt="">' : '<div class="foto-c vacia">sin foto</div>') + '</div></div>' +
+        (x.consulta.msg ? '<div class="msg-c">' + esc(x.consulta.por) + ': “' + esc(x.consulta.msg) + '”</div>' : '') +
+        (mia ? '<div class="suave chico" style="margin-top:8px">⏳ Esperando respuesta…</div>' : '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.responderConsulta(\'' + x.id + '\',true)">✓ Sí, llevalo</button><button class="btn sec" onclick="App.responderConsulta(\'' + x.id + '\',false)">✗ No, dejalo</button></div>') + '</div>';
+    });
+    if (listaModo === 'editar') {
+      h += '<div class="agregar-it"><input id="li-nuevo" placeholder="＋ Agregar… (ej. “2 kg arroz”)" autocomplete="off" onkeydown="if(event.key===\'Enter\')App.agregarItem()"><button class="btn chico" onclick="App.agregarItem()">Agregar</button></div>';
+      if (!it.length && !L.cargando) h += '<div class="caja vacio">Escribí arriba lo que necesitás comprar.<br><button class="btn sec chico" style="margin-top:10px" onclick="App.agregarBasicos()">⭐ Agregar básicos</button></div>';
+      grupos(it).forEach(function (g) {
+        h += '<div class="seccion-t">' + IC_PASILLO[g[0]] + ' ' + esc(g[0]) + '</div><div class="caja sinpad">' + g[1].map(function (x) {
+          return '<div class="it-ed">' + miniFoto(x, 'App.formItem(\'' + x.id + '\')') + '<button class="it-nom" onclick="App.formItem(\'' + x.id + '\')"><b>' + esc(x.n) + '</b>' + (x.nota ? '<span class="suave chico">' + esc(x.nota) + '</span>' : '') + '</button>' +
+            '<span class="stepper"><button onclick="App.cantItem(\'' + x.id + '\',-1)" aria-label="Menos">−</button><b>' + (esc(qtyTxt(x)) || '—') + '</b><button class="mas" onclick="App.cantItem(\'' + x.id + '\',1)" aria-label="Más">+</button></span></div>';
+        }).join('') + '</div>';
+      });
+      if (it.length) h += '<div class="chips" style="margin-top:12px;flex-wrap:wrap"><button class="chip" onclick="App.agregarBasicos()">⭐ Agregar básicos</button><button class="chip" onclick="App.loDeSiempre()">🔁 Lo de siempre</button></div>';
+    } else {
+      var pend = it.filter(function (x) { return !x.on; }), en = it.filter(function (x) { return x.on; });
+      h += '<div class="caja" style="padding:12px 14px"><div class="fila" style="font-size:14px"><b>' + marc + ' de ' + it.length + ' en el carrito</b><span class="suave">' + (it.length - marc ? 'faltan ' + (it.length - marc) : 'listo ✓') + '</span></div>' + barra(it.length ? marc / it.length : 0, false) + '</div>';
+      grupos(pend).forEach(function (g) {
+        h += '<div class="seccion-t">' + IC_PASILLO[g[0]] + ' ' + esc(g[0]) + '</div><div class="caja sinpad">' + g[1].map(filaSuper).join('') + '</div>';
+      });
+      if (en.length) h += plegable('carrito', '✓ En el carrito (' + en.length + ')', '', '<div class="caja sinpad">' + en.map(filaSuper).join('') + '</div>');
+      if (it.length) h += '<button class="btn" style="margin-top:14px;width:100%;justify-content:center" onclick="App.formTerminar()">Terminar compra</button>';
+    }
+    $('p-lista').innerHTML = h;
+    pintarFotos(); cicloLista();
+    if (listaModo === 'super') pantallaEncendida(true);
+  }
+  function filaSuper(x) {
+    return '<div class="it-su' + (x.on ? ' on' : '') + '"><label class="it-check"><input type="checkbox"' + (x.on ? ' checked' : '') + ' onchange="App.marcarItem(\'' + x.id + '\',this.checked)" aria-label="' + esc(x.n) + '"></label>' +
+      miniFoto(x, 'App.verItem(\'' + x.id + '\')') + '<button class="it-nom" onclick="App.verItem(\'' + x.id + '\')"><b>' + esc(x.n) + '</b>' +
+      '<span class="suave chico">' + [x.nota ? esc(x.nota) : '', x.estado === 'nohay' ? '<span class="rojo">✗ ' + esc(x.por || '') + ': no hay</span>' : '', x.on && x.por && x.por !== miNombre() ? esc(x.por) + ' lo marcó' : ''].filter(String).join(' · ') + '</span></button>' +
+      '<b class="it-q">' + esc(qtyTxt(x)) + '</b></div>';
+  }
+  function hace(iso) { var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); return s < 60 ? 'hace ' + Math.round(s) + ' s' : s < 3600 ? 'hace ' + Math.round(s / 60) + ' min' : s < 86400 ? 'hace ' + Math.round(s / 3600) + ' h' : fechaCorta(iso); }
+  var wakeLock = null;
+  function pantallaEncendida(on) {
+    try {
+      if (on && !wakeLock && navigator.wakeLock) navigator.wakeLock.request('screen').then(function (w) { wakeLock = w; w.addEventListener('release', function () { wakeLock = null; }); }).catch(function () { /* nada */ });
+      if (!on && wakeLock) { wakeLock.release(); wakeLock = null; }
+    } catch (e) { /* nada */ }
+  }
+  function modoLista(m) { listaModo = m; guardar('mf-lista-modo', m); if (m !== 'super') pantallaEncendida(false); pintar(); }
+  function itemPor(id) { return (LISTA.items || []).filter(function (x) { return x.id === id; })[0]; }
+  function marcarItem(id, on) { if (navigator.vibrate && on) { try { navigator.vibrate(15); } catch (e) { /* nada */ } } listaOp({ t: 'marcar', item: id, on: !!on }); }
+  function agregarItem() {
+    var d = leerTextoItem(val('li-nuevo')); if (!d) return;
+    var ya = (LISTA.items || []).filter(function (x) { return sinTildes(x.n) === sinTildes(d.n); })[0];
+    if (ya) { toast(d.n + ' ya está en la lista'); return; }
+    listaOp({ t: 'agregar', datos: d }, 'Agregar ' + d.n);
+    setTimeout(function () { var i = $('li-nuevo'); if (i) { i.value = ''; i.focus(); } }, 50);
+  }
+  function cantItem(id, d) {
+    var x = itemPor(id); if (!x) return;
+    var paso = x.u === 'kg' || x.u === 'L' ? 0.5 : x.u === 'g' || x.u === 'ml' ? 100 : 1;
+    var q = Math.max(0, Math.round(((Number(x.q) || 0) + d * paso) * 100) / 100);
+    listaOp({ t: 'editar', item: id, datos: { q: q || '', u: x.u || (q ? 'u' : '') } });
+  }
+  function formItem(id) {
+    var x = id ? itemPor(id) : { n: '', q: '', u: 'u', p: 'Otros', nota: '', foto: '' };
+    if (!x) return;
+    abrir('<h2>' + (id ? esc(x.n) : 'Nueva cosa') + '</h2>' +
+      '<div class="caja" style="flex-direction:row;gap:14px;align-items:center"><div class="foto-g' + (x.foto ? '' : ' vacia') + '" id="fi-prev">' + (x.foto ? '<img data-foto="' + esc(x.foto) + '" alt="">' : '📷') + '</div>' +
+      '<div style="flex:1"><b>Foto (opcional)</b><div class="suave chico">Para no confundir marcas o tamaños</div><div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.fotoItem(\'' + (id || '') + '\',true)">📷 Cámara</button><button class="chip" onclick="App.fotoItem(\'' + (id || '') + '\',false)">🖼 Galería</button>' + (x.foto ? '<button class="chip" onclick="App.quitarFotoItem(\'' + id + '\')">Quitar</button>' : '') + '</div></div></div>' +
+      '<label class="campo"><span>Nombre</span><input id="fi-n" value="' + esc(x.n) + '"></label>' +
+      '<div class="dos"><label class="campo"><span>Cantidad</span><input id="fi-q" inputmode="decimal" value="' + esc(String(x.q === '' || x.q === undefined ? '' : x.q).replace('.', ',')) + '"></label><label class="campo"><span>Unidad</span><select id="fi-u">' + UNIDADES.map(function (u) { return '<option' + ((x.u || 'u') === u ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select></label></div>' +
+      '<label class="campo"><span>Pasillo</span><select id="fi-p">' + PASILLOS.map(function (p) { return '<option' + ((x.p || pasilloDe(x.n)) === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select></label>' +
+      '<label class="campo"><span>Nota</span><input id="fi-nota" placeholder="Ej. El de fresa, botella de 1 L" value="' + esc(x.nota || '') + '"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarItem(\'' + (id || '') + '\')">Guardar</button>' + (id ? '<button class="btn sec peligro" id="fi-borrar" onclick="App.quitarItem(\'' + id + '\')">Quitar de la lista</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    pintarFotos();
+  }
+  function guardarItem(id) {
+    var n = val('fi-n').trim(); if (!n) return toast('Escribí el nombre.');
+    var d = { n: n, q: C.leerNumero(val('fi-q')) || '', u: val('fi-u'), p: val('fi-p'), nota: val('fi-nota').trim() };
+    if (id) listaOp({ t: 'editar', item: id, datos: d }, 'Cambiar ' + n); else listaOp({ t: 'agregar', datos: d }, 'Agregar ' + n);
+    cerrar();
+  }
+  function quitarItem(id) { var b = $('fi-borrar'); if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Tocá otra vez'; return; } var x = itemPor(id); listaOp({ t: 'quitar', item: id }, 'Quitar ' + (x ? x.n : '')); cerrar(); }
+  /** Foto: se achica en el teléfono (≈ 25–45 KB) y se guarda en tu hoja */
+  function elegirFoto(camara) {
+    return new Promise(function (ok, mal) {
+      var inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; if (camara) inp.setAttribute('capture', 'environment');
+      inp.onchange = function () { var f = inp.files && inp.files[0]; if (!f) return mal(new Error('sin foto')); achicarFoto(f).then(ok, mal); };
+      inp.click();
+    });
+  }
+  function achicarFoto(f) {
+    return new Promise(function (ok, mal) {
+      var url = URL.createObjectURL(f), img = new Image();
+      img.onload = function () {
+        var lado = 520, q = 0.72, intento = 0, d;
+        do {
+          var e = Math.min(1, lado / Math.max(img.width, img.height)), c = document.createElement('canvas');
+          c.width = Math.round(img.width * e); c.height = Math.round(img.height * e);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          d = c.toDataURL('image/jpeg', q); lado = Math.round(lado * 0.85); q = Math.max(0.45, q - 0.07); intento++;
+        } while (d.length > 45000 && intento < 8);
+        URL.revokeObjectURL(url);
+        d.length > 47000 ? mal(new Error('La foto quedó muy grande.')) : ok(d);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); mal(new Error('No se pudo leer la foto.')); };
+      img.src = url;
+    });
+  }
+  function fotoItem(id, camara) {
+    elegirFoto(camara).then(function (d) {
+      var p = $('fi-prev'); if (p) { p.className = 'foto-g'; p.innerHTML = '<img src="' + d + '" alt="">'; }
+      toast('Subiendo la foto…');
+      return llamar('subirFotoLista', [LISTA.id, d]).then(function (fid) {
+        fotosMem[fid] = d;
+        if (id) listaOp({ t: 'editar', item: id, datos: { foto: fid } }, 'Foto de ' + (itemPor(id) || {}).n);
+        else { var n = val('fi-n').trim() || 'Producto'; listaOp({ t: 'agregar', datos: { n: n, q: C.leerNumero(val('fi-q')) || '', u: val('fi-u'), p: val('fi-p'), nota: val('fi-nota').trim(), foto: fid } }, 'Agregar ' + n); cerrar(); }
+        toast('✅ Foto guardada');
+      });
+    }).catch(function (e) { if (e && e.message !== 'sin foto') toast('⚠️ ' + e.message); });
+  }
+  function quitarFotoItem(id) { listaOp({ t: 'editar', item: id, datos: { foto: '' } }, 'Quitar foto'); cerrar(); }
+  function verItem(id) {
+    var x = itemPor(id); if (!x) return;
+    abrir('<div class="fila"><h2 style="margin:0">' + esc(x.n) + '</h2><b>' + esc(qtyTxt(x)) + '</b></div>' + (x.nota ? '<div class="suave">“' + esc(x.nota) + '”</div>' : '') +
+      (x.foto ? '<img class="foto-grande" data-foto="' + esc(x.foto) + '" alt="">' : '<div class="foto-grande vacia" onclick="App.cerrar();App.formItem(\'' + id + '\')">📷<span class="suave chico">Sin foto · tocá para agregar una</span></div>') +
+      '<div class="acciones"><button class="btn" style="background:var(--positivo);border-color:var(--positivo);color:#111" onclick="App.cerrar();App.marcarItem(\'' + id + '\',true)">✓ Este es, va al carrito</button>' +
+      '<button class="btn sec" onclick="App.preguntarItem(\'' + id + '\')">📷 No está igual · ¿este sirve?</button><button class="btn sec" onclick="App.cerrar();App.noHayItem(\'' + id + '\')">✗ No hay</button></div>');
+    pintarFotos();
+  }
+  function noHayItem(id) { listaOp({ t: 'nohay', item: id }, 'No hay'); }
+  function preguntarItem(id) {
+    elegirFoto(true).then(function (d) {
+      abrir('<h2>📷 ¿Este sirve?</h2><img class="foto-grande" src="' + d + '" alt=""><label class="campo"><span>Mensaje corto (opcional)</span><input id="pq-msg" placeholder="Ej. No hay de fresa, ¿llevo de mora?"></label>' +
+        '<div class="acciones"><button class="btn" id="pq-ok" onclick="App.enviarPregunta(\'' + id + '\')">Preguntar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+      preguntarItem.foto = d;
+    }).catch(function (e) { if (e && e.message !== 'sin foto') toast('⚠️ ' + e.message); });
+  }
+  function enviarPregunta(id) {
+    var d = preguntarItem.foto, b = $('pq-ok'); ocupar(b);
+    llamar('subirFotoLista', [LISTA.id, d]).then(function (fid) { fotosMem[fid] = d; liberar(b, true); cerrar(); listaOp({ t: 'consulta', item: id, foto: fid, msg: val('pq-msg') }, '¿Este sirve?'); toast('📷 Pregunta enviada'); },
+      function (e) { liberar(b, false); toast('⚠️ ' + (e.message || e)); });
+  }
+  function responderConsulta(id, si) { listaOp({ t: 'responder', item: id, si: !!si }, si ? 'Sí, llevalo' : 'No, dejalo'); }
+  function agregarBasicos() {
+    var ya = {}; (LISTA.items || []).forEach(function (x) { ya[sinTildes(x.n)] = 1; });
+    abrir('<h2>⭐ Agregar básicos</h2><div class="suave">Marcá lo que querés sumar a esta lista.</div>' + LISTA_BASE.map(function (g) {
+      var f = g[1].filter(function (n) { return !ya[sinTildes(n)]; });
+      return f.length ? '<div class="seccion-t" style="margin-top:12px">' + IC_PASILLO[g[0]] + ' ' + g[0] + '</div>' + f.map(function (n) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="ab-it" data-p="' + esc(g[0]) + '" value="' + esc(n) + '"> ' + esc(n) + '</label>'; }).join('') : '';
+    }).join('') + '<div class="acciones"><button class="btn" onclick="App.guardarBasicos()">Agregar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarBasicos() {
+    var l = Array.prototype.filter.call(document.querySelectorAll('.ab-it'), function (x) { return x.checked; });
+    l.forEach(function (x) { listaOp({ t: 'agregar', datos: { n: x.value, q: '', u: '', p: x.dataset.p } }, 'Agregar ' + x.value); });
+    cerrar(); if (l.length) toast('✅ ' + l.length + ' agregadas');
+  }
+  function loDeSiempre() { toast('Lo de siempre: al terminar cada compra, la lista se conserva con sus cantidades. Solo se limpian las marcas.', 6000); }
+  function compartirLista() {
+    var L = LISTA;
+    var pintarC = function (tok, impl) {
+      var link = location.href.split(/[?#]/)[0].replace(/[^/]*$/, '') + 'lista.html#s=' + encodeURIComponent(impl) + '&k=' + encodeURIComponent(tok);
+      compartirLista.link = link;
+      abrir('<h2>👥 Compartir “' + esc(L.nombre) + '”</h2><div class="suave">Quien tenga el link ve y marca <b>solo esta lista</b>. No ve tus cuentas, sobres ni montos. No necesita instalar nada.</div>' +
+        '<div class="caja" style="margin-top:12px;font-size:13px;word-break:break-all" class="suave">' + esc(link.replace(/k=(.{6}).*/, 'k=$1…')) + '</div>' +
+        '<div class="dos"><button class="btn" onclick="App.enviarLink()">📤 Enviar</button><button class="btn sec" onclick="App.copiarLink()">Copiar</button></div>' +
+        '<label class="check"><input type="checkbox"' + (L.editable !== false ? ' checked' : '') + ' onchange="App.listaEditable(this.checked)"> Pueden agregar, cambiar y quitar cosas</label>' +
+        '<div class="acciones"><button class="btn sec" onclick="App.nuevoLink(this)">⟲ Cambiar link (el viejo deja de servir)</button><button class="btn sec peligro" onclick="App.dejarCompartir(this)">Dejar de compartir</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+    };
+    abrir('<h2>👥 Compartir</h2><div class="caja vacio"><div class="spinner" style="margin:0 auto 10px"></div>Preparando el link…</div>');
+    llamar('linkLista', [L.id, false]).then(function (r) { L.token = r.token; pintarC(r.token, r.implementacion); }, function (e) { cerrar(); toast('⚠️ ' + (e.message || e)); });
+  }
+  function enviarLink() {
+    var url = compartirLista.link;
+    if (navigator.share) navigator.share({ title: LISTA.nombre, text: '🛒 ' + LISTA.nombre + ': abrí la lista y marcá lo que vas metiendo al carrito', url: url }).catch(function () { /* cancelado */ });
+    else copiarLink();
+  }
+  function copiarLink() { navigator.clipboard.writeText(compartirLista.link).then(function () { toast('📋 Link copiado'); }, function () { toast('No se pudo copiar'); }); }
+  function listaEditable(on) { listaOp({ t: 'editable', on: !!on }, on ? 'Pueden editar' : 'Solo marcar'); }
+  function nuevoLink(b) { ocupar(b); llamar('linkLista', [LISTA.id, true]).then(function (r) { liberar(b, true); LISTA.token = r.token; compartirLista(); toast('⟲ Link nuevo: el anterior ya no sirve'); }, function (e) { liberar(b, false); toast('⚠️ ' + (e.message || e)); }); }
+  function dejarCompartir(b) { if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Tocá otra vez'; return; } srv('quitarLinkLista', [LISTA.id], function () { LISTA.token = ''; cerrar(); pintar(); toast('La lista ya no está compartida'); }, b); }
+  function menuLista() {
+    abrir('<h2>' + esc(LISTA.icono) + ' ' + esc(LISTA.nombre) + '</h2><label class="campo"><span>Nombre</span><input id="ml-n" value="' + esc(LISTA.nombre) + '"></label>' +
+      '<label class="campo"><span>Tu nombre en las listas</span><input id="ml-yo" value="' + esc(miNombre()) + '"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarMenuLista()">Guardar</button><button class="btn sec peligro" id="ml-borrar" onclick="App.borrarLista(this)">Borrar esta lista</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarMenuLista() {
+    var n = val('ml-n').trim(), yo = val('ml-yo').trim();
+    if (yo) guardar('mf-mi-nombre', yo.slice(0, 30));
+    if (n && n !== LISTA.nombre) { LISTA.nombre = n; listaOp({ t: 'renombrar', nombre: n }, 'Renombrar lista'); }
+    cerrar(); pintar();
+  }
+  function borrarLista(b) { if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Se borra para todos'; return; } srv('eliminarLista', [LISTA.id], function () { cerrar(); LISTA = null; LISTAS = null; ir('super'); toast('Lista borrada'); }, b); }
+  function formTerminar() {
+    var pend = (LISTA.items || []).filter(function (x) { return !x.on; }), otras = (LISTAS || []).filter(function (l) { return l.id !== LISTA.id; });
+    abrir('<h2>Terminar compra</h2><div class="caja" style="gap:4px"><b>' + ((LISTA.items || []).length - pend.length) + ' de ' + (LISTA.items || []).length + ' en el carrito ✓</b>' +
+      (pend.length ? '<div class="suave chico">Quedaron pendientes: ' + pend.map(function (x) { return esc(x.n); }).join(', ') + '</div>' : '<div class="verde chico fuerte">¡No quedó nada pendiente!</div>') + '</div>' +
+      (pend.length ? '<div class="suave chico fuerte" style="margin-top:10px">¿QUÉ HACEMOS CON LOS PENDIENTES?</div>' +
+        '<label class="op on"><input type="radio" name="tp" value="dejar" checked> Dejarlos para la próxima</label>' +
+        (otras.length ? '<label class="op"><input type="radio" name="tp" value="mover"> Pasarlos a <select id="tp-dest" onclick="event.stopPropagation()">' + otras.map(function (l) { return '<option value="' + l.id + '">' + esc(l.icono + ' ' + l.nombre) + '</option>'; }).join('') + '</select></label>' : '') +
+        '<label class="op"><input type="radio" name="tp" value="borrar"> Borrarlos de la lista</label>' : '') +
+      '<div class="caja" style="margin-top:12px;gap:6px"><b>¿El gasto?</b><div class="suave chico">Si pagaste con tarjeta o SINPE, el correo del banco lo anota solo: asignalo a tu sobre de super desde Por asignar. Si pagaste en efectivo, anotalo a mano.</div>' +
+      '<div class="dos"><button class="btn sec chico" onclick="App.terminarCompra(\'asignar\')">Ir a Por asignar</button><button class="btn sec chico" onclick="App.terminarCompra(\'mano\')">Anotar a mano</button></div></div>' +
+      '<div class="acciones"><button class="btn" onclick="App.terminarCompra(\'\')">Terminar y limpiar marcas</button><button class="btn sec" onclick="App.cerrar()">Seguir comprando</button></div>');
+  }
+  function terminarCompra(luego) {
+    var r = document.querySelector('input[name=tp]:checked'), modo = r ? r.value : 'dejar';
+    listaOp({ t: 'terminar', pendientes: modo, destino: modo === 'mover' ? val('tp-dest') : '' }, 'Terminar compra');
+    cerrar(); pantallaEncendida(false); toast('✅ Compra terminada');
+    if (luego === 'asignar') ir('porasignar');
+    else if (luego === 'mano') formRapido('Gasto');
+    else pintar();
+  }
+
   return {
     iniciar: iniciar, ir: ir, cambiarMes: cambiarMes, cerrar: cerrar,
     buscar: function (v) { filtro.q = v; pintarLista(); },
@@ -3477,6 +4313,14 @@ var App = (function () {
     usarHuella: usarHuella, alternarHuella: alternarHuella, activarHuella: activarHuella,
     recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
+    salarioLlego: salarioLlego, formSalarioOtro: formSalarioOtro, salarioManana: salarioManana, formSalario: formSalario, salPrev: salPrev, guardarSalario: guardarSalario, repCero: repCero,
+    avisoTipo: avisoTipo, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
+    formActualizar: formActualizar, copiarCodigo: copiarCodigo, volverAnterior: volverAnterior, actualizarApp: actualizarApp,
+    formNuevaLista: formNuevaLista, nlIcono: nlIcono, crearListaNueva: crearListaNueva, crearConBase: crearConBase, abrirLista: abrirLista, modoLista: modoLista, marcarItem: marcarItem,
+    agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,
+    noHayItem: noHayItem, preguntarItem: preguntarItem, enviarPregunta: enviarPregunta, responderConsulta: responderConsulta, agregarBasicos: agregarBasicos, guardarBasicos: guardarBasicos,
+    loDeSiempre: loDeSiempre, compartirLista: compartirLista, enviarLink: enviarLink, copiarLink: copiarLink, listaEditable: listaEditable, nuevoLink: nuevoLink, dejarCompartir: dejarCompartir,
+    menuLista: menuLista, guardarMenuLista: guardarMenuLista, borrarLista: borrarLista, formTerminar: formTerminar, terminarCompra: terminarCompra, editarInicio: editarInicio, iniQuitar: iniQuitar, iniTam: iniTam, iniListo: iniListo, iniAgregarW: iniAgregarW, iniActivar: iniActivar, iniFabrica: iniFabrica, iniAgregarA: iniAgregarA, iniQuitarAcceso: iniQuitarAcceso, reemplazarAcceso: reemplazarAcceso, mostrarDatosCx: mostrarDatosCx, cerrarCapaSegura: cerrarCapaSegura, verificarPinSeguro: verificarPinSeguro, huellaSegura: huellaSegura,
     volver: volver, abrirItem: abrirItem, presionar: presionar, soltar: soltar, cancelarPresion: cancelarPresion,
     formAccesos: formAccesos, guardarAccesos: guardarAccesos, exportarCSV: exportarCSV,
     calcSet: calcSet, calcular: calcular, verDatos: verDatos, verYSi: verYSi,
