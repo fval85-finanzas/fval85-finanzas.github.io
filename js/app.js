@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.2.1';
+  var VERSION_WEB = '2.3.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -267,6 +267,7 @@ var App = (function () {
       if (escribiendo()) pintarPendiente = true; else pintar();   // no borrar lo que la persona está escribiendo
       if (cb) cb();
       if (cola.length) enviarCola();
+      if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
     }, null, function () { sincronizando(false); });
   }
 
@@ -1596,6 +1597,7 @@ var App = (function () {
           '<div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.verComprasDe(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')">Ver compras</button>' +
           '<button class="chip" onclick="App.formMovimiento(0,{tipo:\'Pago de tarjeta\',cuenta:\'' + esc(c.nombre).replace(/'/g, "\\'") + '\'})">Registrar pago</button>' +
           '<button class="chip on" onclick="App.formSaldoTarjeta(' + c.fila + ')">↻ Actualizar saldo</button>' +
+          '<button class="chip" onclick="App.elegirArchivo(\'foto\')">📷 Pago desde foto</button>' +
           '<button class="chip" onclick="App.formCuenta(' + c.fila + ')">Editar</button></div></div>';
       }
       return '<div class="tj-fila' + (ab ? ' abierta' : '') + '">' + fila + '</div>';
@@ -1989,6 +1991,7 @@ var App = (function () {
       '<div class="grande">' + din(fd.total.CRC, 'CRC') + '</div>' + (fd.total.USD ? '<div class="medio">' + din(fd.total.USD, 'USD') + '</div>' : '') +
       (interesesTot ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Intereses (últimos ajustes)</span><b class="verde">+' + din(interesesTot, 'CRC') + '</b></div>' : '') +
       (sobreF ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Sobre Fondos (sin invertir)</span><b style="color:var(--acento)">' + din(sobreF.saldo, 'CRC') + '</b></div>' : '') + '</div>';
+    if (fd.lista.length) h += '<button class="btn borde" onclick="App.elegirArchivo(\'pdf\')">📄 Cargar estado de cuenta (PDF)</button>';
     if (fd.pendientes.length) h += plegable('fo-pend', '📈 <b>' + fd.pendientes.length + '</b> movimiento' + (fd.pendientes.length === 1 ? '' : 's') + ' sin subcuenta', 'Asignar', fd.pendientes.map(itemFondoPend).join(''), 'alerta');
     if (!fd.lista.length) h += '<div class="vacio-lindo"><div class="dibujo">📈</div><b>Agregá tus subcuentas</b><span>Los nombres y saldos están en tu estado de cuenta de BCR SAFI.</span><button class="btn" onclick="App.formFondo()">＋ Agregar subcuenta</button></div>';
     else h += '<div class="seccion">Subcuentas · ' + fd.lista.length + '</div><div class="caja sinpad">' + fd.lista.map(function (f, i) {
@@ -2556,6 +2559,140 @@ var App = (function () {
       toast('Leí ' + txt(r.monto, rap.moneda) + (r.comercio ? ' en ' + nombreBonito(r.comercio) : '') + '. Revisá y guardá.', 4000);
     }, function () { toast('Para pegar, permití que la app lea lo copiado.', 4500); });
   }
+  // ------------------------------------------------------------ v2.3: leer fotos de comprobantes y PDF de fondos (dentro del teléfono)
+  function elegirArchivo(tipo) {
+    var i = document.createElement('input');
+    i.type = 'file'; i.accept = tipo === 'pdf' ? 'application/pdf,.pdf' : 'image/*';
+    i.onchange = function () { if (i.files && i.files[0]) procesarArchivo(i.files[0]); };
+    i.click();
+  }
+  function procesarArchivo(f) {
+    if (!D) return toast('Esperá a que carguen tus datos.');
+    if (/pdf/i.test(f.type) || /\.pdf$/i.test(f.name || '')) return leerEstadoFondosPdf(f);
+    if (/^image\//i.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name || '')) return leerFotoComprobante(f);
+    toast('Ese archivo no es una foto ni un PDF.');
+  }
+  function revisarCompartido() {
+    if (!/compartido=1/.test(location.search) || !('caches' in window)) return;
+    try { history.replaceState(history.state, '', location.pathname); } catch (e) { /* nada */ }
+    caches.open('mf-compartido').then(function (c) {
+      return c.match('./__compartido').then(function (r) {
+        if (!r) return toast('No llegó ningún archivo.');
+        return r.blob().then(function (b) {
+          c.delete('./__compartido');
+          var nombre = decodeURIComponent(r.headers.get('X-Nombre') || 'archivo');
+          procesarArchivo(new File([b], nombre, { type: b.type || r.headers.get('Content-Type') || '' }));
+        });
+      });
+    });
+  }
+  function cargando(titulo, sub) {
+    abrir('<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:24px 8px;text-align:center"><div class="spinner"></div><b>' + titulo + '</b><span class="suave chico">' + sub + '</span></div>');
+  }
+  var compLeido = null;
+  function leerFotoComprobante(f) {
+    var primera = !guardado('mf-ocr-listo', '');
+    cargando('Leyendo el comprobante…', primera ? 'La primera vez descarga el lector (unos 8 MB) y queda guardado. La foto no sale del teléfono.' : 'La foto no sale del teléfono.');
+    Lector.leerImagen(f).then(function (texto) {
+      guardar('mf-ocr-listo', '1');
+      compLeido = Lector.leerComprobante(texto, D.cuentas);
+      compLeido.miniatura = URL.createObjectURL(f);
+      formComprobante();
+    }, function (e) { cerrar(); toast('⚠️ No pude leer la foto: ' + e.message, 6000); });
+  }
+  function formComprobante() {
+    var r = compLeido; if (!r) return;
+    var tipos = D.tiposMovimiento && D.tiposMovimiento.length ? D.tiposMovimiento : ['Gasto', 'Ingreso', 'Pago de tarjeta', 'Transferencia'];
+    if (tipos.indexOf(r.tipo) < 0) tipos = tipos.concat([r.tipo]);
+    var cuentas = D.cuentas.filter(function (c) { return c.activa; }).map(function (c) { return c.nombre; });
+    var aut = r.documento ? 'DOC-' + r.documento : '';
+    var dup = aut && D.movimientos.some(function (m) { return m.autorizacion === aut; });
+    var ok = function (v) { return v ? ' <span class="verde-pos">✓</span>' : ' <span class="naranja">revisá</span>'; };
+    abrir('<div style="display:flex;gap:12px;align-items:center"><img src="' + r.miniatura + '" alt="" style="width:58px;height:74px;object-fit:cover;border-radius:8px;border:1px solid var(--borde)">' +
+      '<div><div class="verde-pos fuerte chico">📷 Leí el comprobante</div><h2 style="margin:2px 0">' + esc(r.tipo) + '</h2><div class="suave chico">Revisá y guardá. Podés cambiar cualquier dato.</div></div></div>' +
+      (dup ? '<div class="aviso-tasa">⚠️ Ese documento (' + esc(r.documento) + ') ya está registrado. Si lo guardás, queda dos veces.</div>' : '') +
+      '<label class="campo compacto"><span>Tipo' + ok(r.tipo) + '</span><select id="cp-tipo">' + opciones(tipos, r.tipo) + '</select></label>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto' + ok(r.monto && !r.montoDudoso) + '</span><input id="cp-monto" data-dinero inputmode="decimal" value="' + (r.monto ? String(r.monto).replace('.', ',') : '') + '"></label>' +
+      '<label class="campo compacto"><span>Moneda</span><select id="cp-moneda"><option value="CRC"' + (r.moneda === 'CRC' ? ' selected' : '') + '>₡</option><option value="USD"' + (r.moneda === 'USD' ? ' selected' : '') + '>$</option></select></label></div>' +
+      '<label class="campo compacto"><span>' + (r.tipo === 'Pago de tarjeta' ? 'Tarjeta pagada' : 'Cuenta') + ok(r.cuenta) + '</span><select id="cp-cuenta">' + opciones(cuentas, r.cuenta, '— Elegí —') + '</select></label>' +
+      '<label class="campo compacto"><span>Fecha y hora' + ok(r.fecha) + '</span><input id="cp-fecha" type="datetime-local" value="' + localInput((r.fecha || new Date()).toISOString(), true) + '"></label>' +
+      '<label class="campo compacto"><span>Descripción</span><input id="cp-comercio" value="' + esc(r.comercio) + '"></label>' +
+      '<label class="campo compacto"><span>Nota</span><input id="cp-nota" value="' + esc(r.nota) + '"></label>' +
+      '<details class="pleg" style="margin-top:10px"><summary><span class="pl-t">Texto que leí de la foto</span><span class="flecha">›</span></summary><div class="pl-c"><pre class="texto-leido">' + esc((r.lineas || []).join('\n')) + '</pre></div></details>' +
+      '<div class="acciones"><button class="btn" id="cp-ok" onclick="App.guardarComprobante()">' + (r.tipo === 'Pago de tarjeta' ? 'Registrar pago' : 'Registrar') + '</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarComprobante() {
+    var monto = C.leerNumero(val('cp-monto'));
+    if (!(monto > 0)) return toast('Revisá el monto.');
+    var fecha = desdeInput(val('cp-fecha'), true); if (!fecha) return toast('Revisá la fecha.');
+    var m = { fila: null, control: null, fecha: fecha, monto: monto, moneda: val('cp-moneda'), tipo: val('cp-tipo'), comercio: val('cp-comercio').trim(), lugar: '', cuenta: val('cp-cuenta'),
+      categoria: '', sobre: '', nota: val('cp-nota').trim(), origen: 'Foto', autorizacion: compLeido && compLeido.documento ? 'DOC-' + compLeido.documento : '', recordarRegla: false };
+    if (m.tipo === 'Pago de tarjeta' && !m.cuenta) return toast('Elegí la tarjeta que pagaste.');
+    encolar('guardarMovimiento', [m], 'Desde foto: ' + (m.comercio || m.tipo) + ' · ' + txt(monto, m.moneda));
+    compLeido = null;
+    hecho(m.tipo === 'Pago de tarjeta' ? '✅ Pago registrado. La deuda de la tarjeta baja sola.' : '✅ Registrado desde la foto');
+  }
+  var estadoLeido = null;
+  function leerEstadoFondosPdf(f) {
+    if (sinServidorV17() || !D.fondos || !D.fondos.length) return toast('Primero agregá tus subcuentas en Fondos (＋ Subcuenta).', 5000);
+    cargando('Leyendo el estado de cuenta…', 'El PDF no sale del teléfono.');
+    Lector.leerPdf(f, function () { return prompt('Este PDF tiene contraseña. Escribila:') || ''; }).then(function (lineas) {
+      if (!lineas.length) { cerrar(); return toast('Ese PDF no trae texto (parece una imagen). Mandame uno para revisarlo.', 6000); }
+      estadoLeido = Lector.leerEstadoFondos(lineas, FD().lista);
+      formEstadoFondos();
+    }, function (e) { cerrar(); toast('⚠️ No pude leer el PDF: ' + e.message, 6000); });
+  }
+  function formEstadoFondos() {
+    var e = estadoLeido; if (!e) return;
+    var encontrados = e.subcuentas.filter(function (s) { return s.propuesto !== null; }).length;
+    abrir('<div class="verde-pos fuerte chico">📄 Leí el estado de cuenta' + (e.corte ? ' al ' + fechaCorta(e.corte.toISOString()) : '') + '</div><h2 style="margin:2px 0 4px">Actualizar fondos</h2>' +
+      '<div class="suave chico">Encontré ' + encontrados + ' de ' + e.subcuentas.length + ' subcuentas. Revisá cada saldo; lo que cambie respecto a hoy se anota como intereses.</div>' +
+      e.subcuentas.map(function (s, i) {
+        var f = s.fondo;
+        return '<div class="ef-fila"><div class="fila"><b>' + esc(f.nombre) + '</b><span class="suave chico">hoy ' + din(f.saldo, f.moneda) + '</span></div>' +
+          '<input id="ef-' + i + '" data-dinero inputmode="decimal" placeholder="' + (s.propuesto === null ? 'No lo encontré · escribilo' : '') + '" value="' + (s.propuesto !== null ? String(s.propuesto).replace('.', ',') : '') + '" oninput="App.difFondo(' + i + ')">' +
+          '<div class="suave chico" id="ef-d-' + i + '">' + difTexto(s.propuesto, f) + '</div>' +
+          (s.safi ? '<div class="suave chico">En el informe: «' + esc(s.safi.nombre) + '» · rendimientos acumulados ' + txt(s.safi.rendimientos, f.moneda) + '</div>' : '') + '</div>';
+      }).join('') +
+      ((e.sobran || []).length ? '<div class="seccion" style="margin-top:12px">En el informe pero no en la app</div>' + e.sobran.map(function (x, j) {
+        return '<div class="ef-fila"><div class="fila"><b>' + esc(x.nombre) + '</b><b>' + txt(x.saldo, /d[oó]lar/i.test(x.fondo) ? 'USD' : 'CRC') + '</b></div><div class="suave chico">' + esc(x.fondo) + '</div>' +
+          '<button class="btn sec chico" onclick="App.agregarSubSAFI(' + j + ')">＋ Agregar como subcuenta</button></div>';
+      }).join('') : '') +
+      (e.montos.length ? '<details class="pleg" style="margin-top:10px"><summary><span class="pl-t">Montos que aparecen en el PDF</span><span class="flecha">›</span></summary><div class="pl-c"><div class="chips" style="padding:8px 12px;flex-wrap:wrap">' +
+      e.montos.map(function (n) { return '<span class="chip" style="cursor:default">' + txt(n, 'CRC') + '</span>'; }).join('') + '</div></div></details>' : '') +
+      '<details class="pleg" style="margin-top:8px"><summary><span class="pl-t">Texto del PDF</span><span class="flecha">›</span></summary><div class="pl-c"><pre class="texto-leido">' + esc(e.lineas.join('\n')) + '</pre></div></details>' +
+      '<div class="acciones"><button class="btn" id="ef-ok" onclick="App.guardarEstadoFondos()">Guardar saldos</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function agregarSubSAFI(j) {
+    var x = estadoLeido.sobran[j]; if (!x) return;
+    var nombre = prompt('Nombre para esta subcuenta en la app:', x.nombre.charAt(0) + x.nombre.slice(1).toLowerCase());
+    if (!nombre) return;
+    srv('guardarFondo', [{ fila: null, nombre: nombre.trim(), fondo: x.fondo, moneda: /d[oó]lar/i.test(x.fondo) ? 'USD' : 'CRC', saldo: x.saldo, meta: '' }], function () {
+      estadoLeido.sobran.splice(j, 1); toast('✅ Subcuenta agregada'); cargar(); formEstadoFondos();
+    });
+  }
+  function difTexto(n, f) {
+    if (n === null || n === undefined || isNaN(n)) return '';
+    var d = n - f.saldo;
+    return Math.abs(d) < 0.005 ? 'sin cambios' : (d > 0 ? '+' : '−') + txt(Math.abs(d), f.moneda) + ' respecto a la app' + (d > 0 ? ' (se anota como intereses)' : '');
+  }
+  function difFondo(i) { var s = estadoLeido.subcuentas[i], e = $('ef-d-' + i); if (e) e.textContent = difTexto(C.leerNumero(val('ef-' + i)), s.fondo); }
+  function guardarEstadoFondos() {
+    var cambios = [];
+    estadoLeido.subcuentas.forEach(function (s, i) {
+      var n = C.leerNumero(val('ef-' + i));
+      if (n !== null && Math.abs(n - s.fondo.saldo) >= 0.005) cambios.push({ f: s.fondo, n: n });
+    });
+    if (!cambios.length) { cerrar(); return toast('No hubo cambios de saldo.'); }
+    var b = $('ef-ok'), k = 0;
+    var sig = function () {
+      if (k >= cambios.length) { estadoLeido = null; return listo('✅ ' + cambios.length + ' subcuenta' + (cambios.length === 1 ? '' : 's') + ' actualizada' + (cambios.length === 1 ? '' : 's')); }
+      var c = cambios[k++];
+      srv('actualizarSaldoFondo', [c.f.fila, c.n, c.n - c.f.saldo], sig, b);
+    };
+    sig();
+  }
+
   function formAcciones() {
     var v = D.viajes ? viajeActual() : null;
     var acc = [
@@ -2568,6 +2705,8 @@ var App = (function () {
     if (D.tasaCero.length) acc.push(['◷', 'Abono tasa cero', "App.cerrar();App.ir('tasacero')"]);
     if (D.prestamo && D.prestamo.estimado) acc.push(['🏠', 'Cuota de la casa', 'App.formPago()']);
     if (v) acc.push(['✈', 'Ver el viaje', 'App.cerrar();App.verViaje(' + v.fila + ')']);
+    acc.push(['📷', 'Leer comprobante (foto)', "App.cerrar();App.elegirArchivo('foto')"]);
+    if (D.fondos && D.fondos.length) acc.push(['📄', 'Estado de cuenta de fondos (PDF)', "App.cerrar();App.elegirArchivo('pdf')"]);
     acc.push(['↻', 'Revisar correos', 'App.cerrar();App.revisarCorreos()']);
     acc.push(['⌨', 'Volver al teclado', 'App.formRapido()']);
     abrir('<h2>¿Qué querés registrar?</h2><div class="acciones-grid">' + acc.map(function (x) {
@@ -2985,7 +3124,7 @@ var App = (function () {
     var cache = leerCache(), pinCache = guardado('mf-pinactivo', 'no') === 'si';
     var mostrado = false;
     if (pinCache && !token) { pinActivo = true; bloquear(); }
-    else if (cache) { D = cache; hoy = new Date(); $('cargando').style.display = 'none'; pintar(); mostrado = true; sincronizando(true); }
+    else if (cache) { D = cache; hoy = new Date(); $('cargando').style.display = 'none'; pintar(); mostrado = true; sincronizando(true); setTimeout(revisarCompartido, 300); }
     // 2) por detrás: confirmar acceso y traer los datos nuevos
     llamar('estadoAcceso').then(function (e) {
       pinActivo = e.pinActivo;
@@ -3048,7 +3187,7 @@ var App = (function () {
     tema: setTema, temaAuto: setTemaAuto, letra: setLetra, alternarTema: alternarTema, privado: setPrivado,
     formRapido: formRapido, rapTecla: rapTecla, rapTipo: rapTipo, rapMoneda: rapMoneda, rapCuenta: rapCuenta, rapFrecuente: rapFrecuente, rapDetalles: rapDetalles, rapGuardar: rapGuardar, rapPegar: rapPegar,
     leerMensajeBanco: leerMensajeBanco, formAcciones: formAcciones, formInicio: formInicio, moverWidget: moverWidget, alternarWidget: alternarWidget, restaurarInicio: restaurarInicio,
-    vistaTC: setVistaTC, formSaldoTarjeta: formSaldoTarjeta, guardarSaldoTarjeta: guardarSaldoTarjeta, cobrar: cobrar, noCobro: noCobro, formDeuda: formDeuda, deudaPagada: deudaPagada, deudaEraMia: deudaEraMia, limpiarCalc: function () { limpiarCalc(); calcVista = 'datos'; window.scrollTo(0, 0); pintar(); toast('Calculadora limpia'); }, claseCalc: claseCalc, alEscribirTasa: alEscribirTasa, buscarAjuste: buscarAjuste, pleg: function (id, abierto) { plegAbierto[id] = abierto; }, grupoAj: function (id, abierto) { grupoAj[id] = abierto; },
+    vistaTC: setVistaTC, agregarSubSAFI: agregarSubSAFI, elegirArchivo: elegirArchivo, guardarComprobante: guardarComprobante, difFondo: difFondo, guardarEstadoFondos: guardarEstadoFondos, formSaldoTarjeta: formSaldoTarjeta, guardarSaldoTarjeta: guardarSaldoTarjeta, cobrar: cobrar, noCobro: noCobro, formDeuda: formDeuda, deudaPagada: deudaPagada, deudaEraMia: deudaEraMia, limpiarCalc: function () { limpiarCalc(); calcVista = 'datos'; window.scrollTo(0, 0); pintar(); toast('Calculadora limpia'); }, claseCalc: claseCalc, alEscribirTasa: alEscribirTasa, buscarAjuste: buscarAjuste, pleg: function (id, abierto) { plegAbierto[id] = abierto; }, grupoAj: function (id, abierto) { grupoAj[id] = abierto; },
     alternarBuscar: alternarBuscar, formFiltros: formFiltros, aplicarFiltros: aplicarFiltros, limpiarFiltros: limpiarFiltros, verComprasDe: verComprasDe, alternarTarjeta: alternarTarjeta, recordatorios: setRecordatorios, pruebaRecordatorio: pruebaRecordatorio,
     formPIN: formPIN, guardarPIN: guardarPIN, tecla: tecla,
     usarHuella: usarHuella, alternarHuella: alternarHuella, activarHuella: activarHuella,
