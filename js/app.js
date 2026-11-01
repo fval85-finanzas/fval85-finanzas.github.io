@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.4.0';
+  var VERSION_WEB = '2.4.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -1877,14 +1877,7 @@ var App = (function () {
         h += '<div class="suave chico fuerte" style="margin-top:12px">' + (asig.items.length ? 'LO QUE FALTA (INTERESES, COMISIONES…), ¿DE QUÉ SOBRES?' : '¿DE QUÉ SOBRES SALIÓ?') + '</div>' +
           '<div class="chips" style="margin:6px 0">' + (sobreTarjetas() ? '<button class="chip" onclick="App.asigTodo()">Todo de ' + esc(nomSobre(sobreTarjetas())) + '</button>' : '') +
           '<button class="chip" onclick="App.asigTodo(\'\')">💳 Todo sin sobre</button></div>' +
-          asig.filas.map(function (f, i) {
-            return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(mon, f.sobre, true) +
-              '<option value=""' + (f.sobre === '' ? ' selected' : '') + '>💳 Sin sobre</option></select>' +
-              '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '" oninput="App.asigFila(' + i + ',\'monto\',this.value)">' +
-              (asig.filas.length > 1 ? '<button class="x" aria-label="Quitar" onclick="App.asigQuitar(' + i + ')">×</button>' : '') + '</div>';
-          }).join('') +
-          (asig.filas.length > 1 ? '<div class="suave chico" style="margin-top:4px">La última fila se llena sola con lo que falta.</div>' : '') +
-          '<button class="btn sec chico" style="justify-content:center;margin-top:6px" onclick="App.asigAgregar()">+ Otro sobre</button>';
+          filasSobresHtml(mon);
       }
       h += '<div id="p2-barra">' + p2Barra() + '</div>';
       var sinSobre = asig.items.some(function (it) { return it.on && !it.sobre; });
@@ -1903,13 +1896,15 @@ var App = (function () {
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿CÓMO QUERÉS CONTARLA?</div>' +
         radio('sobre', '<span><b>✉ De un sobre</b><br><span class="suave chico">' + (asig.tarjeta ? 'El sobre baja ahora y queda reservado para pagar la tarjeta' : 'La plata sale del sobre que elijás') + '</span></span>',
           asig.modo === 'sobre' ? '<select id="as-sobre" onclick="event.stopPropagation()">' + opcionesSobre(m.moneda, asig.filas[0].sobre, true) + '</select>' : '') +
+        radio('varios', '<span><b>✉ De varios sobres</b><br><span class="suave chico">Parte de un sobre y parte de otro</span></span>',
+          asig.modo === 'varios' ? '<div class="campos-op" onclick="event.stopPropagation()">' + filasSobresHtml(m.moneda) + '<div id="p2-barra">' + p2Barra() + '</div></div>' : '') +
         radio('ninguno', '<span><b>💳 Mía, sin sobre</b><br><span class="suave chico">Cuenta como gasto tuyo, pero no toca ningún sobre' + (asig.tarjeta ? '; se decide al pagar la tarjeta' : '') + '</span></span>') +
         radio('otro', '<span><b>🤝 Para otra persona</b><br><span class="suave chico">No es gasto tuyo ni toca sobres. Queda en «Me deben»</span></span>',
           asig.modo === 'otro' ? '<div class="campos-op" onclick="event.stopPropagation()"><label class="campo compacto"><span>¿Quién te la debe?</span><input id="as-para" list="as-personas" placeholder="Ej. Mamá" autocomplete="off"></label>' +
             '<datalist id="as-personas">' + personas.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
             '<label class="campo compacto"><span>Nota (opcional)</span><input id="as-nota" placeholder="Ej. Regalo de cumpleaños"></label></div>' : '');
     }
-    if (m.tipo !== 'Pago de tarjeta' && asig.modo !== 'repartir' && asig.modo !== 'otro') {
+    if (m.tipo !== 'Pago de tarjeta' && asig.modo !== 'repartir' && asig.modo !== 'otro' && asig.modo !== 'varios') {
       h += '<label class="campo compacto"><span>Monto</span><input id="as-monto" data-dinero inputmode="decimal" value="' + esc(String(Math.round(asig.falta * 100) / 100).replace('.', ',')) + '"></label>';
       if ((asig.modo === 'sobre' || asig.sentido === 'sale') && m.comercio) h += '<label class="check"><input type="checkbox" id="as-recordar"> Recordar para «' + esc(m.comercio) + '»</label>';
     }
@@ -1917,8 +1912,25 @@ var App = (function () {
     $('as-cuerpo').innerHTML = h;
     formatearMontos();
   }
-  function asigModo(v) { asig.modo = v; pintarAsignar(); }
+  function asigModo(v) {
+    if (v === 'varios' && asig.modo !== 'varios') {   // v2.4.1: dos filas; la segunda se llena sola
+      var m = movPorFila(asig.fila), uno = ($('as-sobre') && $('as-sobre').value) || asig.filas[0].sobre;
+      var otro = SB().lista.filter(function (s) { return s.moneda === m.moneda && s.nombre !== uno; })[0];
+      asig.filas = [{ sobre: uno, monto: Math.round(asig.falta * 100) / 100 }, { sobre: otro ? otro.nombre : '', monto: 0 }];
+    }
+    asig.modo = v; pintarAsignar();
+  }
   function asigTodo(s) { asig.filas = [{ sobre: s === '' ? '' : sobreTarjetas(), monto: Math.round(p2Resto() * 100) / 100 }]; pintarAsignar(); }
+  function filasSobresHtml(mon) {
+    return asig.filas.map(function (f, i) {
+            return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(mon, f.sobre, true) +
+              '<option value=""' + (f.sobre === '' ? ' selected' : '') + '>💳 Sin sobre</option></select>' +
+              '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '" oninput="App.asigFila(' + i + ',\'monto\',this.value)">' +
+              (asig.filas.length > 1 ? '<button class="x" aria-label="Quitar" onclick="App.asigQuitar(' + i + ')">×</button>' : '') + '</div>';
+          }).join('') +
+          (asig.filas.length > 1 ? '<div class="suave chico" style="margin-top:4px">La última fila se llena sola con lo que falta.</div>' : '') +
+          '<button class="btn sec chico" style="justify-content:center;margin-top:6px" onclick="App.asigAgregar()">+ Otro sobre</button>';
+  }
   function sumaFilas(hasta) { return asig.filas.reduce(function (a, f, j) { return a + (hasta === undefined || j < hasta ? (C.leerNumero(f.monto) || 0) : 0); }, 0); }
   function asigFila(i, k, v) {
     asig.filas[i][k] = v; if (k === 'sobre') return;
@@ -1975,7 +1987,8 @@ var App = (function () {
   function p2Resto() { return Math.max(0, asig.falta - p2Marcado()); }
   function p2Barra() {
     var m = movPorFila(asig.fila), total = m.monto;
-    var hecho2 = Math.min(total, asig.reservado + Math.min(p2Marcado(), asig.falta) + (asig.manual ? sumaFilas() : 0));
+    var antes = Math.max(0, total - asig.falta - asig.reservado);   // lo que ya estaba asignado
+    var hecho2 = Math.min(total, antes + asig.reservado + Math.min(p2Marcado(), asig.falta) + (asig.manual ? sumaFilas() : 0));
     var falta = Math.max(0, Math.round((total - hecho2) * 100) / 100), ok = falta < 0.01;
     return '<div class="barra" style="height:10px;margin-top:14px"><i style="width:' + Math.round(hecho2 / total * 100) + '%;background:var(--positivo)"></i></div>' +
       '<div class="fila chico" style="margin-top:6px"><span class="suave">Repartido ' + esc(txt(hecho2, m.moneda)) + ' de ' + esc(txt(total, m.moneda)) + '</span>' +
@@ -2023,6 +2036,19 @@ var App = (function () {
       return hecho('🤝 Anotado en «Me deben»: ' + para);
     }
     if (m.tipo === 'Pago de tarjeta') return guardarPagoTarjeta(m, g);
+    if (asig.modo === 'varios') {
+      var lv = [], sv = 0, dupv = {}, repv = false;
+      asig.filas.forEach(function (f) {
+        var v = C.leerNumero(f.monto) || 0; if (v <= 0) return;
+        if (dupv[f.sobre]) repv = true; dupv[f.sobre] = 1; sv += v;
+        lv.push({ fecha: fechaSobre(m), sobre: f.sobre, monto: -v, tipo: !f.sobre ? 'Sin sobre' : asig.tarjeta ? 'Compra con tarjeta' : 'Gasto', movimiento: m.fila, grupo: g, nota: m.comercio || '' });
+      });
+      if (!lv.length) return toast('Escribí cuánto salió de cada sobre.');
+      if (repv) return toast('Hay un sobre repetido.');
+      if (sv > asig.falta + 0.01) return toast('Asignaste más que el movimiento (' + txt(asig.falta, m.moneda) + ').');
+      encolar('guardarSobresMov', [lv], 'Asignar ' + (m.comercio || m.tipo) + ' → ' + lv.map(function (x) { return x.sobre || 'sin sobre'; }).join(', ') + ' · ' + txt(sv, m.moneda));
+      return hecho('✅ Repartido en ' + lv.length + ' sobres');
+    }
     {
       var monto = C.leerNumero(val('as-monto'));
       if (!monto || monto <= 0) return toast('Escribí el monto.');
