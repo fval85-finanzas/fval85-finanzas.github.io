@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.3.0';
+  var VERSION_WEB = '2.3.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -107,18 +107,18 @@ var App = (function () {
       if (e) e.classList.remove('ver');
     }
   }
-  function llamar(accion, args, conex) {
+  function llamar(accion, args, conex, id) {
     trabajando(accion, true);
-    return llamarDirecto(accion, args, conex).then(function (x) { trabajando(accion, false); return x; }, function (e) { trabajando(accion, false); throw e; });
+    return llamarDirecto(accion, args, conex, id).then(function (x) { trabajando(accion, false); return x; }, function (e) { trabajando(accion, false); throw e; });
   }
-  function llamarDirecto(accion, args, conex) {
+  function llamarDirecto(accion, args, conex, id) {
     var c = conex || conexion();
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var t = setTimeout(function () { if (ctl) ctl.abort(); }, 60000);
     return fetch(c.url, {
       method: 'POST', redirect: 'follow', signal: ctl ? ctl.signal : undefined,
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ clave: c.clave, sesion: token, accion: accion, args: args || [] })
+      body: JSON.stringify({ clave: c.clave, sesion: token, accion: accion, args: args || [], id: id || undefined })
     }).then(function (r) { return r.text(); }, function (e) {
       clearTimeout(t);
       var err = new Error(e && e.name === 'AbortError' ? 'Google tardó demasiado en responder. Intentá de nuevo.' : 'Sin conexión con Google. Revisá tu internet y la URL /exec.');
@@ -192,19 +192,21 @@ var App = (function () {
     return it;
   }
   function reaplicarCola() { cola.forEach(function (it) { if (APLICAR[it.accion]) { try { APLICAR[it.accion](it.args, it); } catch (e) { /* nada */ } } }); }
-  function enviarCola() {
+  var fallosRed = 0, siguienteIntento = 0;
+  function enviarCola(forzar) {
     if (enviando || !cola.length || !conexion().url) return;
+    if (forzar !== true && Date.now() < siguienteIntento) return;   // v2.3.1: si falla la red, espera cada vez más (hasta 10 min)
     if (navigator.onLine === false) { ultimoErrorCola = 'Sin internet.'; actualizarBadges(); return; }
     enviando = true;
     var it = cola[0];
-    llamar(it.accion, it.args).then(function () {
-      cola.shift(); guardarCola(); enviando = false; envios++;
+    llamar(it.accion, it.args, null, it.id).then(function () {
+      cola.shift(); guardarCola(); enviando = false; envios++; fallosRed = 0; siguienteIntento = 0;
       ultimoErrorCola = ''; guardar('mf-cola-error', null);
       if (cola.length) enviarCola(); else cargar();
     }, function (e) {
       enviando = false;
       var msg = e && e.message ? e.message : String(e);
-      if (e && e.red) { ultimoErrorCola = msg; guardar('mf-cola-error', msg); actualizarBadges(); return; }
+      if (e && e.red) { fallosRed++; siguienteIntento = Date.now() + Math.min(600000, 30000 * Math.pow(2, fallosRed - 1)); ultimoErrorCola = msg; guardar('mf-cola-error', msg); actualizarBadges(); return; }
       if (msg.indexOf('PIN_REQUERIDO') >= 0) { token = null; guardar('mf-ses', null, sessionStorage); bloquear(); return; }
       if (msg.indexOf('CLAVE_INVALIDA') >= 0) { mostrarConexion('La clave ya no es válida. Escribí la clave actual.'); return; }
       // Google lo rechazó: se quita de la cola y la recarga lo deshace en la pantalla
@@ -213,7 +215,7 @@ var App = (function () {
       if (cola.length) enviarCola(); else cargar();
     });
   }
-  window.addEventListener('online', function () { enviarCola(); });
+  window.addEventListener('online', function () { enviarCola(true); });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') enviarCola(); });
   setInterval(enviarCola, 30000);
   function badgeCola() { return '<span class="badge-cola"' + (cola.length ? '' : ' hidden') + ' onclick="event.stopPropagation();App.formCola()">' + cola.length + '</span>'; }
@@ -226,7 +228,8 @@ var App = (function () {
     abrir('<h2>' + (cola.length ? 'Por enviar a Google (' + cola.length + ')' : 'Todo está en Google ✓') + '</h2>' +
       '<div class="suave chico" id="cola-lista">' + (cola.length ? 'Ya están aplicados en el teléfono. Se envían solos cuando haya internet.' : 'No queda nada pendiente.') + '</div>' +
       (cola.length ? '<div class="caja sinpad" style="margin-top:10px;background:var(--fondo)">' + cola.map(function (it) {
-        return '<div class="item" style="cursor:default"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(it.desc || it.accion) + '</span><span class="det" style="display:block">' + hace(it.creado) + '</span></span></div>';
+        return '<div class="item" style="cursor:default"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(it.desc || it.accion) + '</span><span class="det" style="display:block">' + hace(it.creado) + '</span></span>' +
+          '<button class="chip" onclick="App.quitarDeCola(\'' + it.id + '\', this)">Quitar</button></div>';
       }).join('') + '</div>' + (ultimoErrorCola ? '<div class="suave chico" style="margin-top:8px">⚠️ Último intento: ' + esc(ultimoErrorCola) + '</div>' : '') : '') +
       '<div class="acciones">' + (cola.length ? '<button class="btn" onclick="App.reintentarCola()">Reintentar ahora</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
   }
@@ -2626,7 +2629,7 @@ var App = (function () {
     if (!(monto > 0)) return toast('Revisá el monto.');
     var fecha = desdeInput(val('cp-fecha'), true); if (!fecha) return toast('Revisá la fecha.');
     var m = { fila: null, control: null, fecha: fecha, monto: monto, moneda: val('cp-moneda'), tipo: val('cp-tipo'), comercio: val('cp-comercio').trim(), lugar: '', cuenta: val('cp-cuenta'),
-      categoria: '', sobre: '', nota: val('cp-nota').trim(), origen: 'Foto', autorizacion: compLeido && compLeido.documento ? 'DOC-' + compLeido.documento : '', recordarRegla: false };
+      categoria: '', sobre: '', nota: val('cp-nota').trim(), origen: 'Manual', autorizacion: compLeido && compLeido.documento ? 'DOC-' + compLeido.documento : '', recordarRegla: false };
     if (m.tipo === 'Pago de tarjeta' && !m.cuenta) return toast('Elegí la tarjeta que pagaste.');
     encolar('guardarMovimiento', [m], 'Desde foto: ' + (m.comercio || m.tipo) + ' · ' + txt(monto, m.moneda));
     compLeido = null;
@@ -3205,7 +3208,10 @@ var App = (function () {
     repGuardarCheck: function (v) { rep.guardar = v; }, formMover: formMover, guardarMover: guardarMover,
     limpiarSel: function (n, v) { limpiar.sel[n] = v; pintar(); }, limpiarDestino: function (n) { limpiar.destino = n; pintar(); },
     guardarLimpiar: guardarLimpiar, deshacerSobres: deshacerSobres, formSobresDesde: formSobresDesde, guardarSobresDesde: guardarSobresDesde, formSobresEspeciales: formSobresEspeciales, guardarSobresEspeciales: guardarSobresEspeciales,
-    formCola: formCola, reintentarCola: function () { ultimoErrorCola = ''; toast('Enviando…'); enviarCola(); setTimeout(actualizarBadges, 300); },
+    formCola: formCola, quitarDeCola: function (id, b) {
+      if (!b.dataset.ok) { b.dataset.ok = '1'; b.textContent = '¿Seguro? Tocá otra vez'; return; }
+      cola = cola.filter(function (x) { return x.id !== id; }); guardarCola(); toast('Quitado. Si ya estaba en la hoja, queda como está.'); cargar(); formCola();
+    }, reintentarCola: function () { ultimoErrorCola = ''; toast('Enviando…'); enviarCola(true); setTimeout(actualizarBadges, 300); },
     formSubcuenta: formSubcuenta, guardarSubcuenta: guardarSubcuenta, formFondo: formFondo, guardarFondo: guardarFondo,
     formActualizarFondo: formActualizarFondo, vistaFondo: vistaFondo, guardarActualizarFondo: guardarActualizarFondo,
     verViaje: verViaje, formViaje: formViaje, guardarViaje: guardarViaje, borrarViaje: borrarViaje, formLimiteViaje: formLimiteViaje,
