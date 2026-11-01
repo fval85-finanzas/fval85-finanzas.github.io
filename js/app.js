@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.3.2';
+  var VERSION_WEB = '2.4.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -250,7 +250,8 @@ var App = (function () {
   }
   // ---- datos guardados en el teléfono: la app abre al instante y se actualiza por detrás
   function leerJSONSeguro(k) { try { var t = localStorage.getItem(k); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
-  function leerCache() { try { var t = localStorage.getItem('mf-cache'); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
+  function leerCache() { try { var t = localStorage.getItem('mf-cache'); return t ? limpiarD(JSON.parse(t)) : null; } catch (e) { return null; } }
+  function limpiarD(d) { if (d && d.sobres) d.sobres = d.sobres.filter(C.esSobreReal); return d; }   // v2.4: sin filas de totales/notas
   function guardarCache(json) { try { localStorage.setItem('mf-cache', json); } catch (e) { /* sin espacio: no pasa nada */ } }
   var pintarPendiente = false;
   function sincronizando() { /* v1.9: la descarga es silenciosa */ }
@@ -260,7 +261,7 @@ var App = (function () {
     var n0 = envios;
     srv('obtenerDatos', [], function (json) {
       if (n0 !== envios && D) { if (cb) cb(); return; }   // llegó algo a Google mientras tanto: viene otra recarga más fresca
-      D = JSON.parse(json);
+      D = limpiarD(JSON.parse(json));
       hoy = new Date(D.hoy);
       reaplicarCola();   // lo que todavía no llegó a Google se sigue viendo
       guardarCache(JSON.stringify(D));
@@ -409,7 +410,7 @@ var App = (function () {
       var cand = SB().lista.filter(function (s) { return s.moneda === 'CRC' && s.tipo !== 'Ahorro' && s.tipo !== 'Fijo'; }).sort(function (a, b) { return a.saldo - b.saldo; });
       if (!cand.length) return '';
       var s = cand[0];
-      return wChico("App.ir('sobres')", '✉ Sobre más bajo', esc(s.nombre), din(s.saldo, 'CRC'), s.saldo < 10000 ? 'rojo' : '');
+      return wChico("App.ir('sobres')", '✉ Sobre más bajo', esc(nomSobre(s.nombre)), din(s.saldo, 'CRC'), s.saldo < 10000 ? 'rojo' : '');
     }
     if (k === 'proxPago') {
       var p = proximosPagos()[0];
@@ -442,7 +443,7 @@ var App = (function () {
       var sbI = SB(), lst = sbI.lista.filter(function (s) { return s.moneda === 'CRC'; }).sort(function (a, b) { return (b.pct || 0) - (a.pct || 0); }).slice(0, 4);
       if (!lst.length) return '';
       return '<div class="caja ancho"><div class="fila"><h3>Sobres · ' + din(sbI.total.CRC, 'CRC') + '</h3><a href="#" onclick="App.ir(\'sobres\');return false" class="enlace">Ver todos</a></div>' + lst.map(function (s) {
-        return '<div style="display:flex;flex-direction:column;gap:4px"><div class="fila" style="font-size:14px"><span>' + esc(s.nombre) + '</span><span class="fuerte' + (s.saldo < 0 ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></div>' + barra(s.pct, s.pct >= 0.85) + '</div>';
+        return '<div style="display:flex;flex-direction:column;gap:4px"><div class="fila" style="font-size:14px"><span>' + esc(nomSobre(s.nombre)) + '</span><span class="fuerte' + (s.saldo < 0 ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></div>' + barra(s.pct, s.pct >= 0.85) + '</div>';
       }).join('') + '</div>';
     }
     if (k === 'accesos') {
@@ -1363,7 +1364,7 @@ var App = (function () {
     if (!nombres.length && m.sobre) nombres = [m.sobre];
     if (!nombres.length) return sb.cubierto[m.fila] ? '<span class="et-sobre ok">✉ Cubierto</span>' :
       (sb.porMov[m.fila] || []).length ? '<span class="et-sobre otro">💳 Sin sobre</span>' : '';
-    return '<span class="et-sobre ok">✉ ' + esc(nombres[0]) + (nombres.length > 1 ? ' +' + (nombres.length - 1) : '') + '</span>';
+    return '<span class="et-sobre ok">✉ ' + esc(nomSobre(nombres[0])) + (nombres.length > 1 ? ' +' + (nombres.length - 1) : '') + '</span>';
   }
   function itemMov(m) {
     var revisar = m.tipo === 'Gasto' && !m.categoria;
@@ -1647,7 +1648,7 @@ var App = (function () {
       if (s.meta) det += ' · meta ' + din(s.meta, s.moneda);
       var avance = s.meta ? Math.max(0, Math.min(1, s.saldo / s.meta)) : s.pct;
       return '<button class="item" style="flex-direction:column;align-items:stretch;gap:6px" onclick="App.formSobre(' + i + ')">' +
-        '<span class="fila"><span style="font-weight:700">' + esc(s.nombre) + (s.ajuste ? ' <span class="pill" style="font-size:10px;padding:2px 6px">AJUSTE</span>' : '') + '</span>' +
+        '<span class="fila"><span style="font-weight:700">' + iconoSobre(s.nombre) + ' ' + esc(nomSobre(s.nombre)) + (s.ajuste ? ' <span class="pill" style="font-size:10px;padding:2px 6px">AJUSTE</span>' : '') + '</span>' +
         '<span class="fuerte' + (neg ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></span>' +
         barra(avance, !s.meta && s.pct >= 0.85) + '<span class="chico suave">' + det + '</span></button>';
     }).join('') + '</div>';
@@ -1682,10 +1683,154 @@ var App = (function () {
 
   // ---- asignar un movimiento
   var asig = null;   // { fila, modo, filas:[{sobre,monto}] }
+  // ------------------------------------------------------------ v2.4: nombres e íconos de sobres + selector propio
+  var SIGLAS = /^(BCR|BN|BNCR|BAC|BCT|CCSS|INS|ICE|AYA|IPTV|SAFI|CNFL|ATM|SINPE|USD|CRC|TV|IVA|RTV|ESPH|JASEC|MUCAP|COOPENAE|LAFISE|CMB|CRS|PC)$/;
+  /** "SOBRE SAMMY COLEGIO" → "Sammy Colegio" (solo cómo se ve; la hoja no cambia) */
+  function nomSobre(n) {
+    var orig = String(n || '').trim(), s = orig.replace(/^sobres?\s+(de\s+)?/i, '').trim();
+    if (!s) return orig;
+    if (s !== s.toUpperCase()) return s;   // ya viene con mayúsculas y minúsculas: se respeta
+    return s.split(/(\s+)/).map(function (w, i) {
+      if (/^\s+$/.test(w) || !w) return w;
+      var up = w.toUpperCase(), lo = w.toLowerCase();
+      if (/\d/.test(w) || SIGLAS.test(up.replace(/[^A-ZÑ]/g, '')) || !/[AEIOUÁÉÍÓÚÜ]/.test(up)) return up;
+      if (i > 0 && /^(de|del|la|las|el|los|y|e|o|para|en|con|a|al)$/.test(lo)) return lo;
+      return lo.charAt(0).toUpperCase() + lo.slice(1);
+    }).join('');
+  }
+  var ICONOS_SOBRE = [
+    [/venta|negocio|emprend/, '💼'], [/camara|foto/, '📷'], [/reloj/, '⌚'], [/celular|telefono|iphone|samsung/, '📱'],
+    [/super|mercado|abarrot|comida|pulperia|despensa/, '🛒'], [/fruta|verdura|feria|aguacate/, '🥑'],
+    [/ingles|idioma|clase|curso|libro|estudio|tutor/, '📚'], [/colegio|escuela|kinder|guarderia|universidad|matricula|uniforme/, '🎒'],
+    [/tarjeta|credix|visa|master|amex/, '💳'], [/casa|hipoteca|prestamo|alquiler|renta|vivienda|condominio/, '🏠'],
+    [/gasolina|combustible|carro|auto\b|vehiculo|marchamo|riteve|taller|moto|peaje|parqueo|transporte|uber|bus\b|taxi/, '🚗'],
+    [/ejercicio|gym|gimnasio|karate|deporte|natacion|futbol|crossfit|yoga|zumba/, '🏋️'],
+    [/luz|electric|cnfl/, '💡'], [/agua\b|aya/, '💧'], [/internet|cable|iptv|netflix|streaming|spotify|disney|kolbi|claro|liberty|tigo/, '📺'],
+    [/ahorro|fondo|inversion|emergencia|imprevisto/, '🐷'], [/salud|medic|farmacia|doctor|dentista|seguro|ccss|optica/, '💊'],
+    [/mascota|perro|gato|veterinari/, '🐾'], [/viaje|vacacion|paseo|hotel/, '✈️'], [/ropa|zapato|calzado/, '👕'],
+    [/regalo|navidad|cumple/, '🎁'], [/restaurante|salida|cafe|comer/, '🍽️'], [/belleza|pelo|unas|barberia|salon/, '💇'],
+    [/impuesto|hacienda|municipal/, '🧾'], [/diezmo|iglesia|donacion|ofrenda/, '🙏'], [/operacion|banco|deuda|bcr|bn\b|bac/, '🏦'],
+    [/personal|gastos|varios|otros/, '🙂']
+  ];
+  function sinTildes(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  function iconoSobre(n) { var s = sinTildes(n); for (var i = 0; i < ICONOS_SOBRE.length; i++) if (ICONOS_SOBRE[i][0].test(s)) return ICONOS_SOBRE[i][1]; return '✉'; }
+  function sobreInfo(nombre, moneda) {
+    if (!D || sinServidorSobres()) return null;
+    var l = SB().lista.filter(function (s) { return s.nombre === nombre; });
+    return l.filter(function (s) { return !moneda || s.moneda === moneda; })[0] || l[0] || null;
+  }
+  function claseSaldo(s) { return !s ? '' : s.saldo < 0 ? 'rojo' : (s.asignado && s.saldo < s.asignado * 0.2) ? 'amarillo' : 'verde'; }
+
+  // Todas las listas (<select>) se muestran con una hoja propia en vez de la lista de Android.
+  // El <select> queda escondido y sigue guardando el valor: el resto de la app no cambia.
+  var selVal = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  var selIdx = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+  Object.defineProperty(HTMLSelectElement.prototype, 'value', { configurable: true, get: selVal.get, set: function (v) { selVal.set.call(this, v); if (this._btn) etiquetaSel(this); } });
+  Object.defineProperty(HTMLSelectElement.prototype, 'selectedIndex', { configurable: true, get: selIdx.get, set: function (v) { selIdx.set.call(this, v); if (this._btn) etiquetaSel(this); } });
+  function esSelSobre(sel) {
+    if (sel._esSobre !== undefined) return sel._esSobre;
+    var nombres = {}; ((D && D.sobres) || []).forEach(function (s) { nombres[s.nombre] = 1; });
+    var con = 0, si = 0;
+    Array.prototype.forEach.call(sel.options, function (o) { if (o.value) { con++; if (nombres[o.value]) si++; } });
+    return (sel._esSobre = si > 0 && si * 2 >= con);
+  }
+  function monedaSel(sel) { return sel.getAttribute('data-moneda') || ''; }
+  function mejorarSelects() {
+    var l = document.querySelectorAll('select:not([data-mej])');
+    for (var i = 0; i < l.length; i++) mejorarSel(l[i]);
+  }
+  function mejorarSel(sel) {
+    sel.setAttribute('data-mej', '1');
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sel-btn ' + sel.className;
+    if (sel.style.cssText) b.style.cssText = sel.style.cssText;
+    if (sel.getAttribute('aria-label')) b.setAttribute('aria-label', sel.getAttribute('aria-label'));
+    b.setAttribute('aria-haspopup', 'listbox');
+    b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); abrirElegir(sel); });
+    sel.classList.add('sel-oculto');
+    sel.parentNode.insertBefore(b, sel.nextSibling);
+    sel._btn = b;
+    sel.addEventListener('change', function () { etiquetaSel(sel); });
+    etiquetaSel(sel);
+  }
+  function etiquetaSel(sel) {
+    var b = sel._btn; if (!b) return;
+    var o = sel.options[selIdx.get.call(sel)], h;
+    b.disabled = sel.disabled;
+    if (!o) h = '<span class="sel-txt suave">Elegí…</span>';
+    else if (esSelSobre(sel) && o.value) {
+      var s = sobreInfo(o.value, monedaSel(sel));
+      h = '<span class="sel-ic">' + iconoSobre(o.value) + '</span><span class="sel-txt">' + esc(nomSobre(o.value)) + '</span>' +
+        (s && !b.classList.contains('sel-mini') ? '<span class="sel-saldo ' + claseSaldo(s) + '">' + esc(txt(s.saldo, s.moneda)) + '</span>' : '');
+    } else h = '<span class="sel-txt' + (o.value ? '' : ' suave') + '">' + esc(o.text) + '</span>';
+    b.innerHTML = h + '<span class="sel-flecha" aria-hidden="true">▾</span>';
+  }
+  var elegirSel = null;
+  function tituloSel(sel) {
+    if (sel.getAttribute('data-titulo')) return sel.getAttribute('data-titulo');
+    if (esSelSobre(sel)) return 'Elegí el sobre';
+    var lab = sel.closest('label'), sp = lab && lab.querySelector('span');
+    var t = (sp && sp.textContent) || sel.getAttribute('aria-label') || '';
+    return t.replace(/\s*\(.*\)\s*$/, '').trim() || 'Elegí una opción';
+  }
+  function abrirElegir(sel) {
+    if (sel.disabled) return;
+    elegirSel = sel;
+    var sobre = esSelSobre(sel), mon = monedaSel(sel), actual = sel.value;
+    var ops = Array.prototype.map.call(sel.options, function (o, i) { return { i: i, v: o.value, t: o.text, dis: o.disabled }; });
+    var fila = function (op) {
+      var s = sobre && op.v ? sobreInfo(op.v, mon) : null, nombre = sobre && op.v ? nomSobre(op.v) : op.t;
+      var ic = sobre ? (op.v ? iconoSobre(op.v) : /sin sobre/i.test(op.t) ? '💳' : '—') : '';
+      return '<button type="button" class="el-fila' + (op.v === actual ? ' on' : '') + '"' + (op.dis ? ' disabled' : '') + ' data-q="' + esc(sinTildes(nombre + ' ' + op.v)) + '" onclick="App.elegir(' + op.i + ')">' +
+        (ic ? '<span class="el-ic">' + ic + '</span>' : '') + '<span class="el-nom">' + esc(sobre && !op.v ? op.t.replace(/^💳\s*/, '') : nombre) + '</span>' +
+        (s ? '<b class="el-saldo ' + claseSaldo(s) + '">' + esc(txt(s.saldo, s.moneda)) + '</b>' : '') + (op.v === actual ? '<span class="el-ok">✓</span>' : '') + '</button>';
+    };
+    var muchos = ops.length > 7, h = '';
+    if (sobre) {
+      var reales = ops.filter(function (o) { return o.v; }), vacios = ops.filter(function (o) { return !o.v; });
+      if (muchos) {
+        var uso = {}; (D.sobresMov || []).forEach(function (x) { if (x.sobre) uso[x.sobre] = (uso[x.sobre] || 0) + 1; });
+        var top = reales.filter(function (o) { return uso[o.v]; }).sort(function (a, b) { return uso[b.v] - uso[a.v]; }).slice(0, 3);
+        if (top.length) h += '<div class="el-sec">MÁS USADOS</div>' + top.map(fila).join('');
+        h += '<div class="el-sec">TODOS (A–Z)</div>';
+      }
+      h += reales.slice().sort(function (a, b) { return nomSobre(a.v).localeCompare(nomSobre(b.v), 'es'); }).map(fila).join('');
+      if (vacios.length) h += '<div class="el-sep"></div>' + vacios.map(fila).join('');
+    } else h = ops.map(fila).join('');
+    var cont = $('elegir');
+    if (!cont) { cont = document.createElement('div'); cont.id = 'elegir'; cont.className = 'elegir-velo'; cont.addEventListener('click', function (e) { if (e.target === cont) cerrarElegir(); }); document.body.appendChild(cont); }
+    cont.innerHTML = '<div class="elegir" role="listbox"><div class="asa"></div><div class="el-cab"><b>' + esc(tituloSel(sel)) + '</b><button type="button" class="el-x" aria-label="Cerrar" onclick="App.cerrarElegir()">×</button></div>' +
+      (muchos ? '<label class="el-buscar"><span aria-hidden="true">🔍</span><input id="el-q" type="search" autocomplete="off" placeholder="' + (sobre ? 'Buscar sobre…' : 'Buscar…') + '" oninput="App.buscarElegir(this.value)"></label>' : '') +
+      '<div class="el-lista" id="el-lista">' + h + '<div class="el-nada suave" id="el-nada" hidden>No hay resultados</div></div></div>';
+    cont.classList.add('abierto');
+    var on = cont.querySelector('.el-fila.on'); if (on && on.scrollIntoView && !muchos) on.scrollIntoView({ block: 'nearest' });
+  }
+  function buscarElegir(q) {
+    q = sinTildes(q).trim();
+    var n = 0, filas = document.querySelectorAll('#el-lista .el-fila');
+    Array.prototype.forEach.call(filas, function (f) { var ok = !q || f.getAttribute('data-q').indexOf(q) >= 0; f.hidden = !ok; if (ok) n++; });
+    Array.prototype.forEach.call(document.querySelectorAll('#el-lista .el-sec, #el-lista .el-sep'), function (e) { e.hidden = !!q; });
+    if (q) {   // al buscar, no repetir los "más usados"
+      var vistos = {}; Array.prototype.forEach.call(filas, function (f) { if (f.hidden) return; var k = f.getAttribute('onclick'); if (vistos[k]) { f.hidden = true; n--; } vistos[k] = 1; });
+    }
+    $('el-nada').hidden = n > 0;
+  }
+  function elegir(i) {
+    var sel = elegirSel; cerrarElegir(); if (!sel) return;
+    if (selIdx.get.call(sel) !== i) { sel.selectedIndex = i; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
+  function cerrarElegir() { var c = $('elegir'); if (c) { c.classList.remove('abierto'); c.innerHTML = ''; } elegirSel = null; }
+  var mejorarPend = false;
+  if (typeof MutationObserver !== 'undefined') new MutationObserver(function () {
+    if (mejorarPend) return; mejorarPend = true;
+    (window.requestAnimationFrame || setTimeout)(function () { mejorarPend = false; mejorarSelects(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
   function opcionesSobre(moneda, sel, conSaldo) {
     var sb = SB();
     return sb.lista.filter(function (s) { return s.moneda === moneda; }).map(function (s) {
-      return '<option value="' + esc(s.nombre) + '"' + (s.nombre === sel ? ' selected' : '') + '>' + esc(s.nombre) + (conSaldo ? ' · ' + txt(s.saldo, s.moneda) : '') + '</option>';
+      return '<option value="' + esc(s.nombre) + '"' + (s.nombre === sel ? ' selected' : '') + '>' + esc(nomSobre(s.nombre)) + (conSaldo ? ' · ' + txt(s.saldo, s.moneda) : '') + '</option>';
     }).join('');
   }
   function formAsignar(fila) {
@@ -1694,9 +1839,17 @@ var App = (function () {
     var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0];
     if (!p) return toast('Este movimiento ya está asignado.');
     var primero = sobreTarjetas() || ((SB().lista.filter(function (s) { return s.moneda === m.moneda; })[0] || {}).nombre) || '';
-    asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: 'sobre', tarjeta: !!p.tarjeta, reservado: p.reservadoUsado || 0, filas: [{ sobre: primero, monto: p.falta }] };
+    asig = { fila: fila, falta: p.falta, sentido: p.sentido, moneda: m.moneda, modo: 'sobre', tarjeta: !!p.tarjeta, reservado: p.reservadoUsado || 0, filas: [{ sobre: primero, monto: p.falta }], items: [], manual: true };
+    if (m.tipo === 'Pago de tarjeta') {   // v2.4 (P2): las compras de la tarjeta sin sobre, marcadas solas hasta donde alcance el pago
+      var acum = 0;
+      asig.items = comprasDelPago(m).map(function (it) {
+        it.sobre = sugerirSobre(it.mov); it.on = acum + it.monto <= p.falta + 0.01; if (it.on) acum += it.monto; return it;
+      });
+      asig.manual = !asig.items.length;
+      asig.filas = [{ sobre: asig.items.length ? '' : primero, monto: Math.max(0, Math.round((p.falta - acum) * 100) / 100) }];
+    }
     var h = '<div class="suave chico">' + esc(m.tipo) + ' · ' + fechaCorta(m.fecha) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</div>' +
-      '<h2>' + esc(m.comercio || m.tipo) + '</h2><div class="grande ' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="font-size:28px;font-weight:800">' + (p.sentido === 'entra' ? '+' : '−') + din(p.falta, m.moneda) + '</div>' +
+      '<h2>' + esc(m.comercio || m.tipo) + '</h2><div class="grande ' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="font-size:28px;font-weight:800">' + (p.sentido === 'entra' ? '+' : '−') + din(m.tipo === 'Pago de tarjeta' ? m.monto : p.falta, m.moneda) + '</div>' +
       (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + bannerCobro(m) + '<div id="as-cuerpo"></div>';
     abrir(h);
     pintarAsignar();
@@ -1707,19 +1860,37 @@ var App = (function () {
       return '<label class="op' + (asig.modo === val ? ' on' : '') + '"><input type="radio" name="as-modo" value="' + val + '"' + (asig.modo === val ? ' checked' : '') + ' onchange="App.asigModo(\'' + val + '\')">' + txtOp + (extra || '') + '</label>';
     };
     if (m.tipo === 'Pago de tarjeta') {
-      var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0);
-      h += '<div class="suave chico fuerte" style="margin-top:10px">¿DE QUÉ SOBRES SALIÓ?</div>' +
-        '<div class="chips" style="margin:6px 0">' + (sobreTarjetas() ? '<button class="chip" onclick="App.asigTodo()">Todo de ' + esc(sobreTarjetas()) + '</button>' : '') +
-        '<button class="chip" onclick="App.asigTodo(\'\')">💳 Todo sin sobre</button></div>' +
-        asig.filas.map(function (f, i) {
-          return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(m.moneda, f.sobre, true) +
-            '<option value=""' + (f.sobre === '' ? ' selected' : '') + '>💳 Sin sobre</option></select>' +
-            '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '" oninput="App.asigFila(' + i + ',\'monto\',this.value)">' +
-            (asig.filas.length > 1 ? '<button class="x" aria-label="Quitar" onclick="App.asigQuitar(' + i + ')">×</button>' : '') + '</div>';
-        }).join('') +
-        '<button class="btn sec chico" style="justify-content:center;margin-top:6px" onclick="App.asigAgregar()">+ Otro sobre</button>' +
-        (asig.reservado ? '<div class="fila chico" style="margin-top:8px"><span class="suave">Ya cubierto con compras reservadas</span><b class="verde">' + txt(asig.reservado, m.moneda) + ' ✓</b></div>' : '') +
-        '<div class="fila" style="margin-top:8px"><span class="suave">Falta asignar</span><b id="as-falta" style="color:' + (Math.abs(asig.falta - suma) < 0.01 ? 'var(--positivo)' : 'var(--acento)') + '">' + txt(asig.falta - suma, m.moneda) + (Math.abs(asig.falta - suma) < 0.01 ? ' ✓' : '') + '</b></div>';
+      var mon = m.moneda, marc = p2Marcado(), resto = p2Resto();
+      if (asig.reservado) h += '<div class="aviso-ok"><b>✓ ' + esc(txt(asig.reservado, mon)) + ' ya cubiertos</b> <span class="suave">· compras que ya asignaste a sus sobres</span></div>';
+      if (asig.items.length) {
+        h += '<div class="suave chico fuerte" style="margin-top:12px">COMPRAS DE ESTA TARJETA SIN SOBRE</div>' +
+          '<div class="suave chico">Marcá las que paga este pago; cada una sale de su sobre.</div><div class="p2-lista">' +
+          asig.items.map(function (it, i) {
+            return '<div class="p2-fila' + (it.on ? ' on' : '') + '"><label class="p2-check"><input type="checkbox"' + (it.on ? ' checked' : '') + ' onchange="App.p2Marcar(' + i + ',this.checked)" aria-label="Pagar ' + esc(it.comercio) + '"></label>' +
+              '<div class="p2-info"><b class="p2-nom">' + esc(it.comercio) + '</b><span class="suave chico">' + fechaCorta(it.mov.fecha) + (it.tipo === 'sinsobre' ? ' · estaba sin sobre' : '') + '</span>' +
+              '<select class="sel-mini' + (it.sobre ? '' : ' falta') + '" data-titulo="Sobre para ' + esc(it.comercio) + '" onchange="App.p2Sobre(' + i + ',this.value)"><option value="">Elegí sobre</option>' + opcionesSobre(mon, it.sobre, true) + '</select></div>' +
+              '<b class="p2-monto">' + esc(txt(it.monto, mon)) + '</b></div>';
+          }).join('') + '</div>';
+        if (marc > asig.falta + 0.01) h += '<div class="suave chico" style="margin-top:6px">Marcaste ' + esc(txt(marc - asig.falta, mon)) + ' más que el pago: eso queda reservado para el próximo pago.</div>';
+      }
+      if (asig.manual) {
+        h += '<div class="suave chico fuerte" style="margin-top:12px">' + (asig.items.length ? 'LO QUE FALTA (INTERESES, COMISIONES…), ¿DE QUÉ SOBRES?' : '¿DE QUÉ SOBRES SALIÓ?') + '</div>' +
+          '<div class="chips" style="margin:6px 0">' + (sobreTarjetas() ? '<button class="chip" onclick="App.asigTodo()">Todo de ' + esc(nomSobre(sobreTarjetas())) + '</button>' : '') +
+          '<button class="chip" onclick="App.asigTodo(\'\')">💳 Todo sin sobre</button></div>' +
+          asig.filas.map(function (f, i) {
+            return '<div class="fila-sobre"><select onchange="App.asigFila(' + i + ',\'sobre\',this.value)">' + opcionesSobre(mon, f.sobre, true) +
+              '<option value=""' + (f.sobre === '' ? ' selected' : '') + '>💳 Sin sobre</option></select>' +
+              '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '" oninput="App.asigFila(' + i + ',\'monto\',this.value)">' +
+              (asig.filas.length > 1 ? '<button class="x" aria-label="Quitar" onclick="App.asigQuitar(' + i + ')">×</button>' : '') + '</div>';
+          }).join('') +
+          (asig.filas.length > 1 ? '<div class="suave chico" style="margin-top:4px">La última fila se llena sola con lo que falta.</div>' : '') +
+          '<button class="btn sec chico" style="justify-content:center;margin-top:6px" onclick="App.asigAgregar()">+ Otro sobre</button>';
+      }
+      h += '<div id="p2-barra">' + p2Barra() + '</div>';
+      var sinSobre = asig.items.some(function (it) { return it.on && !it.sobre; });
+      if (sinSobre || (!asig.manual && resto > 0.005)) h += '<div class="chips" style="margin-top:8px;flex-wrap:wrap">' +
+        (sinSobre ? '<button class="chip" onclick="App.p2Sugerir()">✨ Sugerir sobres</button>' : '') +
+        (!asig.manual && resto > 0.005 ? '<button class="chip" onclick="App.p2Manual()">Repartir ' + esc(txt(resto, mon)) + ' a mano</button>' : '') + '</div>';
     } else if (asig.sentido === 'entra') {
       h += '<div class="suave chico fuerte" style="margin-top:10px">¿A DÓNDE VA ESTE DINERO?</div>' +
         radio('sobre', 'Meter en un sobre', asig.modo === 'sobre' ? '<select id="as-sobre" onclick="event.stopPropagation()">' + opcionesSobre(m.moneda, null, true) + '</select>' : '') +
@@ -1747,15 +1918,100 @@ var App = (function () {
     formatearMontos();
   }
   function asigModo(v) { asig.modo = v; pintarAsignar(); }
-  function asigTodo(s) { asig.filas = [{ sobre: s === '' ? '' : sobreTarjetas(), monto: asig.falta }]; pintarAsignar(); }
-  function asigFila(i, k, v) { asig.filas[i][k] = v; if (k === 'sobre') return; var m = movPorFila(asig.fila); var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0); var e = $('as-falta'); if (e) { var ok = Math.abs(asig.falta - suma) < 0.01; e.textContent = txt(asig.falta - suma, m.moneda) + (ok ? ' ✓' : ''); e.style.color = ok ? 'var(--positivo)' : 'var(--acento)'; } }
+  function asigTodo(s) { asig.filas = [{ sobre: s === '' ? '' : sobreTarjetas(), monto: Math.round(p2Resto() * 100) / 100 }]; pintarAsignar(); }
+  function sumaFilas(hasta) { return asig.filas.reduce(function (a, f, j) { return a + (hasta === undefined || j < hasta ? (C.leerNumero(f.monto) || 0) : 0); }, 0); }
+  function asigFila(i, k, v) {
+    asig.filas[i][k] = v; if (k === 'sobre') return;
+    var ult = asig.filas.length - 1;
+    if (i < ult) {   // v2.4: la última fila se llena sola con lo que falta
+      var r = Math.max(0, Math.round((p2Resto() - sumaFilas(ult)) * 100) / 100);
+      asig.filas[ult].monto = r;
+      var ins = document.querySelectorAll('#as-cuerpo .fila-sobre input'); if (ins[ult]) { ins[ult].value = String(r).replace('.', ','); formatearMontos(); }
+    }
+    var b = $('p2-barra'); if (b) b.innerHTML = p2Barra();
+  }
   function asigAgregar() {
-    var suma = asig.filas.reduce(function (a, f) { return a + (C.leerNumero(f.monto) || 0); }, 0);
     var m = movPorFila(asig.fila), otro = SB().lista.filter(function (s) { return s.moneda === m.moneda && !asig.filas.some(function (f) { return f.sobre === s.nombre; }); })[0];
-    asig.filas.push({ sobre: otro ? otro.nombre : asig.filas[0].sobre, monto: Math.max(0, Math.round((asig.falta - suma) * 100) / 100) });
+    asig.filas.push({ sobre: otro ? otro.nombre : asig.filas[0].sobre, monto: Math.max(0, Math.round((p2Resto() - sumaFilas()) * 100) / 100) });
     pintarAsignar();
   }
+  // ---- v2.4 (P2): un pago de tarjeta repartido por compras
+  /** Compras de la tarjeta que todavía no salieron de un sobre, hasta la fecha del pago */
+  function comprasDelPago(m) {
+    var sb = SB(), fPago = new Date(m.fecha), mon = m.moneda === 'USD' ? 'USD' : 'CRC', pend = {}, previo = null;
+    sb.pendientes.forEach(function (p) { pend[p.mov.fila] = p; });
+    D.movimientos.forEach(function (x) { if (x.tipo === 'Pago de tarjeta' && x.cuenta === m.cuenta && x.fila !== m.fila && x.fecha && new Date(x.fecha) < fPago && (!previo || new Date(x.fecha) > previo)) previo = new Date(x.fecha); });
+    return D.movimientos.filter(function (x) {
+      return x.tipo === 'Gasto' && x.cuenta === m.cuenta && (x.moneda === 'USD' ? 'USD' : 'CRC') === mon && !x.para && x.fecha && new Date(x.fecha) <= fPago && (!sb.desde || new Date(x.fecha) >= sb.desde);
+    }).map(function (x) {
+      var p = pend[x.fila];
+      if (p) return { fila: x.fila, mov: x, comercio: x.comercio || 'Compra', monto: Math.round(p.falta * 100) / 100, tipo: 'pend', grupos: [] };
+      var filas = sb.porMov[x.fila] || [];
+      if (!filas.length || x.sobre || filas.some(function (f) { return f.sobre; })) return null;   // ya tiene sobre
+      if (previo && new Date(x.fecha) <= previo) return null;   // "sin sobre" de antes del pago anterior
+      var g = {}; filas.forEach(function (f) { if (f.grupo) g[f.grupo] = 1; });
+      return { fila: x.fila, mov: x, comercio: x.comercio || 'Compra', monto: x.monto, tipo: 'sinsobre', grupos: Object.keys(g) };
+    }).filter(Boolean).sort(function (a, b) { return new Date(a.mov.fecha) - new Date(b.mov.fecha); });
+  }
+  /** Sobre sugerido: el último que usaste para ese comercio; si no, el más usado para esa categoría */
+  function sugerirSobre(x) {
+    var mon = x.moneda === 'USD' ? 'USD' : 'CRC', sb = SB(), existe = {};
+    sb.lista.forEach(function (s) { if (s.moneda === mon) existe[s.nombre] = 1; });
+    var com = sinTildes(x.comercio).trim(), mejor = null, fMejor = 0, porCat = {};
+    D.movimientos.forEach(function (y) {
+      if (y.fila === x.fila) return;
+      var nombres = (sb.porMov[y.fila] || []).filter(function (f) { return f.sobre && existe[f.sobre]; }).map(function (f) { return f.sobre; });
+      if (!nombres.length && y.sobre && existe[y.sobre]) nombres = [y.sobre];
+      if (!nombres.length) return;
+      var f = new Date(y.fecha).getTime() || 0;
+      if (com && sinTildes(y.comercio).trim() === com && f >= fMejor) { mejor = nombres[0]; fMejor = f; }
+      if (x.categoria && y.categoria === x.categoria) porCat[nombres[0]] = (porCat[nombres[0]] || 0) + 1;
+    });
+    if (mejor) return mejor;
+    var cats = Object.keys(porCat).sort(function (a, b) { return porCat[b] - porCat[a]; });
+    return cats[0] || '';
+  }
+  function p2Marcado() { return asig.items.reduce(function (a, it) { return a + (it.on ? it.monto : 0); }, 0); }
+  function p2Resto() { return Math.max(0, asig.falta - p2Marcado()); }
+  function p2Barra() {
+    var m = movPorFila(asig.fila), total = m.monto;
+    var hecho2 = Math.min(total, asig.reservado + Math.min(p2Marcado(), asig.falta) + (asig.manual ? sumaFilas() : 0));
+    var falta = Math.max(0, Math.round((total - hecho2) * 100) / 100), ok = falta < 0.01;
+    return '<div class="barra" style="height:10px;margin-top:14px"><i style="width:' + Math.round(hecho2 / total * 100) + '%;background:var(--positivo)"></i></div>' +
+      '<div class="fila chico" style="margin-top:6px"><span class="suave">Repartido ' + esc(txt(hecho2, m.moneda)) + ' de ' + esc(txt(total, m.moneda)) + '</span>' +
+      '<b id="as-falta" style="color:' + (ok ? 'var(--positivo)' : 'var(--acento)') + '">' + (ok ? 'Listo ✓' : 'Falta ' + esc(txt(falta, m.moneda))) + '</b></div>';
+  }
+  function p2Marcar(i, on) { asig.items[i].on = !!on; if (!asig.manual) asig.filas[0].monto = Math.round(p2Resto() * 100) / 100; else { var ult = asig.filas.length - 1; asig.filas[ult].monto = Math.max(0, Math.round((p2Resto() - sumaFilas(ult)) * 100) / 100); } pintarAsignar(); }
+  function p2Sobre(i, v) { asig.items[i].sobre = v; if (v && !asig.items[i].on) asig.items[i].on = true; pintarAsignar(); }
+  function p2Sugerir() {
+    var sin = [];
+    asig.items.forEach(function (it) { if (it.on && !it.sobre) { it.sobre = sugerirSobre(it.mov); if (!it.sobre) sin.push(it.comercio); } });
+    pintarAsignar();
+    if (sin.length) toast('No encontré sobre para ' + sin.join(', ') + '. Elegilo vos.');
+  }
+  function p2Manual() { asig.manual = true; asig.filas = [{ sobre: sobreTarjetas() || '', monto: Math.round(p2Resto() * 100) / 100 }]; pintarAsignar(); }
   function asigQuitar(i) { asig.filas.splice(i, 1); pintarAsignar(); }
+  function guardarPagoTarjeta(m, g) {
+    var marcadas = asig.items.filter(function (it) { return it.on; }), lista = [], suma = 0;
+    var sinSobre = marcadas.filter(function (it) { return !it.sobre; })[0];
+    if (sinSobre) return toast('Elegí el sobre de ' + sinSobre.comercio + '.');
+    marcadas.forEach(function (it) { lista.push({ fecha: fechaSobre(it.mov), sobre: it.sobre, monto: -it.monto, tipo: 'Compra con tarjeta', movimiento: it.fila, grupo: g, nota: it.comercio }); });
+    if (asig.manual) {
+      var dup = {}, rep2 = false;
+      asig.filas.forEach(function (f) {
+        var v = C.leerNumero(f.monto) || 0; if (v <= 0) return;
+        if (dup[f.sobre]) rep2 = true; dup[f.sobre] = 1; suma += v;
+        lista.push({ fecha: fechaSobre(m), sobre: f.sobre, monto: -v, tipo: 'Pago tarjeta', movimiento: m.fila, grupo: g, nota: m.comercio || '' });
+      });
+      if (rep2) return toast('Hay un sobre repetido.');
+      if (suma > p2Resto() + 0.01) return toast('Asignaste más de lo que falta (' + txt(p2Resto(), m.moneda) + ').');
+    }
+    if (!lista.length) return toast(asig.items.length ? 'Marcá al menos una compra.' : 'Escribí cuánto salió de cada sobre.');
+    marcadas.forEach(function (it) { it.grupos.forEach(function (gr) { encolar('eliminarGrupoSobres', [gr], 'Quitar «sin sobre» de ' + it.comercio); }); });
+    var total = lista.reduce(function (s, x) { return s + Math.abs(x.monto); }, 0);
+    encolar('guardarSobresMov', [lista], 'Pago ' + (m.comercio || 'de tarjeta') + ': ' + (marcadas.length ? marcadas.length + ' compras' : '') + (marcadas.length && suma ? ' + ' : '') + (suma ? lista.length - marcadas.length + ' sobres' : '') + ' · ' + txt(total, m.moneda));
+    hecho('✅ Pago repartido');
+  }
   function guardarAsignar() {
     var m = movPorFila(asig.fila), g = grupoNuevo(), filas = [];
     if (asig.modo === 'repartir') { cerrar(); return irReparto(asig.fila); }
@@ -1766,13 +2022,8 @@ var App = (function () {
       if (nota) encolar('marcarMovimiento', [m.fila, 'Nota', nota, { monto: m.monto }], 'Nota: ' + nota);
       return hecho('🤝 Anotado en «Me deben»: ' + para);
     }
-    if (m.tipo === 'Pago de tarjeta') {
-      var suma = 0;
-      asig.filas.forEach(function (f) { var v = C.leerNumero(f.monto) || 0; if (v > 0) { suma += v; filas.push({ sobre: f.sobre, monto: -v }); } });
-      if (!filas.length) return toast('Escribí cuánto salió de cada sobre.');
-      if (suma > asig.falta + 0.01) return toast('Asignaste más que el pago (' + txt(asig.falta, m.moneda) + ').');
-      var dup = {}; if (asig.filas.some(function (f) { if (dup[f.sobre]) return true; dup[f.sobre] = 1; return false; })) return toast('Hay un sobre repetido.');
-    } else {
+    if (m.tipo === 'Pago de tarjeta') return guardarPagoTarjeta(m, g);
+    {
       var monto = C.leerNumero(val('as-monto'));
       if (!monto || monto <= 0) return toast('Escribí el monto.');
       if (monto > asig.falta + 0.01) return toast('El monto es mayor que lo que falta asignar (' + txt(asig.falta, m.moneda) + ').');
@@ -1817,7 +2068,7 @@ var App = (function () {
       rep.filas.map(function (f) { return '<option' + (f.nombre === rep.ajuste ? ' selected' : '') + '>' + esc(f.nombre) + '</option>'; }).join('') + '</select></label>';
     h += '<div class="caja" style="gap:0">' + rep.filas.map(function (f, i) {
       var aj = f.nombre === rep.ajuste;
-      return '<div class="fila-rep' + (aj ? ' aj' : '') + '"><span>' + esc(f.nombre) + (aj ? ' <span class="pill" style="font-size:10px;padding:2px 6px">AJUSTE</span>' : '') + '</span>' +
+      return '<div class="fila-rep' + (aj ? ' aj' : '') + '"><span>' + iconoSobre(f.nombre) + ' ' + esc(nomSobre(f.nombre)) + (aj ? ' <span class="pill" style="font-size:10px;padding:2px 6px">AJUSTE</span>' : '') + '</span>' +
         '<input data-dinero inputmode="decimal" value="' + esc(String(f.monto).replace('.', ',')) + '"' + (aj ? ' readonly' : ' oninput="App.repCambio(' + i + ',this.value)"') + '></div>';
     }).join('') + '</div>';
     var falta = rep.monto - repSuma();
@@ -1894,7 +2145,7 @@ var App = (function () {
     var total = 0;
     h += '<div class="caja" style="gap:0">' + (cand.length ? cand.map(function (s) {
       var on = !!limpiar.sel[s.nombre]; if (on) total += s.saldo;
-      return '<label class="fila-rep"><span><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.limpiarSel(\'' + esc(s.nombre).replace(/'/g, '\\\'') + '\',this.checked)" style="width:20px;height:20px;accent-color:var(--relleno);vertical-align:middle;margin-right:8px">' + esc(s.nombre) +
+      return '<label class="fila-rep"><span><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.limpiarSel(\'' + esc(s.nombre).replace(/'/g, '\\\'') + '\',this.checked)" style="width:20px;height:20px;accent-color:var(--relleno);vertical-align:middle;margin-right:8px">' + esc(nomSobre(s.nombre)) +
         (s.tipo !== 'Variable' ? ' <span class="suave chico">(' + esc(s.tipo.toLowerCase()) + ')</span>' : '') + '</span><b>' + din(s.saldo, 'CRC') + '</b></label>';
     }).join('') : '<div class="suave">No hay sobres con saldo para limpiar.</div>') + '</div>';
     h += '<div class="fila"><span>Total a mover</span><b style="font-size:20px;color:var(--acento)">' + din(total, 'CRC') + '</b></div>' +
@@ -1930,7 +2181,7 @@ var App = (function () {
     var s = SB().lista[i];
     var movs = s.movs.slice().sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
     var r = function (n) { return n === null || n === undefined ? '' : String(n).replace('.', ','); };
-    abrir('<h2>' + esc(s.nombre) + '</h2><div class="fila"><span class="suave">Saldo</span><b style="font-size:22px">' + din(s.saldo, s.moneda) + '</b></div>' +
+    abrir('<h2>' + iconoSobre(s.nombre) + ' ' + esc(nomSobre(s.nombre)) + '</h2><div class="fila"><span class="suave">Saldo</span><b style="font-size:22px">' + din(s.saldo, s.moneda) + '</b></div>' +
       (movs.length ? '<div class="caja sinpad" style="margin-top:8px">' + movs.slice(0, 8).map(function (e) {
         return '<div class="item" style="cursor:default;padding:10px 14px"><span class="cuerpo"><span class="nombre" style="display:block;font-size:14px">' + esc(e.tipo || '') + (e.nota ? ' · ' + esc(e.nota) : '') + '</span><span class="det" style="display:block">' + fechaCorta(e.fecha) + '</span></span>' +
           '<span class="monto"><b class="' + (e.monto >= 0 ? 'verde' : '') + '">' + (e.monto >= 0 ? '+' : '−') + din(Math.abs(e.monto), s.moneda) + '</b></span></div>';
@@ -1959,8 +2210,8 @@ var App = (function () {
     var sb = SB(), filas = sb.porMov[m.fila] || [], pend = sb.pendientes.filter(function (p) { return p.mov.fila === m.fila; })[0];
     var h = '<div class="caja" style="margin-top:14px;background:var(--fondo);gap:6px"><b style="font-size:14px">Sobres</b>';
     if (sb.cubierto[m.fila]) h += '<div class="fila chico"><span>✓ Cubierto con lo reservado de tus compras</span><b class="verde">' + esc(txt(sb.cubierto[m.fila], m.moneda)) + '</b></div>';
-    if (filas.length) h += filas.map(function (x) { return '<div class="fila chico"><span>' + esc(x.sobre || '💳 Sin sobre') + '</span><span>' + (x.monto >= 0 ? '+' : '−') + esc(txt(Math.abs(x.monto), m.moneda)) + '</span></div>'; }).join('');
-    else if (m.sobre && !pend) h += '<div class="fila chico"><span>' + esc(m.sobre) + ' (por regla)</span><span>' + esc(txt(m.monto, m.moneda)) + '</span></div>';
+    if (filas.length) h += filas.map(function (x) { return '<div class="fila chico"><span>' + (x.sobre ? iconoSobre(x.sobre) + ' ' + esc(nomSobre(x.sobre)) : '💳 Sin sobre') + '</span><span>' + (x.monto >= 0 ? '+' : '−') + esc(txt(Math.abs(x.monto), m.moneda)) + '</span></div>'; }).join('');
+    else if (m.sobre && !pend) h += '<div class="fila chico"><span>' + esc(nomSobre(m.sobre)) + ' (por regla)</span><span>' + esc(txt(m.monto, m.moneda)) + '</span></div>';
     if (pend) h += '<button class="btn sec chico" style="justify-content:center" onclick="App.formAsignar(' + m.fila + ')">' + (filas.length ? 'Asignar lo que falta (' + esc(txt(pend.falta, m.moneda)) + ')' : 'Asignar a sobres') + '</button>';
     if (filas.length) h += '<button class="btn sec chico peligro" style="justify-content:center" id="sb-deshacer" onclick="App.deshacerSobres(' + m.fila + ')">Deshacer la asignación</button>';
     return h + '</div>';
@@ -2232,7 +2483,7 @@ var App = (function () {
   function formSobresEspeciales() {
     var esp = D.sobreEspecial || {};
     var sel = function (id, actual) {
-      return '<select id="' + id + '"><option value="">— Ninguno —</option>' + D.sobres.map(function (s) { return '<option' + (s.nombre === actual ? ' selected' : '') + '>' + esc(s.nombre) + '</option>'; }).join('') + '</select>';
+      return '<select id="' + id + '"><option value="">— Ninguno —</option>' + D.sobres.map(function (s) { return '<option value="' + esc(s.nombre) + '"' + (s.nombre === actual ? ' selected' : '') + '>' + esc(nomSobre(s.nombre)) + '</option>'; }).join('') + '</select>';
     };
     abrir('<h2>Sobres especiales</h2><div class="suave">Elegí cuál de tus sobres cumple cada función. Les podés poner el nombre que quieras.</div>' +
       '<label class="campo"><span>Préstamo de casa (los pagos del préstamo salen solos de aquí)</span>' + sel('se-prestamo', esp.prestamo) + '</label>' +
@@ -3211,7 +3462,7 @@ var App = (function () {
     guardarAsignar: guardarAsignar, repCambio: repCambio, repAjuste: repAjuste, guardarRepartoMov: guardarRepartoMov,
     repGuardarCheck: function (v) { rep.guardar = v; }, formMover: formMover, guardarMover: guardarMover,
     limpiarSel: function (n, v) { limpiar.sel[n] = v; pintar(); }, limpiarDestino: function (n) { limpiar.destino = n; pintar(); },
-    guardarLimpiar: guardarLimpiar, deshacerSobres: deshacerSobres, formSobresDesde: formSobresDesde, guardarSobresDesde: guardarSobresDesde, formSobresEspeciales: formSobresEspeciales, guardarSobresEspeciales: guardarSobresEspeciales,
+    guardarLimpiar: guardarLimpiar, deshacerSobres: deshacerSobres, elegir: elegir, buscarElegir: buscarElegir, cerrarElegir: cerrarElegir, p2Marcar: p2Marcar, p2Sobre: p2Sobre, p2Sugerir: p2Sugerir, p2Manual: p2Manual, formSobresDesde: formSobresDesde, guardarSobresDesde: guardarSobresDesde, formSobresEspeciales: formSobresEspeciales, guardarSobresEspeciales: guardarSobresEspeciales,
     formCola: formCola, quitarDeCola: function (id, b) {
       if (!b.dataset.ok) { b.dataset.ok = '1'; b.textContent = '¿Seguro? Tocá otra vez'; return; }
       cola = cola.filter(function (x) { return x.id !== id; }); guardarCola(); toast('Quitado. Si ya estaba en la hoja, queda como está.'); cargar(); formCola();

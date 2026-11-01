@@ -600,3 +600,61 @@ details.pleg .pl-c > .tc-fila { padding: 13px 16px; }
 .texto-leido { white-space: pre-wrap; font-size: 11.5px; color: var(--suave); margin: 8px 14px; max-height: 220px; overflow: auto; font-family: ui-monospace, monospace; }
 .ef-fila { border: 1px solid var(--borde); border-radius: 14px; padding: 10px 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .ef-fila input { height: 44px; border-radius: 10px; border: 1px solid var(--borde); background: var(--fondo); color: var(--texto); padding: 0 12px; font-size: 17px; font-weight: 700; }
+
+/* ---------- v2.4: selector propio (reemplaza la lista de Android en todos los <select>) ---------- */
+select.sel-oculto { display: none !important; }
+.sel-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 48px; padding: 0 12px 0 14px; border-radius: 12px; border: 1px solid var(--borde);
+  background: var(--tarjeta); color: var(--texto); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.sel-btn:disabled { opacity: .55; cursor: default; }
+.sel-btn .sel-ic { font-size: 17px; flex-shrink: 0; }
+.sel-btn .sel-txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.sel-btn .sel-saldo { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.sel-btn .sel-flecha { color: var(--suave); font-size: 13px; flex-shrink: 0; }
+.fila-sobre .sel-btn, .fila-rep .sel-btn { height: 42px; border-radius: 10px; background: var(--fondo); padding: 0 8px 0 10px; }
+.fila-sobre .sel-btn .sel-saldo { display: none; }
+.op .sel-btn { flex-basis: 100%; margin-top: 4px; }
+.sel-btn.rap-cuenta { height: 36px; border-radius: 18px; font-size: 14px; flex: 1; padding: 0 10px 0 12px; }
+.sel-btn.sel-mini { height: auto; min-height: 30px; width: auto; max-width: 100%; padding: 4px 10px; margin-top: 4px; border-radius: 15px; font-size: 13px; background: transparent; }
+.sel-btn.sel-mini .sel-txt { font-weight: 700; color: var(--acento); }
+.sel-btn.sel-mini.falta { border-style: dashed; }
+.sel-btn.sel-mini.falta .sel-txt { color: var(--suave); font-weight: 600; }
+.amarillo { color: var(--naranja-txt, #C8862B); }
+:root[data-tema="dorado"] .amarillo, :root[data-tema="oscuro"] .amarillo { color: #F5B82E; }
+
+.elegir-velo { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 15; display: none; align-items: flex-end; justify-content: center; }
+.elegir-velo.abierto { display: flex; }
+.elegir { background: var(--fondo); width: 100%; max-width: 520px; max-height: 86vh; display: flex; flex-direction: column; border-radius: 22px 22px 0 0;
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 30px rgba(0,0,0,.35); animation: subir .18s ease-out; }
+@keyframes subir { from { transform: translateY(30px); opacity: .6; } to { transform: none; opacity: 1; } }
+.elegir .asa { width: 40px; height: 5px; border-radius: 3px; background: var(--borde); margin: 0 auto 10px; flex-shrink: 0; }
+.el-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px 10px; }
+.el-cab b { font-size: 18px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.el-x { width: 36px; height: 36px; border-radius: 18px; border: 0; background: var(--tarjeta); color: var(--suave); font-size: 22px; cursor: pointer; flex-shrink: 0; }
+.el-buscar { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 12px; margin-bottom: 8px; border: 1px solid var(--borde); border-radius: 14px; background: var(--tarjeta); flex-shrink: 0; }
+.el-buscar input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--texto); font: inherit; font-size: 16px; outline: none; }
+.el-lista { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; margin: 0 -4px; padding: 0 4px; }
+.el-sec { font-size: 11.5px; font-weight: 800; letter-spacing: .5px; color: var(--suave); margin: 10px 6px 4px; }
+.el-sep { border-top: 1px solid var(--borde); margin: 8px 4px; }
+.el-fila { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 10px; border: 1.5px solid transparent; border-radius: 14px;
+  background: transparent; color: var(--texto); font: inherit; font-size: 15.5px; text-align: left; cursor: pointer; }
+.el-fila:active { background: var(--tarjeta); }
+.el-fila.on { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 14%, transparent); }
+.el-fila:disabled { opacity: .45; }
+.el-ic { width: 36px; height: 36px; border-radius: 11px; background: var(--tarjeta); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+.el-nom { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.el-saldo { font-size: 14.5px; white-space: nowrap; }
+.el-ok { color: var(--acento); font-weight: 900; }
+.el-nada { text-align: center; padding: 24px 0; }
+
+/* ---------- v2.4: pago de tarjeta repartido por compras (P2) ---------- */
+.aviso-ok { margin-top: 12px; padding: 10px 12px; border-radius: 14px; font-size: 13.5px; background: color-mix(in srgb, var(--positivo) 14%, transparent); border: 1px solid color-mix(in srgb, var(--positivo) 40%, transparent); }
+.aviso-ok b { color: var(--positivo); }
+.p2-lista { margin-top: 6px; }
+.p2-fila { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--borde); }
+.p2-fila:last-child { border-bottom: 0; }
+.p2-check { padding-top: 2px; flex-shrink: 0; }
+.p2-check input { width: 22px; height: 22px; accent-color: var(--positivo); }
+.p2-info { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.p2-nom { font-size: 15px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p2-monto { white-space: nowrap; font-size: 15px; padding-top: 1px; }
+.p2-fila:not(.on) .p2-nom, .p2-fila:not(.on) .p2-monto { opacity: .6; }
