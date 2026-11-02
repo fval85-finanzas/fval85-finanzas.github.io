@@ -708,7 +708,7 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .wi-L .widget:not(.grande-w) .w-n { font-size: 17px; }
 .wi-L .widget:not(.grande-w) .w-v { font-size: 26px; }
 .wi-M .widget:not(.grande-w) .w-v { font-size: 20px; }
-.widget.wi-vacio { opacity: .6; border-style: dashed; cursor: default; }
+.widget.wi-vacio { opacity: .8; border-style: dashed; }
 .enlace-editar { display: block; margin: 14px auto 4px; background: none; border: 0; color: var(--acento); font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; padding: 8px 12px; }
 .ayuda-edit { text-align: center; font-size: 12.5px; color: var(--suave); margin: -4px 0 10px; }
 .widgets.editando > .wi:not(.wi-fijo) { animation: temblar .3s ease-in-out infinite alternate; }
@@ -797,3 +797,4 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .tile.elegido .ic { outline: 2px solid var(--acento); outline-offset: 2px; }
 .prev-acc { pointer-events: none; }
 .prev-acc .widgets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.widget.wi-vacio .w-v { font-size: 14px !important; font-weight: 600; white-space: normal; }

@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.1';
+  var VERSION_WEB = '2.5.2';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -387,6 +387,9 @@ var App = (function () {
   var TAMANOS = { queda: 'SML', sobreBajo: 'SML', proxPago: 'SML', tasaCero: 'SML', fondos: 'SML', prestamo: 'SML', medeben: 'SML', viaje: 'M', sobres: 'ML', accesos: 'M', ultimos: 'ML' };
   var TAM_INICIAL = { queda: 'L', sobreBajo: 'S', proxPago: 'S', tasaCero: 'S', fondos: 'S', prestamo: 'S', medeben: 'S' };
   var NOM_TAM = { S: 'Chico', M: 'Mediano', L: 'Grande' };
+  var VACIO = { viaje: ['✈', 'Ningún viaje en curso · Crear uno ›', 'viajes'], medeben: ['🤝', 'Nadie te debe ✓', 'medeben'], tasaCero: ['◷', 'Sin cuotas tasa cero', 'tasacero'],
+    fondos: ['📈', 'Sin fondos todavía · Agregar ›', 'fondos'], prestamo: ['🏠', 'Sin préstamo anotado', 'prestamo'], sobres: ['✉', 'Configurá tus sobres ›', 'sobres'],
+    sobreBajo: ['✉', 'Configurá tus sobres ›', 'sobres'], proxPago: ['📅', 'Sin pagos próximos', 'tarjetas'] };
   function tamanosDe(k) { return /^acc:/.test(k) ? 'SM' : (TAMANOS[k] || 'M'); }
   function nomTam(k, t) { return /^acc:/.test(k) ? (t === 'S' ? 'Mediano' : 'Ancho') : NOM_TAM[t]; }
   function defWidget(k) { if (/^acc:/.test(k)) { var it = ITEMS[k.slice(4)] || ['Acceso']; return [k, it[0], 'Acceso', true]; } return WIDGETS.filter(function (x) { return x[0] === k; })[0]; }
@@ -516,8 +519,10 @@ var App = (function () {
     ws.forEach(function (w) {
       if (!avisosPuestos && (w.k === 'accesos' || w.k === 'ultimos' || w.k === 'sobres')) { cuerpo += avisos(); avisosPuestos = true; }
       var html = widget(w.k, res, w.t), def = defWidget(w.k);
-      if (!html && !ed) return;
-      if (!html) html = '<div class="widget wi-vacio"><span class="w-t">' + esc(def[1]) + '</span><span class="w-v chico-v suave">' + esc(def[2]) + '</span></div>';
+      if (!html) {   // v2.5.2: un widget sin datos se ve igual, con un mensaje (antes desaparecía y parecía que no se había agregado)
+        var vac = VACIO[w.k] || ['', 'Sin datos por ahora', ''];
+        html = '<button class="widget wi-vacio"' + (vac[2] ? ' onclick="App.ir(\'' + vac[2] + '\')"' : '') + '><span class="w-t">' + (vac[0] ? vac[0] + ' ' : '') + esc(def[1]) + '</span><span class="w-v chico-v suave">' + vac[1] + '</span></button>';
+      }
       var tams = tamanosDe(w.k);
       cuerpo += '<div class="wi wi-' + w.t + '" data-k="' + w.k + '">' + html +
         (ed ? '<div class="wi-capa"></div><button class="wi-x" aria-label="Quitar ' + esc(def[1]) + '" onclick="App.iniQuitar(\'' + w.k + '\')">×</button>' +

@@ -1,8 +1,8 @@
 {
- "web": "2.5.1",
+ "web": "2.5.2",
  "servidor": "2.5.0",
  "sha256": "ec2f873030b3b72aed8fc164d53dbcca3863312ed8780e86b99bd34e934c436e",
- "novedades": "Accesos con tamaño (ícono, mediano o ancho) y mover widgets arrastrando o con ↑ ↓.",
+ "novedades": "Los widgets sin datos (viaje, me deben…) ahora se ven con un mensaje en vez de desaparecer.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
