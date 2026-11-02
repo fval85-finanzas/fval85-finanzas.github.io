@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que abra rápido y avisa cuando hay una versión nueva.
 // Al publicar cambios, subí el número de VERSION (y el de VERSION_WEB en js/app.js).
-const VERSION = '2.5.2';
+const VERSION = '2.5.3';
 const CACHE = 'misfinanzas-' + VERSION;
 const ARCHIVOS = [
   './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/pdf.js', './js/app.js', './js/lector.js', './js/ocr-worker.js', './js/vendor/pdf-lib.min.js',

@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.2';
+  var VERSION_WEB = '2.5.3';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -275,7 +275,7 @@ var App = (function () {
       if (cb) cb();
       if (cola.length) enviarCola();
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
-      intentarRepartoSalario();
+      intentarRepartoSalario(); finPlanPendiente();
       var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
       if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); if (irA === 'revisar') ir('movimientos', 'revisar'); else ir(irA); }
       if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
@@ -311,6 +311,7 @@ var App = (function () {
   }
   function irDirecto(p, chip) {
     if (p !== 'lista') pantallaEncendida(false);
+    if (p !== 'movimientos') selMov = null;
     if (editIni && p !== 'inicio') { guardar('mf-inicio', JSON.stringify(editIni)); editIni = null; }   // v2.5: salir de editar Inicio guarda
     if (PRINCIPALES.indexOf(pantalla) >= 0 && PRINCIPALES.indexOf(p) < 0) origen = pantalla;
     if (p === 'calculadora') { calcVista = 'datos'; if (pantalla !== 'calculadora' && !calcConservar) limpiarCalc(); calcConservar = false; }
@@ -358,7 +359,7 @@ var App = (function () {
     document.querySelectorAll('.pantalla').forEach(function (s) { s.classList.toggle('activa', s.id === 'p-' + pantalla); });
     ({
       inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
-      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
+      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, plan: pPlan, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
     formatearMontos();
   }
@@ -396,6 +397,7 @@ var App = (function () {
   /** v2.5: un acceso puesto como widget (Mediano = media fila, Ancho = fila entera) con un dato útil */
   function datoAcceso(c, res) {
     try {
+      if (c === 'planpago') { var ts = tarjetasActivas(), tt = 0; ts.forEach(function (x) { tt += totalSinPagar(x.nombre); }); return [din(tt, 'CRC'), 'sin pagar en ' + ts.length + ' tarjeta' + (ts.length === 1 ? '' : 's')]; }
       if (c === 'super') { var l = (LISTAS || [])[0]; return l ? [l.nombre, l.marcados + ' de ' + l.total + ' en el carrito'] : ['Tus listas', 'Crear una lista']; }
       if (c === 'inversiones') { var fl = D.fondos ? FD().lista : [], tf = 0; fl.forEach(function (f) { if (f.moneda === 'CRC') tf += f.saldo; }); return [din(tf, 'CRC'), fl.length + ' subcuenta' + (fl.length === 1 ? '' : 's')]; }
       if (c === 'sobres') { return sinServidorSobres() ? ['Sobres', ''] : [din(SB().total.CRC, 'CRC'), SB().pendientes.length ? SB().pendientes.length + ' por asignar' : 'todo asignado']; }
@@ -502,7 +504,7 @@ var App = (function () {
     return '';
   }
   function avisosInicio(res) {
-    var h = tarjetasVersion() + tarjetaSalario();
+    var h = tarjetasVersion() + tarjetaSalario() + tarjetaPlanes();
     var linea = function (icono, texto, accion, alerta) {
       return '<button class="linea-aviso' + (alerta ? ' alerta' : '') + '" onclick="' + accion + '"><span class="li-ic">' + icono + '</span><span class="li-t">' + texto + '</span><span class="enlace">Ver ›</span></button>';
     };
@@ -680,6 +682,7 @@ var App = (function () {
     medeben: ['Me deben', 'M7 11a3 3 0 1 0 0.01 0zM2 20c0-3 2.5-5 5-5s5 2 5 5', 'M16 8l4 4-4 4M20 12h-7', 'ir:medeben'],
     viajes: ['Viajes', 'M10.5 21l1.5-1v-5l8 3v-2l-8-5V5.5a1.5 1.5 0 0 0-3 0V11l-8 5v2l8-3v5l1.5 1z', 'M17 3.5a1.5 1.5 0 1 0 0.01 0z', 'ir:viajes'],
     sobres: ['Sobres', 'M3 6h18v12H3zM3 7l9 6 9-6', 'M17 15.5a2 2 0 1 0 0.01 0z', 'ir:sobres'],
+    planpago: ['Planear pago', 'M5 4h14v17H5zM9 2h6v4H9zM8 10h8M8 14h5', 'M15 15.5l1.5 1.5 3-3', 'plan'],
     super: ['Super y Otros', 'M3 4h2l2.4 11h11l2-8H7M9 20a1 1 0 1 0 0.01 0zM18 20a1 1 0 1 0 0.01 0z', 'M11 9h6v3h-6z', 'ir:super'],
     calculadora: ['Calculadora', 'M5 2h14v20H5zM8 5h8v4H8z', 'M8 13h2v2H8zM14 13h2v2h-2zM8 17h2v2H8zM14 17h2v2h-2z', 'ir:calculadora'],
     tasacero: ['Tasa cero', 'M3 5h18v16H3zM3 9h18M8 3v4M16 3v4', 'M12 12.5a2.5 3 0 1 0 0.01 0z', 'ir:tasacero'],
@@ -696,7 +699,7 @@ var App = (function () {
   };
   var SECCIONES = [
     ['MIS CUENTAS', ['tarjetas', 'ahorros', 'prestamo', 'inversiones', 'medeben']],
-    ['PLANIFICAR', ['super', 'sobres', 'viajes', 'calculadora', 'tasacero', 'recurrentes']],
+    ['PLANIFICAR', ['planpago', 'super', 'sobres', 'viajes', 'calculadora', 'tasacero', 'recurrentes']],
     ['ANÁLISIS', ['reportes', 'patrimonio', 'categorias', 'exportar']],
     ['AJUSTES', ['configuracion', 'hoja', 'bancos', 'agregar']]
   ];
@@ -726,6 +729,7 @@ var App = (function () {
     if (accion.indexOf('ir:') === 0) return ir(accion.slice(3));
     if (accion.indexOf('hoja:') === 0) return abrirHoja(accion.slice(5));
     if (accion === 'exportar') return exportarCSV();
+    if (accion === 'plan') return abrirPlan();
     if (accion === 'agregar') return toast('¿Qué te gustaría agregar aquí? Contámelo y lo sumamos en la próxima versión.', 5000);
   }
   var presionTimer = null, presionLarga = false;
@@ -1566,7 +1570,8 @@ var App = (function () {
     var extra = [cta && cta.ultimos4 ? '••' + esc(cta.ultimos4) : '', hora(m.fecha)].filter(String);
     if (!et && m.cuenta && !(cta && cta.ultimos4)) extra.unshift(esc(m.cuenta));
     var et = m.para && m.tipo !== 'Ingreso' ? '<span class="et-sobre otro">🤝 ' + esc(m.para) + (m.cobro ? ' · pagado' : '') + '</span>' : C.esCobro(m) ? '<span class="et-sobre otro">🤝 ' + esc(m.cobro) + '</span>' : etiquetaSobre(m);
-    return '<button class="item mov" onclick="App.formMovimiento(' + m.fila + ')"><span class="ico-cat" style="background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span>' +
+    var enSel = selMov && pantalla === 'movimientos';
+    return '<button class="item mov' + (enSel ? ' modo-sel' + (selMov[m.fila] ? ' sel' : '') : '') + '" onclick="App.formMovimiento(' + m.fila + ')">' + (enSel ? '<span class="sel-ck">' + (selMov[m.fila] ? '✓' : '') + '</span>' : '') + '<span class="ico-cat" style="background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span>' +
       '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || m.tipo) + '</span>' +
       '<span class="det" style="display:block">' + desc + (et ? ' ' + et : extra.length ? ' · ' + extra.join(' · ') : '') + '</span></span>' +
       '<span class="monto"><span class="' + (entra ? 'verde-pos' : '') + '" style="display:block">' + signo + din(m.monto, m.moneda).replace('−', '') + '</span>' +
@@ -1599,7 +1604,7 @@ var App = (function () {
       if (cc) h += '<div class="suave chico" style="margin:-4px 2px 0">' + esc(filtro.chip.slice(2)) + ': ' + din(cc.CRC, 'CRC') + (cc.USD ? ' + ' + din(cc.USD, 'USD') : '') + ' este mes</div>';
     }
     h += '<div id="listaMov"></div>';
-    $('p-movimientos').innerHTML = h;
+    $('p-movimientos').innerHTML = h + barraSel();
     pintarLista(res);
   }
   function alternarBuscar() { filtro.buscando = !filtro.buscando; if (!filtro.buscando) filtro.q = ''; pintar(); if (filtro.buscando) setTimeout(function () { var e = $('q'); if (e) e.focus(); }, 50); }
@@ -1790,6 +1795,7 @@ var App = (function () {
             return linea(esc(y.t.descripcion) + ' · ' + (y.t.meses - y.e.restantes) + ' de ' + y.t.meses, din(y.e.cuota, y.t.moneda) + '/mes');
           }).join('') : '') +
           '<div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.verComprasDe(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')">Ver compras</button>' +
+          '<button class="chip on" onclick="App.abrirPlan(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')">📋 Planear pago</button>' +
           '<button class="chip" onclick="App.formMovimiento(0,{tipo:\'Pago de tarjeta\',cuenta:\'' + esc(c.nombre).replace(/'/g, "\\'") + '\'})">Registrar pago</button>' +
           '<button class="chip on" onclick="App.formSaldoTarjeta(' + c.fila + ')">↻ Actualizar saldo</button>' +
           '<button class="chip" onclick="App.elegirArchivo(\'foto\')">📷 Pago desde foto</button>' +
@@ -1949,7 +1955,7 @@ var App = (function () {
     var o = sel.options[selIdx.get.call(sel)], h;
     b.disabled = sel.disabled;
     if (!o) h = '<span class="sel-txt suave">Elegí…</span>';
-    else if (esSelSobre(sel) && o.value) {
+    else if (esSelSobre(sel) && o.value && o.value.indexOf('__') !== 0) {
       var s = sobreInfo(o.value, monedaSel(sel));
       h = '<span class="sel-ic">' + iconoSobre(o.value) + '</span><span class="sel-txt">' + esc(nomSobre(o.value)) + '</span>' +
         (s && !b.classList.contains('sel-mini') ? '<span class="sel-saldo ' + claseSaldo(s) + '">' + esc(txt(s.saldo, s.moneda)) + '</span>' : '');
@@ -1970,15 +1976,16 @@ var App = (function () {
     var sobre = esSelSobre(sel), mon = monedaSel(sel), actual = sel.value;
     var ops = Array.prototype.map.call(sel.options, function (o, i) { return { i: i, v: o.value, t: o.text, dis: o.disabled }; });
     var fila = function (op) {
-      var s = sobre && op.v ? sobreInfo(op.v, mon) : null, nombre = sobre && op.v ? nomSobre(op.v) : op.t;
-      var ic = sobre ? (op.v ? iconoSobre(op.v) : /sin sobre/i.test(op.t) ? '💳' : '—') : '';
+      var real = op.v && op.v.indexOf('__') !== 0;
+      var s = sobre && real ? sobreInfo(op.v, mon) : null, nombre = sobre && real ? nomSobre(op.v) : op.t;
+      var ic = sobre ? (real ? iconoSobre(op.v) : /sin sobre/i.test(op.t) ? '💳' : '—') : '';
       return '<button type="button" class="el-fila' + (op.v === actual ? ' on' : '') + '"' + (op.dis ? ' disabled' : '') + ' data-q="' + esc(sinTildes(nombre + ' ' + op.v)) + '" onclick="App.elegir(' + op.i + ')">' +
-        (ic ? '<span class="el-ic">' + ic + '</span>' : '') + '<span class="el-nom">' + esc(sobre && !op.v ? op.t.replace(/^💳\s*/, '') : nombre) + '</span>' +
+        (ic ? '<span class="el-ic">' + ic + '</span>' : '') + '<span class="el-nom">' + esc(sobre && !real ? op.t.replace(/^💳\s*/, '') : nombre) + '</span>' +
         (s ? '<b class="el-saldo ' + claseSaldo(s) + '">' + esc(txt(s.saldo, s.moneda)) + '</b>' : '') + (op.v === actual ? '<span class="el-ok">✓</span>' : '') + '</button>';
     };
     var muchos = ops.length > 7, h = '';
     if (sobre) {
-      var reales = ops.filter(function (o) { return o.v; }), vacios = ops.filter(function (o) { return !o.v; });
+      var reales = ops.filter(function (o) { return o.v && o.v.indexOf('__') !== 0; }), vacios = ops.filter(function (o) { return !o.v || o.v.indexOf('__') === 0; });
       if (muchos) {
         var uso = {}; (D.sobresMov || []).forEach(function (x) { if (x.sobre) uso[x.sobre] = (uso[x.sobre] || 0) + 1; });
         var top = reales.filter(function (o) { return uso[o.v]; }).sort(function (a, b) { return uso[b.v] - uso[a.v]; }).slice(0, 3);
@@ -2040,7 +2047,8 @@ var App = (function () {
     }
     var h = '<div class="suave chico">' + esc(m.tipo) + ' · ' + fechaCorta(m.fecha) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</div>' +
       '<h2>' + esc(m.comercio || m.tipo) + '</h2><div class="grande ' + (p.sentido === 'entra' ? 'verde' : 'rojo') + '" style="font-size:28px;font-weight:800">' + (p.sentido === 'entra' ? '+' : '−') + din(m.tipo === 'Pago de tarjeta' ? m.monto : p.falta, m.moneda) + '</div>' +
-      (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + bannerCobro(m) + '<div id="as-cuerpo"></div>';
+      (m.nota ? '<div class="suave chico">' + esc(m.nota) + '</div>' : '') + bannerCobro(m) +
+      planesPorUsar().filter(function (x) { return x.mov.fila === fila; }).map(function (x) { return '<button class="btn" style="margin-top:10px" onclick="App.usarPlan(\'' + x.plan.id + '\',' + fila + ')">📋 Usar el plan que guardaste (' + txt(x.plan.total, 'CRC') + ')</button>'; }).join('') + '<div id="as-cuerpo"></div>';
     abrir(h);
     pintarAsignar();
   }
@@ -2780,6 +2788,7 @@ var App = (function () {
   function local(lista) { D.sobresMov = (D.sobresMov || []).concat(lista.map(function (x) { return Object.assign({ fila: 0 }, x); })); guardarCache(JSON.stringify(D)); }
 
   function formMovimiento(fila, pre) {
+    if (selMov && fila && pantalla === 'movimientos') return alternarSel(fila);   // v2.5.3: modo seleccionar
     if (fila && fila < 0) return toast('Se está guardando en Google; en unos segundos lo podés abrir.');
     var m = fila ? D.movimientos.filter(function (x) { return x.fila === fila; })[0] : null;
     m = m || Object.assign({ tipo: 'Gasto', moneda: 'CRC', fecha: new Date().toISOString(), origen: 'Manual' }, pre || {});
@@ -4381,6 +4390,244 @@ var App = (function () {
     else pintar();
   }
 
+  // ==================================================================== v2.5.3: PLANEADOR DE PAGOS DE TARJETA
+  var PL = null;
+  function tarjetasActivas() { return D.cuentas.filter(function (c) { return c.activa && c.tipo === 'Tarjeta de crédito'; }); }
+  function abrirPlan(nombre) {
+    var ts = tarjetasActivas();
+    if (!nombre && ts.length === 1) nombre = ts[0].nombre;
+    if (!nombre) {
+      if (!ts.length) return toast('No tenés tarjetas de crédito activas.');
+      return abrir('<h2>📋 Planear pago</h2><div class="suave">¿De cuál tarjeta?</div><div class="caja sinpad" style="margin-top:10px">' + ts.map(function (c) {
+        var t = totalSinPagar(c.nombre);
+        return '<button class="opcion" onclick="App.cerrar();App.abrirPlan(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(etiquetaCuenta(c.nombre)) + '</span><span class="det" style="display:block">' + txt(t, 'CRC') + ' sin pagar</span></span><span class="flecha">›</span></button>';
+      }).join('') + '</div>');
+    }
+    PL = { cuenta: nombre, items: movsSinPagar(nombre).map(function (x) { return x; }) };
+    planPreset(cuentaPorNombre(nombre) && cuentaPorNombre(nombre).diaCorte ? 'corte' : 'todo', true);
+    ir('plan');
+  }
+  /** Compras (y devoluciones) de la tarjeta que todavía no se marcaron como pagadas */
+  function movsSinPagar(nombre) {
+    var sb = sinServidorSobres() ? null : SB(), lim = new Date(hoy.getTime() - 120 * 86400000);
+    if (D.sobresDesde && new Date(D.sobresDesde) > lim) lim = new Date(D.sobresDesde);
+    // lo de antes del último pago ya se pagó: se cuenta desde el corte que cubrió ese pago (o desde el pago, si no hay día de corte)
+    var ultPago = D.movimientos.filter(function (m) { return m.cuenta === nombre && m.tipo === 'Pago de tarjeta' && m.fecha; }).map(function (m) { return new Date(m.fecha); }).sort(function (a, b) { return b - a; })[0];
+    if (ultPago) {
+      var cta = cuentaPorNombre(nombre), desde = ultPago;
+      if (cta && cta.diaCorte) { var y = ultPago.getFullYear(), mo = ultPago.getMonth(), u = function (yy, mm) { return new Date(yy, mm + 1, 0).getDate(); }, fc = new Date(y, mo, Math.min(cta.diaCorte, u(y, mo)), 23, 59, 59); if (fc > ultPago) { mo--; if (mo < 0) { mo = 11; y--; } fc = new Date(y, mo, Math.min(cta.diaCorte, u(y, mo)), 23, 59, 59); } desde = fc; }
+      if (desde > lim) lim = new Date(desde.getTime() + 1000);
+    }
+    var pend = {}; if (sb) sb.pendientes.forEach(function (p) { pend[p.mov.fila] = p; });
+    return D.movimientos.filter(function (m) {
+      return m.cuenta === nombre && m.fila > 0 && !m.cobro && !m.para && (m.tipo === 'Gasto' || m.tipo === 'Ingreso') && m.fecha && new Date(m.fecha) >= lim;
+    }).sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); }).map(function (m) {
+      var filas = sb ? (sb.porMov[m.fila] || []) : [], conSobre = filas.filter(function (f) { return f.sobre; })[0];
+      var ya = conSobre ? conSobre.sobre : (m.sobre || '');
+      var g = {}; if (!ya) filas.forEach(function (f) { if (f.grupo) g[f.grupo] = 1; });
+      return { m: m, cred: m.tipo === 'Ingreso', ya: ya, sobre: !ya && m.tipo === 'Gasto' ? sugerirSobre(m) : '', grupos: Object.keys(g), pend: !!pend[m.fila], sel: false };
+    });
+  }
+  function totalSinPagar(nombre) { return movsSinPagar(nombre).reduce(function (a, x) { return a + (x.cred ? -x.m.monto : x.m.monto); }, 0); }
+  function ultimoCorte(c) {
+    if (!c || !c.diaCorte) return null;
+    var y = hoy.getFullYear(), mo = hoy.getMonth(), ult = function (yy, mm) { return new Date(yy, mm + 1, 0).getDate(); };
+    var f = new Date(y, mo, Math.min(c.diaCorte, ult(y, mo)), 23, 59, 59);
+    if (f > hoy) { mo--; if (mo < 0) { mo = 11; y--; } f = new Date(y, mo, Math.min(c.diaCorte, ult(y, mo)), 23, 59, 59); }
+    return f;
+  }
+  function planPreset(p, silencio) {
+    var c = cuentaPorNombre(PL.cuenta), corte = ultimoCorte(c);
+    PL.preset = p;
+    PL.items.forEach(function (x) {
+      x.sel = p === 'todo' ? true : p === 'ninguna' ? false : p === 'sinsobre' ? (!x.ya && !x.cred) : p === 'corte' ? (!corte || new Date(x.m.fecha) <= corte) : x.sel;
+    });
+    if (!silencio) pintar();
+  }
+  function planTotales() {
+    var t = 0, n = 0, nc = 0, cred = 0, por = {}, sin = 0, faltan = [];
+    PL.items.forEach(function (x) {
+      if (!x.sel) return;
+      if (x.cred) { cred += x.m.monto; nc++; return; }
+      n++; t += x.m.monto;
+      var s = x.ya || x.sobre;
+      if (s === '__sin') sin += x.m.monto;
+      else if (s) por[s] = (por[s] || 0) + x.m.monto;
+      else { faltan.push(x); sin += 0; }
+    });
+    return { total: Math.round((t - cred) * 100) / 100, compras: n, devs: nc, cred: cred, por: por, sin: sin, faltan: faltan };
+  }
+  function pPlan() {
+    if (!PL) return ir('tarjetas');
+    var c = cuentaPorNombre(PL.cuenta), corte = ultimoCorte(c), T = planTotales();
+    var h = cabSimple('📋 Planear pago', esc(etiquetaCuenta(PL.cuenta)), 'App.ir(\'tarjetas\')');
+    var chip = function (k, n) { return '<button class="chip' + (PL.preset === k ? ' on' : '') + '" onclick="App.planPreset(\'' + k + '\')">' + n + '</button>'; };
+    h += '<div class="chips desliza" style="margin:-6px 0 10px">' + (corte ? chip('corte', 'Hasta el corte (' + fechaCorta(corte.toISOString()) + ')') : '') + chip('todo', 'Todo sin pagar') + chip('sinsobre', 'Solo sin sobre') + chip('ninguna', 'Ninguna') + '</div>';
+    if (!PL.items.length) h += '<div class="caja vacio">No hay compras sin pagar en esta tarjeta.<br><span class="suave chico">Las compras se marcan como pagadas cuando las pagás desde aquí.</span></div>';
+    else {
+      h += '<div class="caja sinpad">' + PL.items.map(function (x, i) {
+        var m = x.m, sob = x.cred ? '<span class="verde chico">↩ devolución</span>' : x.ya ? '<span class="acento chico fuerte">✉ ' + esc(nomSobre(x.ya)) + '</span>' :
+          '<select class="sel-mini' + (x.sobre ? '' : ' falta') + '" data-titulo="Sobre para ' + esc(nombreBonito(m.comercio) || 'la compra') + '" onchange="App.planSobre(' + i + ',this.value)"><option value="">Elegí sobre</option>' + opcionesSobre(m.moneda, x.sobre, true) + '<option value="__sin"' + (x.sobre === '__sin' ? ' selected' : '') + '>💳 Sin sobre</option></select>';
+        return '<div class="it-su' + (x.sel ? '' : ' apagado') + '"><label class="it-check"><input type="checkbox"' + (x.sel ? ' checked' : '') + ' onchange="App.planMarcar(' + i + ',this.checked)"></label>' +
+          '<div class="it-nom" style="cursor:default"><b>' + esc(nombreBonito(m.comercio) || m.tipo) + '</b><span class="suave chico">' + fechaCorta(m.fecha) + '</span>' + sob + '</div>' +
+          '<b class="it-q' + (x.cred ? ' verde' : '') + '">' + (x.cred ? '+' : '') + din(m.monto, m.moneda) + '</b></div>';
+      }).join('') + '</div>';
+      var sinElegir = PL.items.filter(function (x) { return x.sel && !x.cred && !x.ya && !x.sobre; }).length;
+      if (PL.items.some(function (x) { return x.sel && !x.cred && !x.ya; })) h += '<div class="chips" style="margin-top:10px;flex-wrap:wrap">' + (sinElegir ? '<button class="chip" onclick="App.planSugerir()">✨ Sugerir sobres</button>' : '') +
+        '<select class="sel-mini" data-titulo="Todo de un sobre" onchange="App.planTodo(this.value)"><option value="">Todo de un sobre…</option>' + opcionesSobre(c ? (c.moneda || 'CRC') : 'CRC', null, true) + '<option value="__sin">💳 Sin sobre</option></select></div>';
+      var lineas = Object.keys(T.por).sort(function (a, b) { return T.por[b] - T.por[a]; }).map(function (s) { return '<div class="fila chico"><span>' + iconoSobre(s) + ' ' + esc(nomSobre(s)) + '</span><b>' + din(T.por[s], 'CRC') + '</b></div>'; });
+      if (T.sin) lineas.push('<div class="fila chico"><span>💳 Sin sobre</span><b>' + din(T.sin, 'CRC') + '</b></div>');
+      if (T.faltan.length) lineas.push('<div class="fila chico"><span class="acento">⚠ Falta elegir sobre (' + T.faltan.length + ')</span><b class="acento">' + din(T.faltan.reduce(function (a, x) { return a + x.m.monto; }, 0), 'CRC') + '</b></div>');
+      if (T.cred) lineas.push('<div class="fila chico"><span class="verde">↩ Devoluciones</span><b class="verde">−' + din(T.cred, 'CRC') + '</b></div>');
+      if (lineas.length) h += '<div class="caja" style="margin-top:12px;gap:4px"><div class="suave chico fuerte">SACÁ DE TUS SOBRES</div>' + lineas.join('') + '<div class="suave chico" style="margin-top:4px">Lo de compras que ya tenían sobre ya está apartado: no tenés que moverlo otra vez.</div></div>';
+      h += '<div style="height:96px"></div><div class="barra-plan"><div><div class="suave chico">' + T.compras + ' compra' + (T.compras === 1 ? '' : 's') + (T.devs ? ' − ' + T.devs + ' devolución' + (T.devs === 1 ? '' : 'es') : '') + '</div><b class="grande-plan">' + din(T.total, 'CRC') + '</b></div>' +
+        '<button class="btn" onclick="App.formPagarPlan()"' + (T.total > 0 ? '' : ' disabled') + '>Pagar ›</button></div>';
+    }
+    $('p-plan').innerHTML = h;
+  }
+  function planMarcar(i, on) { PL.items[i].sel = !!on; PL.preset = ''; pintar(); }
+  function planSobre(i, v) { PL.items[i].sobre = v; if (v && !PL.items[i].sel) PL.items[i].sel = true; pintar(); }
+  function planSugerir() { var sin = []; PL.items.forEach(function (x) { if (x.sel && !x.cred && !x.ya && !x.sobre) { x.sobre = sugerirSobre(x.m); if (!x.sobre) sin.push(nombreBonito(x.m.comercio)); } }); pintar(); if (sin.length) toast('No encontré sobre para ' + sin.join(', ') + '. Elegilo vos.'); }
+  function planTodo(v) { if (!v) return; PL.items.forEach(function (x) { if (x.sel && !x.cred && !x.ya) x.sobre = v; }); pintar(); }
+  function formPagarPlan() {
+    var T = planTotales();
+    if (T.faltan.length) return toast('Elegí el sobre de ' + nombreBonito(T.faltan[0].m.comercio) + ' (o “Sin sobre”).');
+    abrir('<h2>Pagar ' + din(T.total, 'CRC') + '</h2>' +
+      '<div class="caja" style="gap:6px"><b>1 · Pagá en tu banco</b><div class="suave chico">' + din(T.total, 'CRC') + ' a la ' + esc(etiquetaCuenta(PL.cuenta)) + '</div><button class="btn sec chico" style="align-self:flex-start" onclick="App.copiarMontoPlan()">📋 Copiar monto</button></div>' +
+      '<div class="caja" style="gap:8px;margin-top:10px"><b>2 · ¿Ya lo hiciste?</b>' +
+      '<button class="btn" onclick="App.yaPague()">✓ Ya pagué: anotar y repartir</button>' +
+      '<button class="btn sec" onclick="App.guardarPlan()">⏳ Guardar plan y pagar después</button>' +
+      '<div class="suave chico">Si tu banco te manda correo del pago (o lo subís con la foto del comprobante), usá <b>Guardar plan</b>: cuando llegue, la app lo reconoce y reparte con un toque. Así no queda el pago repetido.</div></div>' +
+      '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Seguir revisando</button></div>');
+  }
+  function copiarMontoPlan() { var t = planTotales().total; navigator.clipboard.writeText(String(t).replace('.', ',')).then(function () { toast('📋 Copiado: ' + txt(t, 'CRC')); }, function () { toast('No se pudo copiar'); }); }
+  /** Reparte en los sobres las compras marcadas (y las devoluciones) y las marca como pagadas. filaPago: si ya existe el pago. */
+  function repartirPlan(items, filaPago, autPago, total) {
+    var g = grupoNuevo(), lista = [], sin = 0, cred = 0, hoyTxt = fechaCorta(new Date().toISOString());
+    items.forEach(function (x) {
+      var m = x.m;
+      if (x.cred) { cred += m.monto; if (x.pend) lista.push({ fecha: fechaSobre(m), sobre: '', monto: m.monto, tipo: 'Sin sobre', movimiento: m.fila, grupo: g, nota: 'Devolución (pago de tarjeta)' }); return; }
+      if (x.ya) return;
+      x.grupos.forEach(function (gr) { encolar('eliminarGrupoSobres', [gr], 'Quitar «sin sobre» de ' + (m.comercio || 'compra')); });
+      if (x.sobre === '__sin') { sin += m.monto; lista.push({ fecha: fechaSobre(m), sobre: '', monto: -m.monto, tipo: 'Sin sobre', movimiento: m.fila, grupo: g, nota: m.comercio || '' }); }
+      else lista.push({ fecha: fechaSobre(m), sobre: x.sobre, monto: -m.monto, tipo: 'Compra con tarjeta', movimiento: m.fila, grupo: g, nota: m.comercio || '' });
+    });
+    if (lista.length) encolar('guardarSobresMov', [lista], 'Plan de pago: ' + lista.length + ' compra' + (lista.length === 1 ? '' : 's') + ' a sus sobres');
+    // cada compra ya salió de su sobre: lo que el pago no cubra con lo apartado se cierra "sin sobre" (no se descuenta dos veces)
+    if (filaPago) cerrarPagoPlan(filaPago);
+    else guardar('mf-plan-fin', JSON.stringify({ aut: autPago }));
+    items.forEach(function (x) { encolar('marcarMovimiento', [x.m.fila, 'Cobro', 'Pagada ' + hoyTxt + ' · plan', { monto: x.m.monto }], 'Pagada: ' + (x.m.comercio || 'compra')); });
+  }
+  function yaPague() {
+    var T = planTotales(), sel = PL.items.filter(function (x) { return x.sel; }), c = cuentaPorNombre(PL.cuenta);
+    var aut = 'PLAN-' + Date.now();
+    var pago = { fecha: new Date().toISOString(), comercio: 'Pago de tarjeta' + (c && c.ultimos4 ? ' ••' + c.ultimos4 : ''), lugar: '', monto: T.total, moneda: 'CRC', tipo: 'Pago de tarjeta', cuenta: PL.cuenta, categoria: '', sobre: '', origen: 'Manual', autorizacion: aut, nota: 'Plan de pago: ' + sel.length + ' movimientos' };
+    encolar('guardarMovimiento', [pago], 'Pago de ' + etiquetaCuenta(PL.cuenta) + ' · ' + txt(T.total, 'CRC'));
+    repartirPlan(sel, null, aut, T.total);
+    cerrar(); PL = null; ir('tarjetas'); toast('✅ Pago anotado y repartido en tus sobres', 4000);
+  }
+  function cerrarPagoPlan(fila) {
+    sbMemo = null;
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p || p.falta < 0.01) return;
+    encolar('guardarSobresMov', [[{ fecha: p.mov.fecha, sobre: '', monto: -Math.round(p.falta * 100) / 100, tipo: 'Pago tarjeta', movimiento: fila, grupo: grupoNuevo(), nota: 'Plan de pago: ya salió de los sobres en cada compra' }]], 'Pago: cerrar ' + txt(p.falta, 'CRC') + ' (ya apartado)');
+  }
+  function finPlanPendiente() {
+    var p = leerJSONSeguro('mf-plan-fin'); if (!p || !D || cola.length) return;   // espera a que todo lo del plan llegue a Google
+    var m = D.movimientos.filter(function (x) { return x.autorizacion === p.aut && x.fila > 0; })[0]; if (!m) return;
+    guardar('mf-plan-fin', null);
+    cerrarPagoPlan(m.fila);
+  }
+  function guardarPlan() {
+    var T = planTotales(), sel = PL.items.filter(function (x) { return x.sel; });
+    var planes = (PREFS().planes || []).filter(function (p) { return p.cuenta !== PL.cuenta; });
+    planes.push({ id: 'p' + Date.now().toString(36), cuenta: PL.cuenta, total: T.total, creado: new Date().toISOString(), items: sel.map(function (x) { return { f: x.m.fila, s: x.cred ? '' : (x.ya ? '' : x.sobre), c: x.cred ? 1 : 0 }; }) });
+    guardarPrefs({ planes: planes }, 'Plan de pago ' + etiquetaCuenta(PL.cuenta) + ' · ' + txt(T.total, 'CRC'));
+    cerrar(); PL = null; ir('tarjetas'); toast('⏳ Plan guardado. Cuando llegue el pago por ' + txt(T.total, 'CRC') + ', te pregunto si es este.', 5000);
+  }
+  /** ¿Llegó un pago de tarjeta que coincide con un plan guardado? */
+  function planesPorUsar() {
+    if (!D || sinServidorSobres()) return [];
+    var planes = PREFS().planes || [], out = [];
+    SB().pendientes.forEach(function (p) {
+      var m = p.mov; if (m.tipo !== 'Pago de tarjeta' || m.fila < 0 || guardado('mf-plan-no-' + m.fila, '')) return;
+      var pl = planes.filter(function (x) { return x.cuenta === m.cuenta && Math.abs(x.total - m.monto) < 1 && new Date(m.fecha) >= new Date(new Date(x.creado).getTime() - 86400000); })[0];
+      if (pl) out.push({ plan: pl, mov: m });
+    });
+    return out;
+  }
+  function tarjetaPlanes() {
+    return planesPorUsar().map(function (x) {
+      return '<div class="aviso-sal"><b>📋 Llegó el pago de la ' + esc(etiquetaCuenta(x.mov.cuenta)) + ' · ' + din(x.mov.monto, x.mov.moneda) + '</b><div class="suave chico">¿Es el plan que guardaste el ' + fechaCorta(x.plan.creado) + '? Se reparte solo en tus sobres.</div>' +
+        '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.usarPlan(\'' + x.plan.id + '\',' + x.mov.fila + ')">Sí, repartir</button><button class="btn sec" onclick="App.noPlan(' + x.mov.fila + ')">No</button></div></div>';
+    }).join('');
+  }
+  function usarPlan(id, fila) {
+    var pl = (PREFS().planes || []).filter(function (x) { return x.id === id; })[0]; if (!pl) return;
+    var todos = movsSinPagar(pl.cuenta), items = [];
+    pl.items.forEach(function (it) { var x = todos.filter(function (y) { return y.m.fila === it.f; })[0]; if (x) { if (!x.ya && !x.cred) x.sobre = it.s || x.sobre || '__sin'; items.push(x); } });
+    repartirPlan(items, fila, null, pl.total);
+    guardarPrefs({ planes: (PREFS().planes || []).filter(function (x) { return x.id !== id; }) }, 'Plan de pago usado');
+    if (pantalla !== 'inicio') cerrar();
+    pintar(); toast('✅ Pago repartido según tu plan', 4000);
+  }
+  function noPlan(fila) { guardar('mf-plan-no-' + fila, '1'); pintar(); }
+
+  // ==================================================================== v2.5.3: SELECCIONAR EN MOVIMIENTOS (sumar como en Excel)
+  var selMov = null;
+  function filaDeItem(el) { var m = (el.getAttribute('onclick') || '').match(/formMovimiento\((\d+)\)/); return m ? Number(m[1]) : 0; }
+  document.addEventListener('pointerdown', function (e) {
+    if (pantalla !== 'movimientos' || !e.target.closest) return;
+    var it = e.target.closest('#p-movimientos .item.mov'); if (!it) return;
+    var fila = filaDeItem(it); if (!fila || selMov) return;
+    var x0 = e.clientX, y0 = e.clientY;
+    var tm = setTimeout(function () {
+      selMov = {}; selMov[fila] = 1; suprimirClick = true; vibrar(); pintar();
+      var fin = function () { document.removeEventListener('pointerup', fin); document.removeEventListener('pointercancel', fin); setTimeout(function () { suprimirClick = false; }, 80); };
+      document.addEventListener('pointerup', fin); document.addEventListener('pointercancel', fin);
+    }, 520);
+    var cancelar = function (ev) { if (ev.type !== 'pointermove' || Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 12) { clearTimeout(tm); quitar(); } };
+    var quitar = function () { ['pointermove', 'pointerup', 'pointercancel'].forEach(function (t2) { document.removeEventListener(t2, cancelar); }); };
+    ['pointermove', 'pointerup', 'pointercancel'].forEach(function (t2) { document.addEventListener(t2, cancelar); });
+  });
+  function alternarSel(fila) { if (selMov[fila]) delete selMov[fila]; else selMov[fila] = 1; if (!Object.keys(selMov).length) selMov = null; pintar(); }
+  function salirSel() { selMov = null; pintar(); }
+  function barraSel() {
+    if (!selMov) return '';
+    var sb = sinServidorSobres() ? null : SB(), g = 0, ing = 0, por = {}, n = 0;
+    Object.keys(selMov).forEach(function (f) {
+      var m = movPorFila(Number(f)); if (!m) return; n++;
+      if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') { ing += m.monto; return; }
+      g += m.monto;
+      var s = (sb && ((sb.porMov[m.fila] || []).filter(function (x) { return x.sobre; })[0] || {}).sobre) || m.sobre || '';
+      por[s] = (por[s] || 0) + m.monto;
+    });
+    var des = Object.keys(por).map(function (s) { return (s ? iconoSobre(s) + ' ' + esc(nomSobre(s)) : '💳 sin sobre') + ' ' + txt(por[s], 'CRC'); }).join(' · ');
+    return '<div style="height:150px"></div><div class="barra-plan sel"><div style="flex:1;min-width:0"><div class="fila"><b>' + n + ' seleccionado' + (n === 1 ? '' : 's') + '</b><button class="chip" onclick="App.salirSel()">✕</button></div>' +
+      '<div class="fila" style="margin-top:4px"><span class="suave chico">Gastos</span><b class="grande-plan" style="font-size:22px">' + din(g, 'CRC') + '</b></div>' + (ing ? '<div class="fila"><span class="suave chico">Ingresos</span><b class="verde">+' + din(ing, 'CRC') + '</b></div>' : '') +
+      (des ? '<div class="suave chico" style="margin-top:4px">' + des + '</div>' : '') +
+      '<div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.copiarSel()">📋 Copiar</button><button class="chip" onclick="App.asignarSel()">Asignar a un sobre</button></div></div></div>';
+  }
+  function copiarSel() {
+    var g = 0; Object.keys(selMov || {}).forEach(function (f) { var m = movPorFila(Number(f)); if (m && m.tipo !== 'Ingreso' && m.tipo !== 'Retiro de fondo') g += m.monto; });
+    navigator.clipboard.writeText(String(Math.round(g * 100) / 100).replace('.', ',')).then(function () { toast('📋 Copiado: ' + txt(g, 'CRC')); }, function () { toast('No se pudo copiar'); });
+  }
+  function asignarSel() {
+    var pend = sinServidorSobres() ? [] : SB().pendientes.filter(function (p) { return selMov[p.mov.fila] && p.sentido === 'sale'; });
+    if (!pend.length) return toast('Ninguno de los seleccionados está por asignar.');
+    var tot = pend.reduce(function (a, p) { return a + p.falta; }, 0);
+    abrir('<h2>Asignar ' + pend.length + ' a un sobre</h2><div class="suave">' + txt(tot, 'CRC') + ' en total (solo los que están por asignar).</div>' +
+      '<label class="campo"><span>Sobre</span><select id="as-sel-sobre">' + opcionesSobre('CRC', null, true) + '<option value="">💳 Sin sobre</option></select></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarAsignarSel()">Asignar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarAsignarSel() {
+    var s = val('as-sel-sobre'), g = grupoNuevo(), lista = [];
+    SB().pendientes.filter(function (p) { return selMov[p.mov.fila] && p.sentido === 'sale'; }).forEach(function (p) {
+      lista.push({ fecha: fechaSobre(p.mov), sobre: s, monto: -p.falta, tipo: !s ? 'Sin sobre' : p.tarjeta ? 'Compra con tarjeta' : 'Gasto', movimiento: p.mov.fila, grupo: g, nota: p.mov.comercio || '' });
+    });
+    if (lista.length) encolar('guardarSobresMov', [lista], 'Asignar ' + lista.length + ' movimientos → ' + (s || 'sin sobre'));
+    cerrar(); selMov = null; pintar(); toast('✅ Asignados' + (s ? ' a ' + nomSobre(s) : ' sin sobre'));
+  }
+
   return {
     iniciar: iniciar, ir: ir, cambiarMes: cambiarMes, cerrar: cerrar,
     buscar: function (v) { filtro.q = v; pintarLista(); },
@@ -4407,7 +4654,7 @@ var App = (function () {
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,
     noHayItem: noHayItem, preguntarItem: preguntarItem, enviarPregunta: enviarPregunta, responderConsulta: responderConsulta, agregarBasicos: agregarBasicos, guardarBasicos: guardarBasicos,
     loDeSiempre: loDeSiempre, compartirLista: compartirLista, enviarLink: enviarLink, copiarLink: copiarLink, listaEditable: listaEditable, nuevoLink: nuevoLink, dejarCompartir: dejarCompartir,
-    menuLista: menuLista, guardarMenuLista: guardarMenuLista, borrarLista: borrarLista, formTerminar: formTerminar, terminarCompra: terminarCompra, editarInicio: editarInicio, iniMover: iniMover, agregarAcceso: agregarAcceso, iniQuitar: iniQuitar, iniTam: iniTam, iniListo: iniListo, iniAgregarW: iniAgregarW, iniActivar: iniActivar, iniFabrica: iniFabrica, iniAgregarA: iniAgregarA, iniQuitarAcceso: iniQuitarAcceso, reemplazarAcceso: reemplazarAcceso, mostrarDatosCx: mostrarDatosCx, cerrarCapaSegura: cerrarCapaSegura, verificarPinSeguro: verificarPinSeguro, huellaSegura: huellaSegura,
+    menuLista: menuLista, guardarMenuLista: guardarMenuLista, borrarLista: borrarLista, formTerminar: formTerminar, terminarCompra: terminarCompra, editarInicio: editarInicio, abrirPlan: abrirPlan, planPreset: planPreset, planMarcar: planMarcar, planSobre: planSobre, planSugerir: planSugerir, planTodo: planTodo, formPagarPlan: formPagarPlan, copiarMontoPlan: copiarMontoPlan, yaPague: yaPague, guardarPlan: guardarPlan, usarPlan: usarPlan, noPlan: noPlan, salirSel: salirSel, copiarSel: copiarSel, asignarSel: asignarSel, guardarAsignarSel: guardarAsignarSel, iniMover: iniMover, agregarAcceso: agregarAcceso, iniQuitar: iniQuitar, iniTam: iniTam, iniListo: iniListo, iniAgregarW: iniAgregarW, iniActivar: iniActivar, iniFabrica: iniFabrica, iniAgregarA: iniAgregarA, iniQuitarAcceso: iniQuitarAcceso, reemplazarAcceso: reemplazarAcceso, mostrarDatosCx: mostrarDatosCx, cerrarCapaSegura: cerrarCapaSegura, verificarPinSeguro: verificarPinSeguro, huellaSegura: huellaSegura,
     volver: volver, abrirItem: abrirItem, presionar: presionar, soltar: soltar, cancelarPresion: cancelarPresion,
     formAccesos: formAccesos, guardarAccesos: guardarAccesos, exportarCSV: exportarCSV,
     calcSet: calcSet, calcular: calcular, verDatos: verDatos, verYSi: verYSi,

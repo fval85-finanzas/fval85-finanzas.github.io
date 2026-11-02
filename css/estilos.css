@@ -798,3 +798,16 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .prev-acc { pointer-events: none; }
 .prev-acc .widgets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .widget.wi-vacio .w-v { font-size: 14px !important; font-weight: 600; white-space: normal; }
+
+/* ---------- v2.5.3: planeador de pagos y selección en Movimientos ---------- */
+.barra-plan { position: fixed; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 20px)); bottom: calc(78px + env(safe-area-inset-bottom)); z-index: 7;
+  display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 18px; background: var(--tarjeta); border: 1px solid var(--borde); box-shadow: 0 -6px 24px rgba(0,0,0,.35); }
+.barra-plan .btn { width: auto; padding: 12px 18px; }
+.barra-plan.sel { align-items: stretch; }
+.grande-plan { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+.it-su.apagado .it-nom b, .it-su.apagado .it-q { opacity: .45; }
+.it-su .it-nom .sel-btn.sel-mini { margin-top: 3px; }
+.item.mov.modo-sel { position: relative; padding-left: 46px; }
+.item.mov .sel-ck { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--suave); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; color: #111; }
+.item.mov.sel .sel-ck { background: var(--acento); border-color: var(--acento); }
+.item.mov.sel { background: color-mix(in srgb, var(--acento) 10%, var(--tarjeta)); }

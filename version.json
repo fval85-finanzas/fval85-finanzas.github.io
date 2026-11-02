@@ -1,8 +1,8 @@
 {
- "web": "2.5.2",
+ "web": "2.5.3",
  "servidor": "2.5.0",
  "sha256": "ec2f873030b3b72aed8fc164d53dbcca3863312ed8780e86b99bd34e934c436e",
- "novedades": "Los widgets sin datos (viaje, me deben…) ahora se ven con un mensaje en vez de desaparecer.",
+ "novedades": "Planeador de pagos de tarjeta (marcás compras, total y cuánto sacar de cada sobre) y seleccionar movimientos para sumar.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
