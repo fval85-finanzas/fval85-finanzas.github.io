@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.0';
+  var VERSION_WEB = '2.5.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -387,12 +387,38 @@ var App = (function () {
   var TAMANOS = { queda: 'SML', sobreBajo: 'SML', proxPago: 'SML', tasaCero: 'SML', fondos: 'SML', prestamo: 'SML', medeben: 'SML', viaje: 'M', sobres: 'ML', accesos: 'M', ultimos: 'ML' };
   var TAM_INICIAL = { queda: 'L', sobreBajo: 'S', proxPago: 'S', tasaCero: 'S', fondos: 'S', prestamo: 'S', medeben: 'S' };
   var NOM_TAM = { S: 'Chico', M: 'Mediano', L: 'Grande' };
+  function tamanosDe(k) { return /^acc:/.test(k) ? 'SM' : (TAMANOS[k] || 'M'); }
+  function nomTam(k, t) { return /^acc:/.test(k) ? (t === 'S' ? 'Mediano' : 'Ancho') : NOM_TAM[t]; }
+  function defWidget(k) { if (/^acc:/.test(k)) { var it = ITEMS[k.slice(4)] || ['Acceso']; return [k, it[0], 'Acceso', true]; } return WIDGETS.filter(function (x) { return x[0] === k; })[0]; }
+  /** v2.5: un acceso puesto como widget (Mediano = media fila, Ancho = fila entera) con un dato útil */
+  function datoAcceso(c, res) {
+    try {
+      if (c === 'super') { var l = (LISTAS || [])[0]; return l ? [l.nombre, l.marcados + ' de ' + l.total + ' en el carrito'] : ['Tus listas', 'Crear una lista']; }
+      if (c === 'inversiones') { var fl = D.fondos ? FD().lista : [], tf = 0; fl.forEach(function (f) { if (f.moneda === 'CRC') tf += f.saldo; }); return [din(tf, 'CRC'), fl.length + ' subcuenta' + (fl.length === 1 ? '' : 's')]; }
+      if (c === 'sobres') { return sinServidorSobres() ? ['Sobres', ''] : [din(SB().total.CRC, 'CRC'), SB().pendientes.length ? SB().pendientes.length + ' por asignar' : 'todo asignado']; }
+      if (c === 'prestamo') { return D.prestamo && D.prestamo.estimado ? [din(D.prestamo.estimado.total, 'CRC'), D.prestamo.proximoVenc ? 'cuota ' + enDias(C.diasEntre(hoy, new Date(D.prestamo.proximoVenc))) : ''] : ['Préstamo', '']; }
+      if (c === 'tasacero') { return [din(res.cuotasTC.CRC, 'CRC'), 'cuotas de este mes']; }
+      if (c === 'medeben') { var md = C.meDeben(D); return [md.total.CRC ? din(md.total.CRC, 'CRC') : 'Nadie', md.personas.length ? md.personas.length + ' persona' + (md.personas.length === 1 ? '' : 's') : 'te debe nada']; }
+      if (c === 'viajes') { var v = (D.viajes || [])[0]; return v ? [esc(v.nombre || 'Viaje'), (D.viajes || []).length + ' viaje' + ((D.viajes || []).length === 1 ? '' : 's')] : ['Viajes', 'Crear un presupuesto']; }
+      if (c === 'tarjetas') { var dt = 0; D.cuentas.forEach(function (x) { if (x.activa && x.tipo === 'Tarjeta de crédito') dt += C.deudaTarjeta(D, x).CRC; }); return [din(dt, 'CRC'), 'deuda de tarjetas hoy']; }
+      if (c === 'reportes' || c === 'categorias') { return [din(res.total.CRC, 'CRC'), 'gastado este mes']; }
+    } catch (e) { /* sin datos */ }
+    var it = ITEMS[c] || ['', ''];
+    return [esc(it[0]), 'Abrir'];
+  }
+  function svgItem(c) { var it = ITEMS[c]; return '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="b" d="' + it[1] + '"/>' + (it[2] ? '<path class="a" d="' + it[2] + '"/>' : '') + '</svg>'; }
+  function widgetAcceso(c, res, tam) {
+    var it = ITEMS[c]; if (!it) return '';
+    var d = datoAcceso(c, res);
+    if (tam === 'M') return '<button class="widget acc-ancho" onclick="App.abrirItem(\'' + c + '\')"><span class="acc-ic tile"><span class="ic">' + svgItem(c) + '</span></span><span class="acc-c"><span class="w-n">' + esc(it[0]) + '</span><span class="w-t">' + d[1] + '</span></span><span class="w-v acento">' + d[0] + '</span></button>';
+    return '<button class="widget acc-med" onclick="App.abrirItem(\'' + c + '\')"><span class="acc-ic tile"><span class="ic">' + svgItem(c) + '</span></span><span class="w-t">' + esc(it[0]) + '</span><span class="w-n">' + d[0] + '</span><span class="w-v chico-v suave">' + d[1] + '</span></button>';
+  }
   function widgetsInicio() {
     var guardados = leerJSONSeguro('mf-inicio');
     var base = WIDGETS.map(function (w) { return { k: w[0], on: w[3] }; });
-    var lista = !Array.isArray(guardados) ? base : guardados.filter(function (x) { return x && WIDGETS.some(function (w) { return w[0] === x.k; }); });
+    var lista = !Array.isArray(guardados) ? base : guardados.filter(function (x) { return x && (WIDGETS.some(function (w) { return w[0] === x.k; }) || (/^acc:/.test(x.k) && ITEMS[x.k.slice(4)])); });
     if (Array.isArray(guardados)) base.forEach(function (b) { if (!lista.some(function (x) { return x.k === b.k; })) lista.push(b); });   // widgets nuevos de versiones futuras
-    lista.forEach(function (w) { var ok = TAMANOS[w.k] || 'M'; if (!w.t || ok.indexOf(w.t) < 0) w.t = TAM_INICIAL[w.k] && ok.indexOf(TAM_INICIAL[w.k]) >= 0 ? TAM_INICIAL[w.k] : ok.charAt(0) === 'S' && ok.length === 1 ? 'S' : (ok.indexOf('M') >= 0 ? 'M' : ok.charAt(0)); });
+    lista.forEach(function (w) { var ok = tamanosDe(w.k); if (!w.t || ok.indexOf(w.t) < 0) w.t = TAM_INICIAL[w.k] && ok.indexOf(TAM_INICIAL[w.k]) >= 0 ? TAM_INICIAL[w.k] : ok.charAt(0) === 'S' && ok.length === 1 ? 'S' : (ok.indexOf('M') >= 0 ? 'M' : ok.charAt(0)); });
     return lista;
   }
   function proximosPagos() {
@@ -410,6 +436,7 @@ var App = (function () {
     return '<button class="widget" onclick="' + onclick + '"><span class="w-t">' + titulo + '</span><span class="w-n">' + nombre + '</span><span class="w-v ' + (cls || '') + '">' + valor + '</span></button>';
   }
   function widget(k, res, tam) {
+    if (/^acc:/.test(k)) return widgetAcceso(k.slice(4), res, tam);
     if (k === 'queda') {
       var ing = res.ingresos.CRC, q = res.queda.CRC, pct = ing ? res.total.CRC / ing : 0;
       return '<div class="widget ancho grande-w"><div class="fila"><span class="w-t">' + (ing ? 'Te quedan este mes' : 'Gastado este mes') + '</span>' + botonOjo() + '</div>' +
@@ -488,17 +515,18 @@ var App = (function () {
     var avisos = function () { var a = avisosInicio(res); return a ? '<div class="wi wi-M wi-fijo">' + a + '</div>' : ''; };
     ws.forEach(function (w) {
       if (!avisosPuestos && (w.k === 'accesos' || w.k === 'ultimos' || w.k === 'sobres')) { cuerpo += avisos(); avisosPuestos = true; }
-      var html = widget(w.k, res, w.t), def = WIDGETS.filter(function (x) { return x[0] === w.k; })[0];
+      var html = widget(w.k, res, w.t), def = defWidget(w.k);
       if (!html && !ed) return;
       if (!html) html = '<div class="widget wi-vacio"><span class="w-t">' + esc(def[1]) + '</span><span class="w-v chico-v suave">' + esc(def[2]) + '</span></div>';
-      var tams = TAMANOS[w.k] || 'M';
+      var tams = tamanosDe(w.k);
       cuerpo += '<div class="wi wi-' + w.t + '" data-k="' + w.k + '">' + html +
         (ed ? '<div class="wi-capa"></div><button class="wi-x" aria-label="Quitar ' + esc(def[1]) + '" onclick="App.iniQuitar(\'' + w.k + '\')">×</button>' +
           '<button class="wi-mover" aria-label="Mover" data-k="' + w.k + '">⠿</button>' +
-          (tams.length > 1 ? '<button class="wi-tam" onclick="App.iniTam(\'' + w.k + '\')">' + NOM_TAM[w.t] + ' ⤢</button>' : '') : '') + '</div>';
+          '<span class="wi-flechas"><button aria-label="Subir" onclick="App.iniMover(\'' + w.k + '\',-1)">↑</button><button aria-label="Bajar" onclick="App.iniMover(\'' + w.k + '\',1)">↓</button></span>' +
+          (tams.length > 1 ? '<button class="wi-tam" onclick="App.iniTam(\'' + w.k + '\')">' + nomTam(w.k, w.t) + ' ⤢</button>' : '') : '') + '</div>';
     });
     if (!avisosPuestos) cuerpo += avisos();
-    h += (ed ? '<div class="ayuda-edit">Arrastrá ⠿ para mover · × para quitar · Tamaño para cambiar</div>' : '') + '<div class="widgets' + (ed ? ' editando' : '') + '">' + cuerpo + '</div>';
+    h += (ed ? '<div class="ayuda-edit">Mantené presionado y arrastrá (o usá ↑ ↓) · × quita · Tamaño cambia</div>' : '') + '<div class="widgets' + (ed ? ' editando' : '') + '">' + cuerpo + '</div>';
     h += ed ? '<div class="barra-edit"><button onclick="App.iniAgregarW()">＋ Widget</button><button onclick="App.iniAgregarA()">＋ Acceso</button><button class="ok" onclick="App.iniListo()">Listo</button></div><div style="height:90px"></div>'
       : '<button class="enlace-editar" onclick="App.editarInicio()">✏ Editar Inicio</button>';
     $('p-inicio').innerHTML = h;
@@ -508,11 +536,17 @@ var App = (function () {
   var editIni = null, presIni = null, suprimirClick = false;
   function editarInicio() { if (pantalla !== 'inicio') ir('inicio'); editIni = widgetsInicio(); pintar(); vibrar(); }
   function vibrar() { if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) { /* nada */ } } }
-  function iniQuitar(k) { editIni.forEach(function (w) { if (w.k === k) w.on = false; }); pintar(); }
-  function iniTam(k) { editIni.forEach(function (w) { if (w.k === k) { var o = TAMANOS[k] || 'M'; w.t = o.charAt((o.indexOf(w.t) + 1) % o.length); } }); pintar(); }
+  function iniQuitar(k) { if (/^acc:/.test(k)) editIni = editIni.filter(function (w) { return w.k !== k; }); else editIni.forEach(function (w) { if (w.k === k) w.on = false; }); pintar(); }
+  function iniTam(k) { editIni.forEach(function (w) { if (w.k === k) { var o = tamanosDe(k); w.t = o.charAt((o.indexOf(w.t) + 1) % o.length); } }); pintar(); }
+  function iniMover(k, d) {
+    var vis = editIni.filter(function (w) { return w.on; }), i = vis.map(function (w) { return w.k; }).indexOf(k), j = i + d;
+    if (i < 0 || j < 0 || j >= vis.length) return;
+    var a = editIni.indexOf(vis[i]), b = editIni.indexOf(vis[j]), tmp = editIni[a]; editIni[a] = editIni[b]; editIni[b] = tmp;
+    pintar(); vibrar();
+  }
   function iniListo() { guardar('mf-inicio', JSON.stringify(editIni)); editIni = null; pintar(); toast('✅ Inicio guardado'); }
   function iniAgregarW() {
-    var fuera = editIni.filter(function (w) { return !w.on; });
+    var fuera = editIni.filter(function (w) { return !w.on && !/^acc:/.test(w.k); });
     abrir('<h2>Agregar widget</h2>' + (fuera.length ? '<div class="caja sinpad">' + fuera.map(function (w) {
       var d = WIDGETS.filter(function (x) { return x[0] === w.k; })[0];
       return '<button class="opcion" onclick="App.iniActivar(\'' + w.k + '\')"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(d[1]) + '</span><span class="det" style="display:block">' + esc(d[2]) + '</span></span><b class="acento" style="font-size:22px">＋</b></button>';
@@ -527,29 +561,77 @@ var App = (function () {
     cerrar(); pintar(); toast('Agregado: ' + WIDGETS.filter(function (x) { return x[0] === k; })[0][1]);
   }
   function iniFabrica() { guardar('mf-inicio', null); editIni = widgetsInicio(); cerrar(); pintar(); toast('Inicio como venía de fábrica'); }
-  function iniAgregarA() { guardar('mf-inicio', JSON.stringify(editIni)); editIni = null; ir('mas'); toast('Mantené presionado un ícono para agregarlo a Inicio', 4000); }
+  var accSel = null, accTam = 'S';
+  function accesoUsado(c) { return accesos().indexOf(c) >= 0 || (editIni || widgetsInicio()).some(function (w) { return w.k === 'acc:' + c && w.on; }); }
+  function iniAgregarA(c, tam) {
+    if (c) accSel = c; if (tam) accTam = tam;
+    var lista = []; SECCIONES.forEach(function (s) { s[1].forEach(function (k) { if (k !== 'agregar' && !accesoUsado(k)) lista.push(k); }); });
+    if (!accSel || accesoUsado(accSel)) accSel = lista[0] || null;
+    var res = C.resumenMes(D, mes);
+    var opT = function (v, n, s, barraW) { return '<button class="tam-op' + (accTam === v ? ' on' : '') + '" onclick="App.iniAgregarA(null,\'' + v + '\')"><span class="tam-dib" style="width:' + barraW + 'px"></span><b>' + n + '</b><span class="suave chico">' + s + '</span></button>'; };
+    var prev = !accSel ? '' : accTam === 'I' ? '<div class="accesos fila-accesos" style="justify-content:flex-start">' + tile(accSel, false) + '</div>' : '<div class="widgets"><div class="wi wi-' + accTam + '">' + widgetAcceso(accSel, res, accTam) + '</div></div>';
+    abrir('<h2>Agregar acceso</h2><div class="suave">Tocá uno y elegí cómo se ve en Inicio.</div>' +
+      (lista.length ? '<div class="accesos" style="margin-top:10px">' + lista.map(function (k) { return '<button class="tile' + (k === accSel ? ' elegido' : '') + '" onclick="App.iniAgregarA(\'' + k + '\')"><span class="ic">' + svgItem(k) + '</span><span class="n">' + esc(ITEMS[k][0]) + '</span></button>'; }).join('') + '</div>' +
+        '<div class="suave chico fuerte" style="margin-top:14px">¿CÓMO LO QUERÉS? · ' + esc(ITEMS[accSel][0]).toUpperCase() + '</div><div class="tam-ops">' + opT('I', 'Ícono', 'en la fila', 22) + opT('S', 'Mediano', 'media fila', 42) + opT('M', 'Ancho', 'fila entera', 84) + '</div>' +
+        '<div class="suave chico" style="margin:12px 0 6px">Vista previa</div><div class="prev-acc">' + prev + '</div>' +
+        '<div class="acciones"><button class="btn" onclick="App.agregarAcceso()">Agregar a Inicio</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>'
+        : '<div class="caja vacio">Ya están todos en Inicio.</div><div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>'));
+  }
+  function agregarAcceso() {
+    var c = accSel; if (!c) return;
+    if (accTam === 'I') {
+      var a = accesos();
+      if (a.length >= MAX_ACCESOS) { cerrar(); return alternarAcceso(c); }   // pregunta cuál reemplazar
+      a.push(c); guardar('mf-accesos', JSON.stringify(a));
+    } else {
+      var w = { k: 'acc:' + c, on: true, t: accTam }, u = -1;
+      editIni.forEach(function (x, j) { if (x.k === 'ultimos' && x.on) u = j; });
+      editIni.splice(u >= 0 ? u : editIni.length, 0, w);
+    }
+    cerrar(); pintar(); vibrar(); toast('✅ ' + ITEMS[c][0] + ' agregado a Inicio');
+  }
+  var arrastre = null;
   function activarArrastre() {
-    Array.prototype.forEach.call(document.querySelectorAll('#p-inicio .wi-mover'), function (h) {
-      h.addEventListener('pointerdown', function (e) {
-        e.preventDefault(); var nodo = h.closest('.wi'), cont = nodo.parentNode;
-        nodo.classList.add('arrastrando'); try { h.setPointerCapture(e.pointerId); } catch (x) { /* nada */ }
-        var mover = function (ev) {
-          nodo.style.visibility = 'hidden'; var bajo = document.elementFromPoint(ev.clientX, ev.clientY); nodo.style.visibility = '';
-          var otro = bajo && bajo.closest && bajo.closest('#p-inicio .wi[data-k]');
-          if (!otro || otro === nodo) return;
-          var r = otro.getBoundingClientRect(), antes = ev.clientY < r.top + r.height / 2 || (ev.clientY < r.bottom && ev.clientX < r.left + r.width / 2 && otro.classList.contains('wi-S'));
-          cont.insertBefore(nodo, antes ? otro : otro.nextSibling);
-        };
-        var soltar = function () {
-          h.removeEventListener('pointermove', mover); h.removeEventListener('pointerup', soltar); h.removeEventListener('pointercancel', soltar);
-          nodo.classList.remove('arrastrando');
-          var orden = Array.prototype.map.call(cont.querySelectorAll('.wi[data-k]'), function (n) { return n.dataset.k; });
-          editIni.sort(function (a, b) { var ia = orden.indexOf(a.k), ib = orden.indexOf(b.k); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
-        };
-        h.addEventListener('pointermove', mover); h.addEventListener('pointerup', soltar); h.addEventListener('pointercancel', soltar);
+    Array.prototype.forEach.call(document.querySelectorAll('#p-inicio .widgets.editando > .wi[data-k]'), function (nodo) {
+      nodo.addEventListener('pointerdown', function (e) {
+        if (e.target.closest('.wi-x, .wi-tam, .wi-flechas, .tile-ed .wi-x')) return;
+        var manija = !!e.target.closest('.wi-mover'), x0 = e.clientX, y0 = e.clientY, id = e.pointerId;
+        var empezar = function () { arrastre = { nodo: nodo, cont: nodo.parentNode, y: y0, id: id }; nodo.classList.add('arrastrando'); vibrar(); };
+        if (manija) { e.preventDefault(); return empezar(); }
+        var tm = setTimeout(empezar, 280);   // mantener presionado el widget entero
+        var cancelar = function (ev) { if (arrastre) return; if (ev.type !== 'pointermove' || Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 10) { clearTimeout(tm); quitar(); } };
+        var quitar = function () { ['pointermove', 'pointerup', 'pointercancel'].forEach(function (t2) { document.removeEventListener(t2, cancelar); }); };
+        ['pointermove', 'pointerup', 'pointercancel'].forEach(function (t2) { document.addEventListener(t2, cancelar); });
       });
     });
   }
+  var autoScroll = null;
+  document.addEventListener('pointermove', function (ev) {
+    if (!arrastre) return;
+    var a = arrastre, bajo;
+    a.ultY = ev.clientY;
+    a.nodo.style.visibility = 'hidden'; bajo = document.elementFromPoint(ev.clientX, ev.clientY); a.nodo.style.visibility = '';
+    var otro = bajo && bajo.closest && bajo.closest('#p-inicio .widgets.editando > .wi[data-k]');
+    if (otro && otro !== a.nodo) {
+      var r = otro.getBoundingClientRect(), antes = ev.clientY < r.top + r.height / 2 || (ev.clientY < r.bottom && ev.clientX < r.left + r.width / 2 && otro.classList.contains('wi-S'));
+      a.cont.insertBefore(a.nodo, antes ? otro : otro.nextSibling);
+    }
+    // cerca del borde, la pantalla baja o sube sola
+    var vel = ev.clientY < 90 ? -14 : ev.clientY > window.innerHeight - 170 ? 14 : 0;
+    clearInterval(autoScroll); if (vel) autoScroll = setInterval(function () { window.scrollBy(0, vel); }, 16);
+  });
+  function soltarArrastre() {
+    if (!arrastre) return;
+    clearInterval(autoScroll);
+    var a = arrastre; arrastre = null;
+    a.nodo.classList.remove('arrastrando');
+    var orden = Array.prototype.map.call(a.cont.querySelectorAll('.wi[data-k]'), function (n) { return n.dataset.k; });
+    editIni.sort(function (x, y) { var ia = orden.indexOf(x.k), ib = orden.indexOf(y.k); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
+    suprimirClick = true; setTimeout(function () { suprimirClick = false; }, 80);
+  }
+  document.addEventListener('pointerup', soltarArrastre);
+  document.addEventListener('pointercancel', soltarArrastre);
+  document.addEventListener('touchmove', function (ev) { if (arrastre) ev.preventDefault(); }, { passive: false });   // mientras se arrastra, la página no se desliza
   // mantener presionado en Inicio (widget o acceso) → editar
   document.addEventListener('pointerdown', function (e) {
     if (pantalla !== 'inicio' || editIni || !e.target.closest) return;
@@ -691,7 +773,7 @@ var App = (function () {
     cerrar(); pintar(); toast('✅ Accesos actualizados');
   }
   function pMas() {
-    var h = cabSimple('Más', 'Mantené presionado un ícono para agregarlo a Inicio'), fij = accesos();
+    var h = cabSimple('Más', 'Mantené presionado un ícono para agregarlo a Inicio'), fij = accesos().concat(widgetsInicio().filter(function (w) { return w.on && /^acc:/.test(w.k); }).map(function (w) { return w.k.slice(4); }));
     SECCIONES.forEach(function (s) {
       var ks = s[1].filter(function (k) { return fij.indexOf(k) < 0; });   // v2.5: lo que ya está en Inicio no se repite aquí
       if (ks.length) h += '<div class="seccion-t">' + s[0] + '</div><div class="accesos">' + ks.map(function (k) { return tile(k, true); }).join('') + '</div>';
@@ -4320,7 +4402,7 @@ var App = (function () {
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,
     noHayItem: noHayItem, preguntarItem: preguntarItem, enviarPregunta: enviarPregunta, responderConsulta: responderConsulta, agregarBasicos: agregarBasicos, guardarBasicos: guardarBasicos,
     loDeSiempre: loDeSiempre, compartirLista: compartirLista, enviarLink: enviarLink, copiarLink: copiarLink, listaEditable: listaEditable, nuevoLink: nuevoLink, dejarCompartir: dejarCompartir,
-    menuLista: menuLista, guardarMenuLista: guardarMenuLista, borrarLista: borrarLista, formTerminar: formTerminar, terminarCompra: terminarCompra, editarInicio: editarInicio, iniQuitar: iniQuitar, iniTam: iniTam, iniListo: iniListo, iniAgregarW: iniAgregarW, iniActivar: iniActivar, iniFabrica: iniFabrica, iniAgregarA: iniAgregarA, iniQuitarAcceso: iniQuitarAcceso, reemplazarAcceso: reemplazarAcceso, mostrarDatosCx: mostrarDatosCx, cerrarCapaSegura: cerrarCapaSegura, verificarPinSeguro: verificarPinSeguro, huellaSegura: huellaSegura,
+    menuLista: menuLista, guardarMenuLista: guardarMenuLista, borrarLista: borrarLista, formTerminar: formTerminar, terminarCompra: terminarCompra, editarInicio: editarInicio, iniMover: iniMover, agregarAcceso: agregarAcceso, iniQuitar: iniQuitar, iniTam: iniTam, iniListo: iniListo, iniAgregarW: iniAgregarW, iniActivar: iniActivar, iniFabrica: iniFabrica, iniAgregarA: iniAgregarA, iniQuitarAcceso: iniQuitarAcceso, reemplazarAcceso: reemplazarAcceso, mostrarDatosCx: mostrarDatosCx, cerrarCapaSegura: cerrarCapaSegura, verificarPinSeguro: verificarPinSeguro, huellaSegura: huellaSegura,
     volver: volver, abrirItem: abrirItem, presionar: presionar, soltar: soltar, cancelarPresion: cancelarPresion,
     formAccesos: formAccesos, guardarAccesos: guardarAccesos, exportarCSV: exportarCSV,
     calcSet: calcSet, calcular: calcular, verDatos: verDatos, verYSi: verYSi,

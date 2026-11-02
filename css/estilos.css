@@ -777,3 +777,23 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .consulta-card { border: 1px solid var(--acento); background: color-mix(in srgb, var(--acento) 10%, var(--tarjeta)); border-radius: 18px; padding: 14px; margin-bottom: 12px; }
 .foto-c { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 14px; background: var(--fondo); margin-top: 4px; display: flex; align-items: center; justify-content: center; color: var(--suave); font-size: 12px; }
 .msg-c { background: var(--fondo); border-radius: 12px; padding: 9px 12px; margin-top: 10px; font-size: 14px; }
+
+/* ---------- v2.5: accesos con tamaño y mover con ↑ ↓ ---------- */
+.wi-flechas { position: absolute; left: 8px; bottom: 8px; z-index: 4; display: flex; gap: 6px; }
+.wi-flechas button { width: 30px; height: 30px; border-radius: 10px; border: 1px solid var(--borde); background: var(--fondo); color: var(--texto); font-size: 15px; font-weight: 800; cursor: pointer; padding: 0; }
+.widgets.editando > .wi:not(.wi-fijo) > :first-child { padding-bottom: 44px; }
+.wi.arrastrando { transform: scale(1.03) rotate(-1deg) !important; box-shadow: 0 14px 30px rgba(0,0,0,.45); }
+.widget.acc-med { gap: 3px; }
+.widget.acc-med .acc-ic, .widget.acc-ancho .acc-ic { padding: 0; background: none; border: 0; width: auto; height: auto; pointer-events: none; }
+.widget.acc-med .acc-ic .ic, .widget.acc-ancho .acc-ic .ic { width: 40px; height: 40px; border-radius: 12px; margin-bottom: 4px; }
+.widget.acc-ancho { flex-direction: row; align-items: center; gap: 12px; }
+.widget.acc-ancho .acc-ic .ic { margin: 0; }
+.widget.acc-ancho .acc-c { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.widget.acc-ancho .w-v { font-size: 16px; }
+.tam-ops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+.tam-op { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; border-radius: 14px; border: 1.5px solid var(--borde); background: var(--fondo); color: var(--texto); font: inherit; cursor: pointer; text-align: center; }
+.tam-op.on { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 14%, var(--fondo)); }
+.tam-dib { display: block; height: 26px; border-radius: 8px; background: var(--acento); max-width: 100%; }
+.tile.elegido .ic { outline: 2px solid var(--acento); outline-offset: 2px; }
+.prev-acc { pointer-events: none; }
+.prev-acc .widgets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
