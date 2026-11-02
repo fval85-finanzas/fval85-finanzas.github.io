@@ -264,7 +264,7 @@ nav.tabs button.on { color: var(--acento); }
 /* ---------- v1.5 · se ajusta a cualquier teléfono (portada del Fold, normal y Fold abierto) ---------- */
 /* nada se corta: los textos largos pasan a una segunda línea */
 .item .cuerpo { min-width: 0; flex: 1; }
-.item .nombre, .item .det { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.item .nombre, .item .det { white-space: normal; overflow-wrap: break-word; word-break: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .item .monto { flex-shrink: 0; }
 /* los chips bajan a otra fila en vez de salirse de la pantalla */
 .chips { flex-wrap: wrap; overflow: visible; }
@@ -528,8 +528,8 @@ details.grupo-aj summary .flecha { margin-left: auto; }
 
 .teclado button { background: var(--tile); border: 1px solid var(--borde); }
 .resumen-mov small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tj .nombre { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.widget .w-t, .widget .w-n, details.grupo-aj summary .det { white-space: normal; overflow-wrap: anywhere; }
+.tj .nombre { white-space: normal; overflow-wrap: break-word; }
+.widget .w-t, .widget .w-n, details.grupo-aj summary .det { white-space: normal; overflow-wrap: break-word; }
 
 /* ================= v2.1 ================= */
 /* el ícono dentro de un botón nunca se agranda */
@@ -811,3 +811,83 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .item.mov .sel-ck { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--suave); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; color: #111; }
 .item.mov.sel .sel-ck { background: var(--acento); border-color: var(--acento); }
 .item.mov.sel { background: color-mix(in srgb, var(--acento) 10%, var(--tarjeta)); }
+
+/* ================= v2.5.5 ================= */
+/* fila de tarjeta/cuenta: nombre completo arriba (una línea), chip y monto abajo; en pantallas anchas el monto va a la derecha */
+.tj { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "ic nom nom" "ic sub mon"; column-gap: 12px; row-gap: 5px; align-items: center; }
+.tj > .mini-plastico, .tj > .tj-ic { grid-area: ic; align-self: start; margin-top: 1px; }
+.tj > .tj-nom { grid-area: nom; font-size: 15px; font-weight: 700; line-height: 1.25; min-width: 0; overflow-wrap: break-word; }
+.tj > .tj-sub { grid-area: sub; min-width: 0; align-self: start; }
+.tj > .tj-sub .pill { white-space: nowrap; }
+.tj > .monto { grid-area: mon; align-items: flex-end; }
+.tj > .monto > * { white-space: nowrap; }
+.tj-ic.ico-cat { width: 40px; height: 40px; font-size: 19px; }
+@media (min-width: 480px) { .tj { grid-template-areas: "ic nom mon" "ic sub mon"; } }
+@media (max-width: 400px) {
+  .mini-plastico { width: 38px; height: 26px; font-size: 8.5px; padding: 2px 4px; }
+  .tj { column-gap: 10px; padding-left: 14px; padding-right: 14px; }
+  .tj > .tj-nom { font-size: 14.5px; }
+  .tj .monto b { font-size: 15px; }
+  .tj-det, .tj-barra { padding-left: 14px; padding-right: 14px; }
+}
+.tj-det .fila { gap: 10px; align-items: flex-start; }
+.tj-det .fila > span:first-child { min-width: 0; }
+.tj-det .fila > span:last-child { white-space: nowrap; text-align: right; flex-shrink: 0; }
+
+/* íconos de acciones (tarjeta, cuenta, sobre) */
+.iconos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 6px; margin-top: 12px; }
+.iconos.seis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ic-b { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; color: var(--texto); font: inherit; cursor: pointer; padding: 0; min-width: 0; -webkit-tap-highlight-color: transparent; }
+.ic-c { width: 52px; height: 52px; border-radius: 16px; background: var(--tile); border: 1px solid var(--borde); display: flex; align-items: center; justify-content: center; font-size: 22px; transition: transform .08s; }
+.ic-b.on .ic-c { background: var(--relleno); border-color: var(--relleno); color: var(--sobre-relleno); }
+.ic-b:active .ic-c { transform: scale(.92); }
+.ic-n { font-size: 12px; font-weight: 600; text-align: center; line-height: 1.2; overflow-wrap: break-word; max-width: 100%; }
+@media (max-width: 370px) { .ic-c { width: 46px; height: 46px; font-size: 20px; border-radius: 14px; } .ic-n { font-size: 11.5px; } .iconos { gap: 10px 4px; } }
+
+/* bloque interno (¿cuánto está en sobres?) */
+.caja-int { border: 1px solid var(--borde); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.sec-int { font-size: 11.5px; font-weight: 800; letter-spacing: .6px; color: var(--suave); }
+/* opciones grandes en hojas (cuadrar, cargar) */
+.op-g { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; padding: 12px 14px; margin-top: 8px; border: 1.5px solid var(--borde); border-radius: 14px; background: var(--tarjeta); color: var(--texto); font: inherit; cursor: pointer; }
+.op-g b { font-size: 15px; } .op-g > span { font-size: 12.5px; color: var(--suave); }
+.op-g.on { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 10%, var(--tarjeta)); }
+.op-g.apagado { opacity: .5; cursor: default; }
+.op-x { margin-top: 8px; } .op-x select { width: 100%; }
+/* filas estilo banco */
+.item.fb { gap: 10px; }
+.item.fb .punto { width: 9px; height: 9px; border-radius: 5px; margin: 0; flex-shrink: 0; align-self: center; }
+.punto.v { background: var(--positivo); } .punto.r { background: var(--rojo); }
+.sbm-t { display: block; font-size: 12px; font-weight: 800; }
+.item .monto .origen { display: block; font-size: 11.5px; font-weight: 500; color: var(--suave); }
+.pie-mov { display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: center; font-size: 13px; color: var(--suave); padding: 4px 0 8px; }
+.pie-mov b { color: var(--texto); }
+.ayuda-q { margin: -4px 2px 0; }
+/* tarjeta del sobre */
+.sb-card { background: var(--hero-fondo); color: var(--hero-texto); border: 1px solid var(--hero-borde); border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
+.sb-top { display: flex; gap: 12px; align-items: center; margin-bottom: 6px; }
+.sb-ic { font-size: 30px; line-height: 1; }
+.sb-tt { display: flex; flex-direction: column; min-width: 0; } .sb-tt b { font-size: 18px; } .sb-tt span { font-size: 12.5px; opacity: .8; }
+.sb-et { font-size: 12.5px; opacity: .8; }
+.sb-card .cifra-g { color: inherit; }
+.sb-card .ic-b { color: inherit; }
+.sb-card .ic-c { background: rgba(127,127,127,.18); border-color: transparent; }
+.sb-card .ic-b.on .ic-c { background: var(--relleno); }
+.tres-c { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tres-c > div { display: flex; flex-direction: column; min-width: 0; } .tres-c span { font-size: 12px; color: var(--suave); } .tres-c b { font-size: 14px; white-space: nowrap; }
+.mini-graf { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
+.mini-graf i { flex: 1; background: var(--linea); border-radius: 6px 6px 3px 3px; min-height: 4px; }
+.mini-graf i.ult { background: var(--relleno); } .mini-graf i.neg { background: color-mix(in srgb, var(--rojo) 50%, transparent); }
+/* calendario de rango */
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.cal-h { text-align: center; font-size: 12px; color: var(--suave); font-weight: 700; padding: 4px 0; }
+.cal-d { height: 40px; border: 0; border-radius: 10px; background: none; color: var(--texto); font: inherit; font-weight: 600; cursor: pointer; }
+.cal-d.hoy { box-shadow: inset 0 0 0 1.5px var(--borde); }
+.cal-d.entre { background: color-mix(in srgb, var(--relleno) 18%, transparent); }
+.cal-d.on { background: var(--relleno); color: var(--sobre-relleno); font-weight: 800; }
+@media (max-width: 370px) { .cal-d { height: 36px; } .tres-c b { font-size: 13px; } .sb-card { padding: 16px 14px; } }
+.resumen-mov b { font-size: clamp(12.5px, 3.9vw, 15px); white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+.resumen-mov { padding-left: 6px; padding-right: 6px; }
+.ic-n { overflow-wrap: normal; word-break: keep-all; hyphens: none; font-size: clamp(10.5px, 3.15vw, 12px); }
+.item.mov .det, .item.fb .det { white-space: normal; text-overflow: clip; overflow: visible; display: block; -webkit-line-clamp: unset; }
+.item .monto .origen { white-space: normal; overflow-wrap: break-word; max-width: 34vw; margin-left: auto; } .item.mov .monto { max-width: 46%; }

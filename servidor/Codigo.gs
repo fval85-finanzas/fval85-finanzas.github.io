@@ -1506,7 +1506,21 @@ function registrarPagoPrestamo_(p) {
   if (t.cols['N° comprobante']) {
     t.hoja.getRange(fila, t.cols['N° comprobante']).setNumberFormat('@').setValue(String(p.comprobante || ''));
   }
+  try { repararFormulasFila_(t.hoja, fila, t.cols, Object.keys(datos).concat(['N° comprobante'])); } catch (e) { console.log(e); }
   return fila;
+}
+
+/** v2.5.5: si una columna con fórmula quedó vacía o con #REF! en la fila nueva, copia la fórmula de la fila de arriba (las referencias se ajustan solas). */
+function repararFormulasFila_(h, fila, cols, escritas) {
+  if (fila <= 1) return 0;
+  var n = h.getLastColumn(), prev = h.getRange(fila - 1, 1, 1, n).getFormulas()[0], cur = h.getRange(fila, 1, 1, n).getFormulas()[0];
+  var noTocar = {}; escritas.forEach(function (k) { if (cols[k]) noTocar[cols[k]] = 1; });
+  var arregladas = 0;
+  for (var c = 0; c < n; c++) {
+    if (!prev[c] || noTocar[c + 1] || /#REF!/.test(prev[c])) continue;
+    if (!cur[c] || /#REF!/.test(cur[c])) { h.getRange(fila - 1, c + 1).copyTo(h.getRange(fila, c + 1)); arregladas++; }
+  }
+  return arregladas;
 }
 
 /** Anota la TBP del día 7. */
@@ -1885,7 +1899,7 @@ function desactivarAutomatico() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.5.0';
+var VERSION_APP = '2.5.5';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -3128,6 +3142,149 @@ var Calc = (function () {
   }
   function esSalario(m) { return m && m.tipo === 'Ingreso' && /salario|planilla|aguinaldo/i.test((m.comercio || '') + ' ' + (m.categoria || '')); }
 
+
+  // ---------------- v2.5.5: cuentas de ahorro con saldo vivo, historial de un sobre, búsqueda ----------------
+  /** Filas de notas/ayuda de la hoja Cuentas ("Saldo actual: en tarjetas, lo que debés hoy…") no son cuentas. */
+  function esCuentaReal(c) {
+    var n = String((c && c.nombre) || '').trim();
+    return !!n && n.length <= 60 && !/^(saldo actual|nota|notas|ayuda|importante)\s*[:\-]/i.test(n) && !/^(saldo actual|ayuda)$/i.test(n);
+  }
+  var NO_AHORRO = ['Tarjeta de crédito', 'Préstamo', 'Inversión'];
+  function esAhorro(c) { return !!c && NO_AHORRO.indexOf(c.tipo) < 0; }
+  /** Cuenta principal y de dónde sale cada pago. o = { principal, tarjetas, prestamo, fondos } (nombres). */
+  function origenes(d, pref) {
+    var ah = (d.cuentas || []).filter(function (c) { return c.activa !== false && esAhorro(c) && esCuentaReal(c); });
+    var existe = function (n) { return n && ah.some(function (c) { return c.nombre === n; }); };
+    pref = pref || {};
+    var def = (ah.filter(function (c) { return (c.moneda || 'CRC') === 'CRC' && /ahorro/i.test(c.tipo + ' ' + c.nombre); })[0] || ah.filter(function (c) { return (c.moneda || 'CRC') === 'CRC'; })[0] || ah[0] || {}).nombre || '';
+    var principal = existe(pref.principal) ? pref.principal : def;
+    return { principal: principal, tarjetas: existe(pref.tarjetas) ? pref.tarjetas : principal, prestamo: existe(pref.prestamo) ? pref.prestamo : principal, fondos: existe(pref.fondos) ? pref.fondos : principal };
+  }
+  /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
+  function efectoCuenta(d, m, o) {
+    var cta = (d.cuentas || []).filter(function (c) { return c.nombre === m.cuenta; })[0];
+    if (cta && !esCuentaReal(cta)) cta = null;
+    if (m.tipo === 'Pago de tarjeta') return o.tarjetas ? { cuenta: o.tarjetas, signo: -1, grupo: 'pagos' } : null;
+    if (m.tipo === 'Inversión') return o.fondos ? { cuenta: o.fondos, signo: -1, grupo: 'pagos' } : null;
+    if (m.tipo === 'Retiro de fondo') return o.fondos ? { cuenta: o.fondos, signo: 1, grupo: 'entra' } : null;
+    if (m.tipo !== 'Ingreso' && m.tipo !== 'Gasto') return null;   // tasa cero y transferencias propias no mueven la plata de ahorros
+    if (cta && !esAhorro(cta)) return null;                        // compra o devolución en la tarjeta
+    var n = cta ? cta.nombre : o.principal;
+    return n ? { cuenta: n, signo: m.tipo === 'Ingreso' ? 1 : -1, grupo: m.tipo === 'Ingreso' ? 'entra' : 'sale' } : null;
+  }
+  /** Movimientos de una cuenta de ahorro (todas las fechas): [{ fecha, monto (con signo), moneda, grupo, mov | pago }] */
+  function movsCuenta(d, c, o) {
+    var out = [];
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha) return;
+      var e = efectoCuenta(d, m, o);
+      if (e && e.cuenta === c.nombre) out.push({ fecha: m.fecha, monto: e.signo * (m.monto || 0), moneda: m.moneda === 'USD' ? 'USD' : 'CRC', grupo: e.grupo, mov: m });
+    });
+    if (o.prestamo === c.nombre && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
+      if (p.fecha && p.total) out.push({ fecha: p.fecha, monto: -p.total, moneda: 'CRC', grupo: 'pagos', pago: p });
+    });
+    return out.sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+  }
+  /** Saldo vivo de una cuenta de ahorro: saldo anotado + lo que entra − lo que sale desde el día siguiente a la fecha del saldo. */
+  function saldoCuenta(d, c, o) {
+    var r = { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0, base: { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0 }, fecha: c.fechaSaldo || null, vivo: false,
+      entra: { CRC: 0, USD: 0 }, sale: { CRC: 0, USD: 0 }, pagos: { CRC: 0, USD: 0 }, nEntra: 0, nSale: 0, nPagos: 0 };
+    var desde = c.fechaSaldo ? new Date(c.fechaSaldo) : null;
+    if (!desde || isNaN(desde)) return r;
+    r.vivo = true;
+    var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
+    movsCuenta(d, c, o).forEach(function (x) {
+      if (new Date(x.fecha) < corte) return;
+      var k = x.grupo === 'entra' ? 'entra' : x.grupo === 'pagos' ? 'pagos' : 'sale';
+      r[k][x.moneda] += Math.abs(x.monto);
+      r[k === 'entra' ? 'nEntra' : k === 'pagos' ? 'nPagos' : 'nSale']++;
+    });
+    ['CRC', 'USD'].forEach(function (mon) { r[mon] = r.base[mon] + r.entra[mon] - r.sale[mon] - r.pagos[mon]; });
+    return r;
+  }
+  /** Todo lo que pasó en un sobre, del más viejo al más nuevo, con el saldo corrido. */
+  function historialSobre(d, nombre) {
+    var s = (d.sobres || []).filter(function (x) { return x.nombre === nombre; })[0];
+    var an = analizarSobres(d), saldo = s ? (s.saldoInicial || 0) : 0, inicial = saldo;
+    var lista = an.efectos.filter(function (e) { return e.sobre === nombre && e.fecha; }).map(function (e, i) { return Object.assign({ _i: i }, e); })
+      .sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha) || a._i - b._i; });
+    lista.forEach(function (e) { e.antes = saldo; saldo += e.monto; e.despues = saldo; });
+    return { sobre: s, inicial: inicial, saldo: saldo, lista: lista, desde: an.desde };
+  }
+  /** Saldo de un sobre al final de cada uno de los últimos n meses (para el mini gráfico). */
+  function saldosMensualesSobre(h, hoy, n) {
+    var out = [];
+    for (var k = n - 1; k >= 0; k--) {
+      var fin = new Date(hoy.getFullYear(), hoy.getMonth() - k + 1, 1), v = h.inicial;
+      h.lista.forEach(function (e) { if (new Date(e.fecha) < fin) v = e.despues; });
+      out.push({ mes: new Date(hoy.getFullYear(), hoy.getMonth() - k, 1), saldo: v });
+    }
+    return out;
+  }
+  var MESES_B = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre'];
+  /**
+   * Buscador que entiende: palabras (comercio, categoría…), meses ("octubre", "octubre 2025"), fechas ("15/10", "15/10/2025"),
+   * montos (">20000", "<5000", "5000-10000", "=3500"). Devuelve { palabras, desde, hasta, min, max }.
+   */
+  function leerBusqueda(q, hoy) {
+    var r = { palabras: [], desde: null, hasta: null, min: null, max: null };
+    var num = function (s) { return leerNumero(s); };
+    var partes = String(q || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim().split(/\s+/).filter(String);
+    var anio = null;
+    partes.forEach(function (w) { if (/^20\d\d$/.test(w)) anio = Number(w); });
+    partes.forEach(function (w) {
+      var mm;
+      if (/^20\d\d$/.test(w)) return;
+      var mi = MESES_B.indexOf(w === 'septiembre' ? 'setiembre' : w);
+      if (mi >= 0) {
+        var y = anio || (mi > hoy.getMonth() ? hoy.getFullYear() - 1 : hoy.getFullYear());
+        r.desde = new Date(y, mi, 1); r.hasta = new Date(y, mi + 1, 1); return;
+      }
+      if ((mm = w.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/))) {
+        var dd = Number(mm[1]), me = Number(mm[2]) - 1, yy = mm[3] ? Number(mm[3].length === 2 ? '20' + mm[3] : mm[3]) : (anio || hoy.getFullYear());
+        if (!mm[3] && !anio && new Date(yy, me, dd) > hoy) yy--;
+        r.desde = new Date(yy, me, dd); r.hasta = new Date(yy, me, dd + 1); return;
+      }
+      if ((mm = w.match(/^(>=?|<=?|=)([\d.,]+)$/))) {
+        var v = num(mm[2]); if (v === null) return;
+        if (mm[1][0] === '>') r.min = v; else if (mm[1][0] === '<') r.max = v; else { r.min = v - 0.5; r.max = v + 0.5; }
+        return;
+      }
+      if ((mm = w.match(/^([\d.,]+)-([\d.,]+)$/))) { var a = num(mm[1]), b = num(mm[2]); if (a !== null && b !== null) { r.min = Math.min(a, b); r.max = Math.max(a, b); return; } }
+      r.palabras.push(w);
+    });
+    return r;
+  }
+  function textoBusqueda(m) { return [m.comercio, m.lugar, m.categoria, m.cuenta, m.sobre, m.nota, m.tipo, m.para].join(' ').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  function coincide(m, b) {
+    var f = new Date(m.fecha);
+    if (b.desde && f < b.desde) return false;
+    if (b.hasta && f >= b.hasta) return false;
+    if (b.min !== null && m.monto < b.min) return false;
+    if (b.max !== null && m.monto > b.max) return false;
+    if (b.palabras.length) { var t = textoBusqueda(m); for (var i = 0; i < b.palabras.length; i++) if (t.indexOf(b.palabras[i]) < 0) return false; }
+    return true;
+  }
+  /** Rango de fechas de un período con nombre: hoy, ayer, semana, mes, pasado, 3m → [desde, hasta) */
+  function rangoPeriodo(per, hoy) {
+    var h = soloFecha(hoy), y = h.getFullYear(), mo = h.getMonth(), d = h.getDate();
+    if (per === 'hoy') return [h, new Date(y, mo, d + 1)];
+    if (per === 'ayer') return [new Date(y, mo, d - 1), h];
+    if (per === 'semana') { var dw = (h.getDay() + 6) % 7; return [new Date(y, mo, d - dw), new Date(y, mo, d + 1)]; }
+    if (per === 'mes') return [new Date(y, mo, 1), new Date(y, mo + 1, 1)];
+    if (per === 'pasado') return [new Date(y, mo - 1, 1), new Date(y, mo, 1)];
+    if (per === '3m') return [new Date(y, mo - 2, 1), new Date(y, mo + 1, 1)];
+    return [null, null];
+  }
+  /** Último día de corte de la tarjeta (hoy o antes) */
+  function ultimoCorte(c, hoy) {
+    if (!c || !c.diaCorte) return null;
+    var h = soloFecha(hoy), dia = Math.min(c.diaCorte, new Date(h.getFullYear(), h.getMonth() + 1, 0).getDate());
+    var f = new Date(h.getFullYear(), h.getMonth(), dia);
+    if (f > h) { var mp = new Date(h.getFullYear(), h.getMonth(), 0); f = new Date(mp.getFullYear(), mp.getMonth(), Math.min(c.diaCorte, mp.getDate())); }
+    return f;
+  }
+
   function pct(n, dec) { return n === null || n === undefined ? '—' : (n * 100).toFixed(dec === undefined ? 2 : dec).replace('.', ',') + '%'; }
 
   return {
@@ -3136,7 +3293,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

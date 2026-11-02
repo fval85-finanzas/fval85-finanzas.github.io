@@ -4,7 +4,7 @@ var App = (function () {
   var hoy = new Date();
   var mes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   var pantalla = 'inicio';
-  var filtro = { q: '', chip: 'todos', cuenta: '', moneda: '', tipo: '', buscando: false };
+  var filtro = { q: '', chip: 'todos', cuenta: '', moneda: '', tipo: '', buscando: false, per: '', desde: null, hasta: null };
   var verTodoHistorial = false;
   var C = Calc;
   var token = guardado('mf-ses', null, sessionStorage);
@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.4';
+  var VERSION_WEB = '2.5.5';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -254,7 +254,7 @@ var App = (function () {
   // ---- datos guardados en el teléfono: la app abre al instante y se actualiza por detrás
   function leerJSONSeguro(k) { try { var t = localStorage.getItem(k); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
   function leerCache() { try { var t = localStorage.getItem('mf-cache'); return t ? limpiarD(JSON.parse(t)) : null; } catch (e) { return null; } }
-  function limpiarD(d) { if (d && d.sobres) d.sobres = d.sobres.filter(C.esSobreReal); return d; }   // v2.4: sin filas de totales/notas
+  function limpiarD(d) { if (d && d.sobres) d.sobres = d.sobres.filter(C.esSobreReal); if (d && d.cuentas) d.cuentas = d.cuentas.filter(C.esCuentaReal); return d; }   // v2.4: sin filas de totales/notas
   function guardarCache(json) { try { localStorage.setItem('mf-cache', json); } catch (e) { /* sin espacio: no pasa nada */ } }
   var pintarPendiente = false;
   function sincronizando() { /* v1.9: la descarga es silenciosa */ }
@@ -359,7 +359,7 @@ var App = (function () {
     document.querySelectorAll('.pantalla').forEach(function (s) { s.classList.toggle('activa', s.id === 'p-' + pantalla); });
     ({
       inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
-      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, plan: pPlan, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
+      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, plan: pPlan, sobre: pSobre, ctamov: pCtaMov, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
     formatearMontos();
   }
@@ -1581,9 +1581,15 @@ var App = (function () {
   function pMovimientos(res) {
     var h = cabMes('Movimientos');
     if (filtro.buscando || filtro.q) h += '<label class="buscador">' + ico('buscar', ' style="width:18px;height:18px;color:var(--suave)"') +
-      '<input type="search" id="q" aria-label="Buscar movimientos" placeholder="Comercio, categoría, nota…" value="' + esc(filtro.q) + '" oninput="App.buscar(this.value)"></label>';
+      '<input type="search" id="q" aria-label="Buscar movimientos" placeholder="Comercio, mes, 15/10, >20000…" value="' + esc(filtro.q) + '" oninput="App.buscar(this.value)"></label>' +
+      '<div class="suave chico ayuda-q">Entiende: <b>comercio</b>, <b>mes</b> («octubre»), <b>fecha</b> («15/10») y <b>montos</b> («>20000», «5000-10000»).</div>';
+    // v2.5.5: período
+    var esteMes = mes.getMonth() === hoy.getMonth() && mes.getFullYear() === hoy.getFullYear();
+    var pers = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', 'Esta semana'], ['', esteMes ? 'Este mes' : MESES[mes.getMonth()].charAt(0).toUpperCase() + MESES[mes.getMonth()].slice(1)], ['pasado', 'Mes pasado'], ['3m', '3 meses'], ['todo', 'Todo'],
+      ['rango', filtro.per === 'rango' && filtro.desde ? '📅 ' + textoRango(filtro.desde, filtro.hasta) : '📅 Rango…']];
+    h += '<div class="chips desliza per">' + pers.map(function (x) { return '<button class="chip' + (filtro.per === x[0] ? ' on' : '') + '" onclick="App.movPer(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>';
     // resumen del mes
-    h += '<div class="resumen-mov"><div><span>Gastos</span><b>' + din(res.total.CRC, 'CRC') + '</b>' + (res.total.USD ? '<small>+ ' + din(res.total.USD, 'USD') + '</small>' : '') + '</div>' +
+    h += '<div class="resumen-mov" id="resMov"><div><span>Gastos</span><b>' + din(res.total.CRC, 'CRC') + '</b>' + (res.total.USD ? '<small>+ ' + din(res.total.USD, 'USD') + '</small>' : '') + '</div>' +
       '<div><span>Ingresos</span><b class="verde-pos">' + din(res.ingresos.CRC, 'CRC') + '</b>' + (res.ingresos.USD ? '<small>+ ' + din(res.ingresos.USD, 'USD') + '</small>' : '') + '</div>' +
       '<div><span>Neto</span><b class="' + (res.queda.CRC < 0 ? 'rojo' : '') + '">' + din(res.queda.CRC, 'CRC') + '</b></div></div>';
     // chips: todas, por revisar, sin sobre, categorías con su total, filtros
@@ -1611,10 +1617,14 @@ var App = (function () {
 
   function pintarLista(res) {
     res = res || C.resumenMes(D, mes);
-    var q = filtro.q.trim().toLowerCase();
+    var bq = C.leerBusqueda(filtro.q, hoy);
+    var r = bq.desde ? [bq.desde, bq.hasta] : filtro.per === 'rango' ? [filtro.desde, filtro.hasta] : filtro.per && filtro.per !== 'todo' ? C.rangoPeriodo(filtro.per, hoy) : [null, null];
+    var todo = !!(bq.desde || filtro.per);
+    if ($('resMov')) $('resMov').style.display = todo ? 'none' : '';
+    var base = todo ? D.movimientos.filter(function (m) { var f = m.fecha && new Date(m.fecha); return f && (!r[0] || f >= r[0]) && (!r[1] || f < r[1]); }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); }) : res.movimientos;
     var sinSobre = {};
     if (filtro.chip === 'sinsobre' && !sinServidorSobres()) SB().pendientes.forEach(function (p) { sinSobre[p.mov.fila] = 1; });
-    var lista = res.movimientos.filter(function (m) {
+    var lista = base.filter(function (m) {
       if (filtro.chip === 'revisar' && !(m.tipo === 'Gasto' && !m.categoria)) return false;
       if (filtro.chip === 'sinsobre' && !sinSobre[m.fila]) return false;
       if (filtro.chip.indexOf('c:') === 0 && !(m.tipo === 'Gasto' && m.categoria === filtro.chip.slice(2))) return false;
@@ -1622,10 +1632,15 @@ var App = (function () {
       if (filtro.moneda && m.moneda !== filtro.moneda) return false;
       if (filtro.cuenta && m.cuenta !== filtro.cuenta) return false;
       if (filtro.tipo && m.tipo !== filtro.tipo) return false;
-      if (q && [m.comercio, m.lugar, m.categoria, m.cuenta, m.sobre, m.nota].join(' ').toLowerCase().indexOf(q) < 0) return false;
+      if (!C.coincide(m, { palabras: bq.palabras, min: bq.min, max: bq.max })) return false;
       return true;
     });
-    if (!lista.length) { $('listaMov').innerHTML = '<div class="caja vacio">No hay movimientos con ese filtro.</div>'; return; }
+    if (!lista.length) { $('listaMov').innerHTML = '<div class="caja vacio">No hay movimientos con ese filtro.' + (filtro.per !== 'todo' && (bq.palabras.length || bq.min !== null || bq.max !== null) && !bq.desde ? '<br><button class="btn sec chico" style="margin-top:10px" onclick="App.movPer(\'todo\')">Buscar en todos los meses</button>' : '') + '</div>'; return; }
+    var tg = { CRC: 0, USD: 0 }, ti = { CRC: 0, USD: 0 };
+    lista.forEach(function (m) { var mon = m.moneda === 'USD' ? 'USD' : 'CRC'; if (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') tg[mon] += m.monto; else if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') ti[mon] += m.monto; });
+    var pie = '<div class="pie-mov"><span>' + lista.length + ' movimiento' + (lista.length === 1 ? '' : 's') + '</span>' +
+      (tg.CRC || tg.USD ? '<span>Gastos <b>' + dosMon(tg) + '</b></span>' : '') + (ti.CRC || ti.USD ? '<span>Ingresos <b class="verde-pos">' + dosMon(ti) + '</b></span>' : '') + '</div>';
+    if (lista.length > 400) lista = lista.slice(0, 400);
     var dias = [], porDia = {};
     lista.forEach(function (m) {
       var d = new Date(m.fecha), clave = d.toDateString();
@@ -1641,9 +1656,10 @@ var App = (function () {
       var x = porDia[k], dd = C.diasEntre(x.d, hoy);
       var et = dd === 0 ? 'Hoy · ' : dd === 1 ? 'Ayer · ' : '';
       var t = [Math.abs(x.CRC) > 0.004 ? tot(x.CRC, 'CRC') : '', Math.abs(x.USD) > 0.004 ? tot(x.USD, 'USD') : ''].filter(String).join(' · ');
-      return '<div class="dia"><span>' + et + DIAS[x.d.getDay()] + ' ' + x.d.getDate() + '</span><span class="m">' + (oculto() ? '' : t) + '</span></div><div class="caja sinpad">' + x.movs.map(itemMov).join('') + '</div>';
+      return '<div class="dia"><span>' + et + DIAS[x.d.getDay()] + ' ' + x.d.getDate() + (todo ? ' ' + MESES_C[x.d.getMonth()] + (x.d.getFullYear() !== hoy.getFullYear() ? ' ' + x.d.getFullYear() : '') : '') + '</span><span class="m">' + (oculto() ? '' : t) + '</span></div><div class="caja sinpad">' + x.movs.map(itemMov).join('') + '</div>';
     }).join('');
-    $('listaMov').innerHTML = '<div style="display:flex;flex-direction:column;gap:10px">' + h + '</div>';
+    $('listaMov').innerHTML = '<div style="display:flex;flex-direction:column;gap:10px">' + h + pie + '</div>';
+    formatearMontos();
   }
   function formFiltros() {
     var cuentas = D.cuentas.filter(function (c) { return c.activa; }).map(function (c) { return c.nombre; });
@@ -1755,7 +1771,7 @@ var App = (function () {
     var deudaEq = deuC + deuU * tc, cubEq = cubC + cubU * tc, pctCub = deudaEq > 0 ? cubEq / deudaEq : 0;
     var h = '<div class="cab"><div><div class="sobretitulo">' + nombreMes(mes) + '</div><h1 class="titulo">Tarjetas</h1></div><div class="mesnav">' + botonOjo().replace('class="ojo"', 'class="btn-icono"') + botonMas() + '</div></div>';
     if (datos.length) {
-      h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Deuda total hoy</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span class="suave chico">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
+      h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Deuda total hoy</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span class="suave chico" style="white-space:nowrap;display:inline-block">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
         (D.sobresDesde ? '<div style="text-align:right"><div class="suave chico">Cubierto por sobres</div><div class="fuerte verde-pos" style="font-size:21px">' + Math.round(pctCub * 100) + '%</div></div>' : '') + '</div>' +
         (D.sobresDesde ? '<div class="barra"><i style="width:' + Math.min(100, pctCub * 100).toFixed(1) + '%;background:var(--positivo)"></i></div>' : '') + '</div>';
     }
@@ -1770,7 +1786,7 @@ var App = (function () {
       }
       var saldo2 = (dt.USD ? '<span class="suave chico">+ ' + din(dt.USD, 'USD') + '</span>' : '') + (cambio || (!dt.vivo ? '<span class="suave chico">saldo sin fecha</span>' : ''));
       var fila = '<button class="tj" onclick="App.alternarTarjeta(' + c.fila + ')" aria-expanded="' + ab + '"><span class="mini-plastico" style="background:linear-gradient(135deg,' + colorBanco(c.banco) + ',color-mix(in srgb,' + colorBanco(c.banco) + ' 70%, white))">' + esc(c.ultimos4 || '') + '</span>' +
-        '<span class="cuerpo"><span class="nombre">' + esc(c.nombre) + '</span>' + (x.dias < 999 ? '<span class="pill' + (urg ? ' alerta' : '') + '">pagar ' + enDias(x.dias) + '</span>' : '') + '</span>' +
+        '<span class="tj-nom">' + esc(c.nombre) + '</span><span class="tj-sub">' + (x.dias < 999 ? '<span class="pill' + (urg ? ' alerta' : '') + '">pagar ' + enDias(x.dias) + '</span>' : '') + '</span>' +
         '<span class="monto"><b>' + din(dt.CRC, 'CRC') + '</b>' + saldo2 + '</span></button>' +
         (x.uso !== null ? '<div class="tj-barra"><div class="barra' + (lleno ? ' alerta' : '') + '" style="height:5px"><i style="width:' + Math.max(1.5, Math.min(100, x.uso * 100)).toFixed(1) + '%' + (lleno ? ';background:var(--rojo)' : '') + '"></i></div></div>' : '');
       if (ab) {
@@ -1778,6 +1794,7 @@ var App = (function () {
         var dosMon = function (o) { return [o.CRC || !o.USD ? din(o.CRC, 'CRC') : '', o.USD ? din(o.USD, 'USD') : ''].filter(String).join(' + '); };
         var tcs = D.tasaCero.filter(function (t) { return t.tarjeta === c.nombre; }).map(function (t) { return { t: t, e: C.estadoTasaCero(t, hoy) }; }).filter(function (y) { return y.e.restantes > 0; });
         var linea = function (a, b, cls) { return '<div class="fila chico"><span class="suave">' + a + '</span><span class="fuerte ' + (cls || '') + '">' + b + '</span></div>'; };
+        var nq = esc(c.nombre).replace(/'/g, "\\'");
         fila += '<div class="tj-det">' +
           (dt.vivo ? linea('Saldo al ' + fechaCorta(dt.fecha) + ' (estado de cuenta)', dosMon(dt.base)) +
             linea('+ ' + dt.compras + ' compra' + (dt.compras === 1 ? '' : 's') + ' desde entonces', '+' + dosMon(dt.sube), 'naranja') +
@@ -1794,21 +1811,20 @@ var App = (function () {
           (tcs.length ? '<div class="suave chico fuerte" style="margin-top:6px">CUOTAS TASA CERO</div>' + tcs.map(function (y) {
             return linea(esc(y.t.descripcion) + ' · ' + (y.t.meses - y.e.restantes) + ' de ' + y.t.meses, din(y.e.cuota, y.t.moneda) + '/mes');
           }).join('') : '') +
-          '<div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.verComprasDe(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')">Ver compras</button>' +
-          '<button class="chip on" onclick="App.abrirPlan(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')">📋 Planear pago</button>' +
-          '<button class="chip" onclick="App.formMovimiento(0,{tipo:\'Pago de tarjeta\',cuenta:\'' + esc(c.nombre).replace(/'/g, "\\'") + '\'})">Registrar pago</button>' +
-          '<button class="chip on" onclick="App.formSaldoTarjeta(' + c.fila + ')">↻ Actualizar saldo</button>' +
-          '<button class="chip" onclick="App.elegirArchivo(\'foto\')">📷 Pago desde foto</button>' +
-          '<button class="chip" onclick="App.formCuenta(' + c.fila + ')">Editar</button></div></div>';
+          (tcs.length ? '' : '<div class="suave chico" style="margin-top:4px">Esta tarjeta no tiene compras tasa cero.</div>') +
+          iconos([['📋', 'Planear pago', 'App.abrirPlan(\'' + nq + '\')', true], ['🧾', 'Movimientos', 'App.verCuentaMov(\'' + nq + '\')'],
+            ['💳', 'Registrar pago', 'App.formMovimiento(0,{tipo:\'Pago de tarjeta\',cuenta:\'' + nq + '\'})'], ['↻', 'Actualizar saldo', 'App.formSaldoTarjeta(' + c.fila + ')'],
+            ['📷', 'Pago con foto', 'App.elegirArchivo(\'foto\')'], ['✏️', 'Editar', 'App.formCuenta(' + c.fila + ')']]) + '</div>';
       }
       return '<div class="tj-fila' + (ab ? ' abierta' : '') + '">' + fila + '</div>';
     }).join('') + '</div>';
     var otras = D.cuentas.filter(function (c) { return c.tipo !== 'Tarjeta de crédito' && c.activa; });
     if (otras.length) {
       h += '<div class="seccion">Otras cuentas</div><div class="caja sinpad">' + otras.map(function (c) {
+        if (C.esAhorro(c)) return filaAhorro(c);
         var icono = c.tipo === 'Préstamo' ? '🏠' : c.tipo === 'Inversión' ? '📈' : c.moneda === 'USD' ? '💵' : '🏦';
         var saldo = [c.saldoCRC ? din(c.saldoCRC, 'CRC') : '', c.saldoUSD ? din(c.saldoUSD, 'USD') : ''].filter(String).join(' + ') || din(0, c.moneda);
-        return '<button class="item" onclick="App.formCuenta(' + c.fila + ')"><span class="ico-cat" style="background:var(--linea)">' + icono + '</span><span class="cuerpo"><span class="nombre" style="display:block">' + esc(c.nombre) + '</span><span class="det" style="display:block">' + esc(c.tipo + (c.banco ? ' · ' + c.banco : '')) + '</span></span><span class="monto">' + saldo + '</span></button>';
+        return '<div class="tj-fila"><button class="tj" onclick="App.formCuenta(' + c.fila + ')"><span class="ico-cat tj-ic" style="background:var(--linea)">' + icono + '</span><span class="tj-nom">' + esc(c.nombre) + '</span><span class="tj-sub suave chico">' + esc(c.tipo + (c.banco ? ' · ' + c.banco : '')) + '</span><span class="monto"><b>' + saldo + '</b></span></button></div>';
       }).join('') + '</div>';
     }
     h += '<button class="punteado" onclick="App.formCuenta()">' + ico('mas', ' style="width:20px;height:20px"') + 'Agregar tarjeta o cuenta</button>';
@@ -1843,7 +1859,7 @@ var App = (function () {
       var det = (Math.abs(s.inicioMes) > 0.005 ? 'Venía ' + din(s.inicioMes, s.moneda) + ' · ' : '') + (s.entradas ? '+' + din(s.entradas, s.moneda) + ' · ' : '') + 'salió ' + din(s.salidas, s.moneda);
       if (s.meta) det += ' · meta ' + din(s.meta, s.moneda);
       var avance = s.meta ? Math.max(0, Math.min(1, s.saldo / s.meta)) : s.pct;
-      return '<button class="item" style="flex-direction:column;align-items:stretch;gap:6px" onclick="App.formSobre(' + i + ')">' +
+      return '<button class="item" style="flex-direction:column;align-items:stretch;gap:6px" onclick="App.verSobre(' + i + ')">' +
         '<span class="fila"><span style="font-weight:700">' + iconoSobre(s.nombre) + ' ' + esc(nomSobre(s.nombre)) + (s.ajuste ? ' <span class="pill" style="font-size:10px;padding:2px 6px">AJUSTE</span>' : '') + '</span>' +
         '<span class="fuerte' + (neg ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></span>' +
         barra(avance, !s.meta && s.pct >= 0.85) + '<span class="chico suave">' + det + '</span></button>';
@@ -2401,7 +2417,7 @@ var App = (function () {
   }
 
   // ---- un sobre (editar y ver su mes)
-  function formSobre(i) {
+  function formSobre(i, soloEditar) {
     if (i === undefined) {
       return abrir('<h2>Nuevo sobre</h2><label class="campo"><span>Nombre</span><input id="s-nombre" placeholder="Ej. Mascotas"></label>' +
         '<div class="dos"><label class="campo"><span>Moneda</span><select id="s-moneda"><option value="CRC">Colones ₡</option><option value="USD">Dólares $</option></select></label>' +
@@ -2411,19 +2427,19 @@ var App = (function () {
         '<div class="acciones"><button class="btn" id="s-ok" onclick="App.guardarSob()">Crear sobre</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
     }
     var s = SB().lista[i];
-    var movs = s.movs.slice().sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    var movs = soloEditar ? [] : s.movs.slice().sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
     var r = function (n) { return n === null || n === undefined ? '' : String(n).replace('.', ','); };
     abrir('<h2>' + iconoSobre(s.nombre) + ' ' + esc(nomSobre(s.nombre)) + '</h2><div class="fila"><span class="suave">Saldo</span><b style="font-size:22px">' + din(s.saldo, s.moneda) + '</b></div>' +
       (movs.length ? '<div class="caja sinpad" style="margin-top:8px">' + movs.slice(0, 8).map(function (e) {
         return '<div class="item" style="cursor:default;padding:10px 14px"><span class="cuerpo"><span class="nombre" style="display:block;font-size:14px">' + esc(e.tipo || '') + (e.nota ? ' · ' + esc(e.nota) : '') + '</span><span class="det" style="display:block">' + fechaCorta(e.fecha) + '</span></span>' +
           '<span class="monto"><b class="' + (e.monto >= 0 ? 'verde' : '') + '">' + (e.monto >= 0 ? '+' : '−') + din(Math.abs(e.monto), s.moneda) + '</b></span></div>';
-      }).join('') + '</div>' : '<div class="suave chico">Sin movimientos en ' + nombreMes(mes).toLowerCase() + '.</div>') +
+      }).join('') + '</div>' : soloEditar ? '' : '<div class="suave chico">Sin movimientos en ' + nombreMes(mes).toLowerCase() + '.</div>') +
       (s.asignadoAuto ? '' : '<label class="campo"><span>Reparto de siempre (por mes)</span><input id="s-monto" data-dinero inputmode="decimal" value="' + r(s.asignado) + '"></label>') +
       '<div class="dos-campos"><label class="campo compacto"><span>Saldo inicial</span><input id="s-saldo" data-dinero inputmode="decimal" value="' + r(s.saldoInicial) + '"></label>' +
       '<label class="campo compacto"><span>Meta (opcional)</span><input id="s-meta" data-dinero inputmode="decimal" value="' + r(s.meta) + '"></label></div>' +
       '<label class="campo compacto"><span>Tipo</span><select id="s-tipo">' + ['Variable', 'Fijo', 'Ahorro'].map(function (t) { return '<option' + (s.tipo === t ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></label>' +
       '<div class="acciones"><button class="btn" id="s-ok" onclick="App.guardarSob(' + s.fila + ',' + (s.asignadoAuto ? s.asignado : 'null') + ')">Guardar</button>' +
-      '<button class="btn sec" onclick="App.formMover(\'' + esc(s.nombre).replace(/'/g, '\\\'') + '\')">Mover desde este sobre</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+      (soloEditar ? '' : '<button class="btn sec" onclick="App.formMover(\'' + esc(s.nombre).replace(/'/g, '\\\'') + '\')">Mover desde este sobre</button>') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function guardarSob(fila, asignadoFijo) {
     var monto = asignadoFijo !== null && asignadoFijo !== undefined ? asignadoFijo : C.leerNumero(val('s-monto'));
@@ -3297,6 +3313,11 @@ var App = (function () {
       h += grupo('so', '✉', '#3DD68C', 'Sobres', 'Desde ' + fechaCorta(D.sobresDesde) + ' · especiales',
         opcion('sobre', 'Saldos de los sobres desde', fechaCorta(D.sobresDesde) + ' · los saldos iniciales se ponen en la pestaña Sobres', '', 'App.formSobresDesde()') +
         opcion('ajustes', 'Sobres especiales', 'Préstamo: ' + nom(esp.prestamo) + ' · Fondos: ' + nom(esp.fondos) + ' · Pago de tarjetas: ' + nom(esp.tarjetas), '', 'App.formSobresEspeciales()'));
+    }
+    if (cuentasAhorro().length) {
+      var og = ORIG();
+      h += grupo('cu', '🏦', '#5B8DEF', 'Cuentas', 'Principal: ' + esc(og.principal),
+        opcion('tarjeta', 'Cuentas de dónde salen los pagos', 'Tarjetas: ' + esc(og.tarjetas) + ' · Préstamo: ' + esc(og.prestamo) + ' · Fondos: ' + esc(og.fondos), '<span class="flecha">›</span>', 'App.formOrigenes()'));
     }
     var ult = AJ.ultimaRevision ? new Date(Number(AJ.ultimaRevision) + 10 * 60000) : null;
     h += grupo('co', '📧', '#5B8DEF', 'Correos de los bancos', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE',
@@ -4628,7 +4649,351 @@ var App = (function () {
     cerrar(); selMov = null; pintar(); toast('✅ Asignados' + (s ? ' a ' + nomSobre(s) : ' sin sobre'));
   }
 
+  // ==================================================================== v2.5.5
+  // ---- cuentas de ahorro con saldo vivo
+  function ORIG() { return C.origenes(D, PREFS().origenes); }
+  function cuentasAhorro() { return D.cuentas.filter(function (c) { return c.activa && C.esAhorro(c); }); }
+  function dosMon(o, mon) { return [o.CRC || mon !== 'USD' && !o.USD ? din(o.CRC, 'CRC') : '', o.USD ? din(o.USD, 'USD') : ''].filter(String).join(' + '); }
+  function iconos(lista) {
+    return '<div class="iconos' + (lista.length > 4 ? ' seis' : '') + '">' + lista.map(function (b) {
+      return '<button class="ic-b' + (b[3] ? ' on' : '') + '" onclick="' + b[2] + '"><span class="ic-c">' + b[0] + '</span><span class="ic-n">' + b[1] + '</span></button>';
+    }).join('') + '</div>';
+  }
+  function filaAhorro(c) {
+    var o = ORIG(), sc = C.saldoCuenta(D, c, o), mon = c.moneda === 'USD' ? 'USD' : 'CRC', ab = tarjetaAbierta === c.fila;
+    var principal = o.principal === c.nombre;
+    var sub = sc.vivo ? 'Saldo hoy · desde ' + fechaCorta(sc.fecha).replace(/ \d{4}$/, '') : 'Sin saldo anotado';
+    var h = '<button class="tj" onclick="App.alternarTarjeta(' + c.fila + ')" aria-expanded="' + ab + '"><span class="ico-cat tj-ic" style="background:var(--linea)">' + (mon === 'USD' ? '💵' : '🏦') + '</span>' +
+      '<span class="tj-nom">' + esc(c.nombre) + '</span><span class="tj-sub suave chico">' + sub + (principal ? ' · principal' : '') + '</span>' +
+      '<span class="monto"><b>' + dosMon(sc, mon) + '</b></span></button>';
+    if (!ab) return '<div class="tj-fila">' + h + '</div>';
+    var linea = function (a, b, cls) { return '<div class="fila chico"><span class="suave">' + a + '</span><span class="fuerte ' + (cls || '') + '">' + b + '</span></div>'; };
+    h += '<div class="tj-det">';
+    if (sc.vivo) {
+      h += linea('Saldo al ' + fechaCorta(sc.fecha) + ' (anotado)', dosMon(sc.base, mon)) +
+        linea('+ Entradas (' + sc.nEntra + ')' + (principal ? ' · salario, SINPE recibidos' : ''), '+' + dosMon(sc.entra, mon), 'verde-pos') +
+        linea('− Salidas (' + sc.nSale + ') · gastos, SINPE enviados', '−' + dosMon(sc.sale, mon), 'rojo') +
+        linea('− Pagos de tarjeta, préstamo y fondos (' + sc.nPagos + ')', '−' + dosMon(sc.pagos, mon)) +
+        '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea('Saldo hoy', dosMon(sc, mon));
+    } else h += '<div class="aviso-tasa" style="margin:0 0 4px">Tocá <b>↻ Cuadrar con el banco</b> y poné lo que dice el banco hoy: desde ahí la app suma lo que entra y resta lo que sale.</div>';
+    if (principal && D.sobresDesde && mon === 'CRC') {
+      var sbH = C.saldosSobres(D, hoy, hoy), enS = sbH.total.CRC, res = sbH.reservadoTotal || 0, libre = sc.CRC - enS - res;
+      h += '<div class="caja-int"><div class="sec-int">¿CUÁNTO ESTÁ EN SOBRES?</div>' + linea('✉ En tus sobres', din(enS, 'CRC')) +
+        (res > 0.005 ? linea('💳 Reservado para pagar tarjetas', din(res, 'CRC')) : '') +
+        linea('🪙 Libre (fuera de sobres)', din(libre, 'CRC'), libre < -0.005 ? 'rojo' : 'verde-pos') +
+        '<div class="suave chico">' + (libre < -0.005 ? '⚠ Tus sobres dicen tener más plata de la que hay en la cuenta. Cuadrá el saldo o revisá lo que falta asignar.' : 'Si «Libre» queda en negativo, tus sobres dicen tener más plata de la que hay en la cuenta.') + '</div></div>';
+    }
+    if (principal) h += '<div class="suave chico">Cuenta principal: aquí entran el salario y los SINPE, y se toman los movimientos sin cuenta.</div>';
+    var n = esc(c.nombre).replace(/'/g, "\\'");
+    h += iconos([['↻', 'Cuadrar con el banco', 'App.formCuadrar(' + c.fila + ')', true], ['🧾', 'Movimientos', 'App.verCuentaMov(\'' + n + '\')'],
+      ['🏦', 'Origen de pagos', 'App.formOrigenes()'], ['✏️', 'Editar', 'App.formCuenta(' + c.fila + ')']]) + '</div>';
+    return '<div class="tj-fila abierta">' + h + '</div>';
+  }
+  function formCuadrar(fila) {
+    var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC';
+    abrir('<h2>↻ Cuadrar ' + esc(c.nombre) + '</h2><div class="suave">Poné lo que dice la app del banco hoy.</div>' +
+      '<label class="campo"><span>Saldo en el banco (' + (mon === 'USD' ? '$' : '₡') + ')</span><input id="cq-banco" class="monto" data-dinero inputmode="decimal" placeholder="0" oninput="App.cuadrarVista(' + fila + ')"></label>' +
+      '<div id="cq-vista"></div>');
+    cuadrarVista(fila);
+    setTimeout(function () { var e = $('cq-banco'); if (e) e.focus(); }, 80);
+  }
+  function cuadrarVista(fila) {
+    var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG()), banco = C.leerNumero(val('cq-banco'));
+    var h = '';
+    if (sc.vivo) {
+      var dif = banco === null ? null : banco - sc[mon];
+      h += '<div class="caja" style="gap:6px;margin-top:10px"><div class="fila"><span>La app calcula</span><b>' + din(sc[mon], mon) + '</b></div>' +
+        '<div class="fila"><span>El banco dice</span><b>' + (banco === null ? '—' : din(banco, mon)) + '</b></div>' +
+        '<div class="fila"><span>Diferencia</span><b class="' + (dif === null || Math.abs(dif) < 0.005 ? 'verde-pos' : 'acento') + '">' + (dif === null ? '—' : Math.abs(dif) < 0.005 ? '✓ cuadra' : (dif > 0 ? '+' : '−') + din(Math.abs(dif), mon)) + '</b></div></div>';
+      h += '<div class="sec-int" style="margin-top:14px">¿QUÉ HAGO CON LA DIFERENCIA?</div>' +
+        '<button class="op-g on" onclick="App.guardarCuadrar(' + fila + ')"><b>Ajustar y seguir desde hoy</b><span>El saldo queda igual al banco (comisiones, intereses, centavos…) y desde mañana se mueve solo.</span></button>' +
+        '<button class="op-g" onclick="App.cerrar();App.verCuentaMov(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\',\'saldo\')"><b>Buscar qué falta</b><span>Te muestro lo que la app contó desde el ' + fechaCorta(sc.fecha) + ' para compararlo con el banco.</span></button>';
+    } else {
+      h += '<div class="suave chico" style="margin-top:8px">Desde mañana la app suma lo que entra (salario, SINPE recibidos, retiros de fondos) y resta lo que sale (gastos, SINPE enviados, pagos de tarjeta, préstamo y fondos).</div>' +
+        '<div class="acciones"><button class="btn" onclick="App.guardarCuadrar(' + fila + ')">Guardar saldo de hoy</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>';
+    }
+    $('cq-vista').innerHTML = h;
+    formatearMontos();
+  }
+  function guardarCuadrar(fila) {
+    var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
+    var banco = C.leerNumero(val('cq-banco'));
+    if (banco === null) return toast('Escribí el saldo que dice el banco.');
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG());
+    var crc = mon === 'CRC' ? banco : (sc.vivo ? sc.CRC : c.saldoCRC || 0), usd = mon === 'USD' ? banco : (sc.vivo ? sc.USD : c.saldoUSD || 0);
+    encolar('actualizarSaldoCuenta', [fila, Math.round(crc * 100) / 100, Math.round(usd * 100) / 100, desdeInput(localInput())], 'Saldo de ' + c.nombre + ' · ' + txt(banco, mon));
+    hecho('✅ Cuadrado con el banco. Desde mañana se mueve solo.');
+  }
+  function formOrigenes() {
+    var ah = cuentasAhorro().map(function (c) { return c.nombre; });
+    if (!ah.length) return toast('Primero agregá tu cuenta de ahorros: Tarjetas → Agregar tarjeta o cuenta (tipo ahorro).', 5000);
+    var o = ORIG(), sel = function (id, v) { return '<select id="' + id + '">' + opciones(ah, v) + '</select>'; };
+    abrir('<h2>🏦 Cuentas de dónde salen los pagos</h2><div class="suave">Los pagos de tarjeta y del préstamo se anotan en la tarjeta o el préstamo, pero la plata sale de tu cuenta. Elegí de cuál:</div>' +
+      '<label class="campo"><span>Cuenta principal (salario, SINPE y movimientos sin cuenta)</span>' + sel('or-pr', o.principal) + '</label>' +
+      '<label class="campo"><span>Pagos de tarjetas salen de</span>' + sel('or-tj', o.tarjetas) + '</label>' +
+      '<label class="campo"><span>Cuota del préstamo sale de</span>' + sel('or-pt', o.prestamo) + '</label>' +
+      '<label class="campo"><span>Aportes a fondos salen de (y los retiros entran a)</span>' + sel('or-fo', o.fondos) + '</label>' +
+      '<div class="caja" style="background:var(--fondo);gap:4px;margin-top:12px;font-size:13.5px"><b>Qué suma y qué resta</b>' +
+      '<span><b>Suma:</b> ingresos a esa cuenta (salario, SINPE recibidos, retiros de fondos).</span><span><b>Resta:</b> gastos y SINPE enviados desde esa cuenta, pagos de tarjeta, cuota del préstamo y aportes a fondos.</span>' +
+      '<span class="suave">Igual que las tarjetas: cuenta desde el día siguiente a la fecha del saldo.</span></div>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarOrigenes()">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarOrigenes() {
+    guardarPrefs({ origenes: { principal: val('or-pr'), tarjetas: val('or-tj'), prestamo: val('or-pt'), fondos: val('or-fo') } }, 'Cuentas de dónde salen los pagos');
+    hecho('✅ Guardado');
+  }
+
+  // ---- movimientos de una tarjeta o cuenta (pantalla propia)
+  var CM = { cuenta: '', f: 'mes', desde: null, hasta: null };
+  function verCuentaMov(n, f) {
+    var c = cuentaPorNombre(n); if (!c) return;
+    var tj = c.tipo === 'Tarjeta de crédito';
+    CM = { cuenta: n, f: f || (tj ? (c.diaCorte ? 'corte' : 'mes') : (c.fechaSaldo ? 'saldo' : 'mes')), desde: null, hasta: null };
+    ir('ctamov');
+  }
+  function cmFiltro(f) { if (f === 'rango') return formRango('cta'); CM.f = f; pintar(); }
+  function rangoCM(c) {
+    var dia = function (d) { return d ? new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1) : null; };
+    if (CM.f === 'corte') return [dia(C.ultimoCorte(c, hoy)), null];
+    if (CM.f === 'saldo') { var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null; return [fs && !isNaN(fs) ? dia(fs) : null, null]; }
+    if (CM.f === 'rango') return [CM.desde, CM.hasta];
+    if (CM.f === 'todo') return [null, null];
+    return C.rangoPeriodo(CM.f, hoy);
+  }
+  function textoRango(a, b) {
+    if (!a) return '';
+    var fin = b ? new Date(b.getTime() - 86400000) : null, f = function (d) { return d.getDate() + ' ' + MESES_C[d.getMonth()]; };
+    return !fin || fin.toDateString() === a.toDateString() ? f(a) : f(a) + ' → ' + f(fin);
+  }
+  function pCtaMov() {
+    var c = cuentaPorNombre(CM.cuenta);
+    if (!c) { $('p-ctamov').innerHTML = cabSimple('Movimientos') + '<div class="caja vacio">No encontré esa cuenta.</div>'; return; }
+    var tj = c.tipo === 'Tarjeta de crédito', o = ORIG();
+    var items = tj ? D.movimientos.filter(function (m) { return m.cuenta === c.nombre && m.fecha; }).map(function (m) {
+      var sale = m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero';
+      return { fecha: m.fecha, mov: m, moneda: m.moneda === 'USD' ? 'USD' : 'CRC', monto: (sale ? -1 : 1) * m.monto, grupo: sale ? 'sale' : 'entra' };
+    }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); }) : C.movsCuenta(D, c, o);
+    var r = rangoCM(c);
+    var lista = items.filter(function (x) { var f = new Date(x.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]); });
+    var sum = { e: { CRC: 0, USD: 0 }, s: { CRC: 0, USD: 0 } };
+    lista.forEach(function (x) { sum[x.monto >= 0 ? 'e' : 's'][x.moneda] += Math.abs(x.monto); });
+    var h = cabSimple('Movimientos', esc(c.nombre));
+    var hoyV = tj ? C.deudaTarjeta(D, c) : C.saldoCuenta(D, c, o), mon = c.moneda === 'USD' && !tj ? 'USD' : 'CRC';
+    var col = function (t, v, cls) { return '<div><span>' + t + '</span><b class="' + (cls || '') + '">' + v + '</b></div>'; };
+    h += '<div class="resumen-mov">' + (tj ? col('Compras', dosMon(sum.s)) + col('Pagos', dosMon(sum.e), 'verde-pos') + col('Deuda hoy', dosMon(hoyV))
+      : col('Entró', dosMon(sum.e, mon), 'verde-pos') + col('Salió', dosMon(sum.s, mon), 'rojo') + col(hoyV.vivo ? 'Saldo hoy' : 'Saldo', hoyV.vivo ? dosMon(hoyV, mon) : '—')) + '</div>';
+    var chips = (tj ? (c.diaCorte ? [['corte', 'Desde el corte']] : []) : (c.fechaSaldo ? [['saldo', 'Desde el saldo']] : []))
+      .concat([['mes', 'Este mes'], ['pasado', 'Mes pasado'], ['todo', 'Todo'], ['rango', CM.f === 'rango' && CM.desde ? '📅 ' + textoRango(CM.desde, CM.hasta) : '📅 Rango…']]);
+    h += '<div class="chips desliza">' + chips.map(function (x) { return '<button class="chip' + (CM.f === x[0] ? ' on' : '') + '" onclick="App.cmFiltro(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>';
+    if (!lista.length) h += '<div class="caja vacio">No hay movimientos en ese período.</div>';
+    else {
+      var meses = [], por = {};
+      lista.forEach(function (x) { var d = new Date(x.fecha), k = d.getFullYear() + '-' + d.getMonth(); if (!por[k]) { por[k] = { d: d, l: [], t: { CRC: 0, USD: 0 } }; meses.push(k); } por[k].l.push(x); por[k].t[x.moneda] += x.monto; });
+      h += meses.map(function (k) {
+        var g = por[k], t = [Math.abs(g.t.CRC) > 0.004 ? (g.t.CRC > 0 ? '+' : '−') + txt(Math.abs(g.t.CRC), 'CRC') : '', Math.abs(g.t.USD) > 0.004 ? (g.t.USD > 0 ? '+' : '−') + txt(Math.abs(g.t.USD), 'USD') : ''].filter(String).join(' · ');
+        return '<div class="dia"><span>' + MESES[g.d.getMonth()].toUpperCase() + (g.d.getFullYear() !== hoy.getFullYear() ? ' ' + g.d.getFullYear() : '') + '</span><span class="m">' + (oculto() ? '' : t) + '</span></div>' +
+          '<div class="caja sinpad">' + g.l.map(function (x) { return filaBanco(x, tj); }).join('') + '</div>';
+      }).join('');
+    }
+    h += '<div class="suave chico" style="text-align:center">' + lista.length + ' movimiento' + (lista.length === 1 ? '' : 's') + ' · solo ' + (tj ? 'esta tarjeta' : 'esta cuenta') + ' · tocá uno para abrirlo</div>';
+    $('p-ctamov').innerHTML = h;
+  }
+  function filaBanco(x, tj) {
+    var m = x.mov, entra = x.monto >= 0, d = new Date(x.fecha);
+    var nombre = m ? (nombreBonito(m.comercio) || m.tipo) : 'Cuota del préstamo';
+    var det = d.getDate() + ' ' + MESES_C[d.getMonth()] + (m && hora(m.fecha) ? ' · ' + hora(m.fecha) : '');
+    if (m && !tj && (m.tipo === 'Pago de tarjeta' || m.tipo === 'Inversión' || m.tipo === 'Retiro de fondo')) det += ' · ' + esc(m.tipo === 'Pago de tarjeta' ? 'Pago de ' + etiquetaCuenta(m.cuenta) : m.tipo);
+    else if (m && m.tipo === 'Gasto' && m.categoria) det += ' · ' + esc(m.categoria);
+    var et = m && m.tipo === 'Gasto' ? etiquetaSobre(m) : '';
+    return '<button class="item fb" onclick="' + (m ? 'App.formMovimiento(' + m.fila + ')' : 'App.ir(\'prestamo\')') + '"><span class="punto ' + (entra ? 'v' : 'r') + '"></span>' +
+      '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombre) + '</span><span class="det" style="display:block">' + det + (et ? ' ' + et : '') + '</span></span>' +
+      '<span class="monto"><b class="' + (entra ? 'verde-pos' : '') + '">' + (entra ? '+' : '−') + din(Math.abs(x.monto), x.moneda) + '</b></span></button>';
+  }
+
+  // ---- calendario de rango (Movimientos y cuentas)
+  var RG = null;
+  function formRango(destino) {
+    var a = destino === 'cta' ? CM.desde : filtro.desde, b = destino === 'cta' ? CM.hasta : filtro.hasta;
+    RG = { dest: destino, a: a, b: b ? new Date(b.getTime() - 86400000) : null, ver: new Date((a || hoy).getFullYear(), (a || hoy).getMonth(), 1) };
+    pintarRango();
+  }
+  function pintarRango() {
+    var v = RG.ver, y = v.getFullYear(), mo = v.getMonth(), dias = new Date(y, mo + 1, 0).getDate(), off = (new Date(y, mo, 1).getDay() + 6) % 7;
+    var cel = ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(function (x) { return '<span class="cal-h">' + x + '</span>'; }).join('');
+    for (var i = 0; i < off; i++) cel += '<span></span>';
+    var hoy0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    for (var dd = 1; dd <= dias; dd++) {
+      var f = new Date(y, mo, dd), t = f.getTime();
+      var cls = (RG.a && t === RG.a.getTime()) || (RG.b && t === RG.b.getTime()) ? ' on' : RG.a && RG.b && t > RG.a.getTime() && t < RG.b.getTime() ? ' entre' : '';
+      cel += '<button class="cal-d' + cls + (t === hoy0.getTime() ? ' hoy' : '') + '" onclick="App.rgDia(' + y + ',' + mo + ',' + dd + ')">' + dd + '</button>';
+    }
+    var tx = RG.a ? textoRango(RG.a, RG.b ? new Date(RG.b.getTime() + 86400000) : null) + (RG.b ? '' : ' · tocá el último día') : 'Tocá el primer día';
+    abrir('<h2>📅 Rango de fechas</h2><div class="cal-nav"><button class="btn-icono" aria-label="Mes anterior" onclick="App.rgMes(-1)">' + ico('atras') + '</button><b>' + nombreMes(v) + '</b>' +
+      '<button class="btn-icono" aria-label="Mes siguiente" onclick="App.rgMes(1)">' + ico('adelante') + '</button></div><div class="cal">' + cel + '</div>' +
+      '<div class="fila" style="margin-top:10px"><span class="fuerte">' + tx + '</span></div>' +
+      '<div class="acciones"><button class="btn" onclick="App.rgAplicar()"' + (RG.a ? '' : ' disabled') + '>Aplicar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function rgMes(d) { RG.ver = new Date(RG.ver.getFullYear(), RG.ver.getMonth() + d, 1); pintarRango(); }
+  function rgDia(y, mo, d) {
+    var f = new Date(y, mo, d);
+    if (!RG.a || RG.b) { RG.a = f; RG.b = null; }
+    else if (f < RG.a) { RG.b = RG.a; RG.a = f; }
+    else RG.b = f;
+    pintarRango();
+  }
+  function rgAplicar() {
+    if (!RG || !RG.a) return;
+    var b = RG.b || RG.a, hasta = new Date(b.getFullYear(), b.getMonth(), b.getDate() + 1);
+    if (RG.dest === 'cta') { CM.f = 'rango'; CM.desde = RG.a; CM.hasta = hasta; }
+    else { filtro.per = 'rango'; filtro.desde = RG.a; filtro.hasta = hasta; }
+    cerrar(); pintar();
+  }
+  function movPer(p) { if (p === 'rango') return formRango('mov'); filtro.per = p; filtro.desde = filtro.hasta = null; pintar(); }
+
+  // ---- pantalla de cada sobre
+  var SOB = { nombre: '', f: 'mes', vista: [] };
+  function verSobre(i) { var s = SB().lista[i]; if (!s) return; SOB = { nombre: s.nombre, f: 'mes', vista: [] }; ir('sobre'); }
+  function sobreFiltro(f) { SOB.f = f; pintar(); }
+  function descSobre(e) {
+    var m = e.movimiento ? movPorFila(e.movimiento) : null, mt;
+    if (e.tipo === 'Mover') { mt = /^De (.+) a (.+)$/.exec(e.nota || ''); return mt ? (e.monto >= 0 ? 'Movido desde ' + nomSobre(mt[1]) : 'Movido a ' + nomSobre(mt[2])) : (e.nota || 'Movido entre sobres'); }
+    if (e.tipo === 'Limpiar') return e.monto >= 0 ? 'Limpieza: llegó lo que sobró' : 'Limpieza: lo que sobró se fue';
+    if (e.tipo === 'Préstamo') return 'Cuota del préstamo';
+    if (e.tipo === 'Cargar' || e.tipo === 'Descargar') return e.nota || (e.monto >= 0 ? 'Desde lo libre de la cuenta' : 'A lo libre de la cuenta');
+    if (m) {
+      if (m.tipo === 'Ingreso') return (e.tipo === 'Reparto' ? (C.esSalario(m) ? 'Reparto del salario' : 'Reparto · ' + (nombreBonito(m.comercio) || 'ingreso')) : (nombreBonito(m.comercio) || 'Ingreso'));
+      if (m.tipo === 'Pago de tarjeta') return 'Pago de ' + etiquetaCuenta(m.cuenta);
+      if (m.tipo === 'Inversión') return 'Aporte a fondos';
+      if (m.tipo === 'Retiro de fondo') return 'Retiro de fondo';
+      return 'Compra · ' + (nombreBonito(m.comercio) || m.categoria || 'gasto');
+    }
+    return e.nota || e.tipo || 'Movimiento';
+  }
+  function pSobre() {
+    var hs = C.historialSobre(D, SOB.nombre), s = hs.sobre;
+    if (!s || sinServidorSobres()) { $('p-sobre').innerHTML = cabSimple('Sobre', 'Sobres') + '<div class="caja vacio">Ese sobre ya no existe.</div>'; return; }
+    var mon = s.moneda === 'USD' ? 'USD' : 'CRC', neg = hs.saldo < -0.005;
+    var h = cabSimple(esc(nomSobre(s.nombre)), 'Sobres');
+    var meta = s.meta || 0, pm = meta ? hs.saldo / meta : null;
+    h += '<div class="sb-card"><div class="sb-top"><span class="sb-ic">' + iconoSobre(s.nombre) + '</span><div class="sb-tt"><b>' + esc(nomSobre(s.nombre)) + '</b><span>' + esc(s.tipo || 'Variable') +
+      (meta ? ' · meta ' + din(meta, mon) : '') + (s.asignado ? ' · ' + din(s.asignado, mon) + '/mes' : '') + '</span></div></div>' +
+      '<div class="sb-et">Saldo del sobre</div><div class="cifra-g' + (neg ? ' rojo' : '') + '">' + din(hs.saldo, mon) + '</div>' +
+      (meta ? barra(pm) + '<div class="sb-et">' + Math.max(0, Math.round(pm * 100)) + '% de la meta' + (pm < 1 ? ' · faltan ' + din(meta - hs.saldo, mon) : ' · ¡lograda!') + '</div>' : '') +
+      iconos([['📥', 'Cargar', 'App.formCargarSobre(1)', true], ['📤', 'Descargar', 'App.formCargarSobre(-1)'], ['🧾', 'Movimientos', 'App.irListaSobre()'], ['✏️', 'Editar', 'App.editarSobre()']]) + '</div>';
+    // período
+    var r = SOB.f === 'mes' ? C.rangoPeriodo('mes', hoy) : SOB.f === 'pasado' ? C.rangoPeriodo('pasado', hoy) : [null, null];
+    var en = hs.lista.filter(function (e) { var f = new Date(e.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]) && (SOB.f !== 'cargas' || e.monto >= 0) && (SOB.f !== 'descargas' || e.monto < 0); });
+    var venia = hs.inicial; if (r[0]) hs.lista.forEach(function (e) { if (new Date(e.fecha) < r[0]) venia = e.despues; });
+    var entro = 0, salio = 0; en.forEach(function (e) { if (e.monto >= 0) entro += e.monto; else salio -= e.monto; });
+    var serie = C.saldosMensualesSobre(hs, hoy, 8), mx = Math.max.apply(null, serie.map(function (x) { return Math.abs(x.saldo); }).concat([1]));
+    h += '<div class="caja" style="gap:10px"><div class="tres-c"><div><span>' + (r[0] ? 'Venía (' + r[0].getDate() + ' ' + MESES_C[r[0].getMonth()] + ')' : 'Inicial') + '</span><b>' + din(venia, mon) + '</b></div>' +
+      '<div><span>Entró</span><b class="verde-pos">+' + din(entro, mon) + '</b></div><div><span>Salió</span><b class="rojo">−' + din(salio, mon) + '</b></div></div>' +
+      '<div class="mini-graf" aria-label="Saldo al final de cada mes">' + serie.map(function (x, i) {
+        return '<i class="' + (i === serie.length - 1 ? 'ult' : '') + (x.saldo < 0 ? ' neg' : '') + '" style="height:' + Math.max(4, Math.abs(x.saldo) / mx * 100).toFixed(0) + '%" title="' + esc(nombreMes(x.mes)) + '"></i>';
+      }).join('') + '</div><div class="fila suave" style="font-size:11.5px"><span>' + MESES_C[serie[0].mes.getMonth()] + '</span><span>saldo al final de cada mes</span><span>' + MESES_C[serie[serie.length - 1].mes.getMonth()] + '</span></div></div>';
+    h += '<div class="chips desliza" id="sb-filtros">' + [['mes', 'Este mes'], ['pasado', 'Mes pasado'], ['todo', 'Todo'], ['cargas', 'Cargas'], ['descargas', 'Descargas']].map(function (x) {
+      return '<button class="chip' + (SOB.f === x[0] ? ' on' : '') + '" onclick="App.sobreFiltro(\'' + x[0] + '\')">' + x[1] + '</button>';
+    }).join('') + '</div>';
+    SOB.vista = en.slice().reverse().slice(0, 200);
+    if (!SOB.vista.length) h += '<div class="caja vacio">Sin movimientos en este período.</div>';
+    else {
+      var meses = [], por = {};
+      SOB.vista.forEach(function (e, i) { var d = new Date(e.fecha), k = d.getFullYear() + '-' + d.getMonth(); if (!por[k]) { por[k] = { d: d, l: [], t: 0 }; meses.push(k); } por[k].l.push([e, i]); por[k].t += e.monto; });
+      h += meses.map(function (k) {
+        var g = por[k];
+        return '<div class="dia"><span>' + MESES[g.d.getMonth()].toUpperCase() + (g.d.getFullYear() !== hoy.getFullYear() ? ' ' + g.d.getFullYear() : '') + '</span><span class="m">' + (oculto() ? '' : (g.t >= 0 ? '+' : '−') + txt(Math.abs(g.t), mon)) + '</span></div>' +
+          '<div class="caja sinpad">' + g.l.map(function (p) {
+            var e = p[0], carga = e.monto >= 0, d = new Date(e.fecha);
+            return '<button class="item fb" onclick="App.verSobreMov(' + p[1] + ')"><span class="punto ' + (carga ? 'v' : 'r') + '"></span><span class="cuerpo"><span class="sbm-t ' + (carga ? 'verde-pos' : 'rojo') + '">' + (carga ? 'Carga' : 'Descarga') + '</span>' +
+              '<span class="nombre" style="display:block">' + esc(descSobre(e)) + '</span><span class="det" style="display:block">Saldo final ' + din(e.despues, mon) + '</span></span>' +
+              '<span class="monto"><b class="' + (carga ? 'verde-pos' : 'rojo') + '" style="display:block">' + (carga ? '+' : '−') + din(Math.abs(e.monto), mon) + '</b><span class="origen">' + d.getDate() + ' ' + MESES_C[d.getMonth()] + (hora(e.fecha) ? ' · ' + hora(e.fecha) : '') + '</span></span></button>';
+          }).join('') + '</div>';
+      }).join('');
+    }
+    $('p-sobre').innerHTML = h;
+  }
+  function irListaSobre() { if (SOB.f !== 'todo') { SOB.f = 'todo'; pintar(); } var e = $('sb-filtros'); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  function editarSobre() { var i = -1; SB().lista.forEach(function (s, k) { if (s.nombre === SOB.nombre) i = k; }); if (i >= 0) formSobre(i, true); }
+  function verSobreMov(k) {
+    var e = SOB.vista[k]; if (!e) return;
+    var mon = (sobreInfo(SOB.nombre) || {}).moneda === 'USD' ? 'USD' : 'CRC', carga = e.monto >= 0, m = e.movimiento ? movPorFila(e.movimiento) : null;
+    var otros = e.grupo ? (D.sobresMov || []).filter(function (x) { return x.grupo === e.grupo && x.sobre && x.sobre !== SOB.nombre; }).length : 0;
+    var d = new Date(e.fecha);
+    var linea = function (a, b) { return '<div class="fila"><span class="suave">' + a + '</span><b style="text-align:right">' + b + '</b></div>'; };
+    abrir('<div class="sbm-t ' + (carga ? 'verde-pos' : 'rojo') + '" style="font-size:12px;letter-spacing:.6px">' + (carga ? 'CARGA' : 'DESCARGA') + '</div><h2>' + esc(descSobre(e)) + '</h2>' +
+      '<div class="cifra-g ' + (carga ? 'verde-pos' : 'rojo') + '">' + (carga ? '+' : '−') + din(Math.abs(e.monto), mon) + '</div>' +
+      '<div class="caja" style="gap:8px;margin-top:10px;background:var(--fondo)">' + linea('Fecha', fechaCorta(e.fecha) + (hora(e.fecha) ? ' · ' + hora(e.fecha) : '')) +
+      linea('Sobre', iconoSobre(SOB.nombre) + ' ' + esc(nomSobre(SOB.nombre))) + linea('Saldo antes', din(e.antes, mon)) + linea('Saldo después', din(e.despues, mon)) +
+      (m ? linea('Movimiento', esc(nombreBonito(m.comercio) || m.tipo) + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + ' · ' + din(m.monto, m.moneda)) : '') +
+      (otros ? linea('Junto con', otros + ' sobre' + (otros === 1 ? '' : 's') + ' más (mismo ' + (e.tipo === 'Mover' ? 'movimiento' : 'reparto') + ')') : '') +
+      (e.nota && !m ? linea('Nota', esc(e.nota)) : '') + '</div>' +
+      '<div class="acciones">' + (m ? '<button class="btn sec" onclick="App.cerrar();App.formMovimiento(' + m.fila + ')">Ver el movimiento</button>' : '') +
+      (e.grupo ? '<button class="btn sec peligro" id="sbm-desh" onclick="App.deshacerSobreMov(' + k + ')">Deshacer ' + (otros && e.tipo !== 'Mover' ? 'este reparto' : 'esto') + '</button>' : '') +
+      '<button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>' +
+      (e.grupo ? '' : '<div class="suave chico" style="margin-top:8px">Esto sale solo (préstamo o regla del correo); para cambiarlo, abrí el movimiento.</div>'));
+  }
+  function deshacerSobreMov(k) {
+    var e = SOB.vista[k], b = $('sbm-desh'); if (!e || !e.grupo) return;
+    if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Tocá otra vez'; return; }
+    encolar('eliminarGrupoSobres', [e.grupo], 'Deshacer en ' + nomSobre(SOB.nombre) + ': ' + descSobre(e));
+    hecho('Deshecho.' + (e.movimiento ? ' Ese movimiento quedó por asignar.' : ''));
+  }
+  // Cargar (dir 1) / Descargar (dir -1)
+  var CG = null;
+  function formCargarSobre(dir, op) {
+    var s = sobreInfo(SOB.nombre); if (!s) return;
+    var montoPrev = $('cg-monto') && CG ? val('cg-monto') : '';
+    CG = { dir: dir, op: op || (CG && CG.dir === dir ? CG.op : 'sobre') };
+    var mon = s.moneda === 'USD' ? 'USD' : 'CRC', sb = SB();
+    var pend = sb.pendientes.filter(function (p) { return (p.mov.moneda === 'USD' ? 'USD' : 'CRC') === mon && (dir > 0 ? p.sentido === 'entra' : p.sentido === 'sale' && p.mov.tipo !== 'Pago de tarjeta'); });
+    var o = ORIG(), cp = cuentaPorNombre(o.principal), libre = null;
+    if (cp && mon === 'CRC') { var sc = C.saldoCuenta(D, cp, o); if (sc.vivo) { var sbH = C.saldosSobres(D, hoy, hoy); libre = sc.CRC - sbH.total.CRC - (sbH.reservadoTotal || 0); } }
+    var otrosS = sb.lista.filter(function (x) { return x.nombre !== s.nombre && x.moneda === s.moneda; });
+    var op1 = function (k, tit, det, extra, deshab) {
+      return '<div class="op-g' + (CG.op === k ? ' on' : '') + (deshab ? ' apagado' : '') + '" role="button" tabindex="0" onclick="' + (deshab ? '' : 'App.formCargarSobre(' + dir + ',\'' + k + '\')') + '"><b>' + tit + '</b><span>' + det + '</span>' + (CG.op === k && extra ? '<div class="op-x" onclick="event.stopPropagation()">' + extra + '</div>' : '') + '</div>';
+    };
+    var selS = '<select id="cg-sobre">' + otrosS.map(function (x) { return '<option value="' + esc(x.nombre) + '">' + esc(nomSobre(x.nombre)) + ' · ' + txt(x.saldo, x.moneda) + '</option>'; }).join('') + '</select>';
+    var selM = '<select id="cg-mov" onchange="App.cgMov()">' + pend.map(function (p) { return '<option value="' + p.mov.fila + '">' + esc((nombreBonito(p.mov.comercio) || p.mov.tipo) + ' · ' + fechaCorta(p.mov.fecha).replace(/ \d{4}$/, '') + ' · falta ' + txt(p.falta, mon)) + '</option>'; }).join('') + '</select>';
+    var h = '<h2>' + (dir > 0 ? '📥 Cargar' : '📤 Descargar') + ' «' + esc(nomSobre(s.nombre)) + '»</h2><div class="suave">' + (dir > 0 ? '¿De dónde viene la plata?' : '¿A dónde va la plata?') + '</div>' +
+      op1('sobre', dir > 0 ? '⇄ Desde otro sobre' : '⇄ A otro sobre', dir > 0 ? 'Mover de un sobre a este' : 'Mover de este sobre a otro', selS, !otrosS.length) +
+      (dir > 0 ? op1('mov', '💰 De un ingreso por asignar', pend.length ? pend.length + ' por asignar · SINPE recibido, salario…' : 'No hay ingresos por asignar', selM, !pend.length)
+        : op1('mov', '🧾 A un gasto sin sobre', pend.length ? pend.length + ' gasto' + (pend.length === 1 ? '' : 's') + ' sin sobre' : 'No hay gastos sin sobre', selM, !pend.length)) +
+      op1('libre', dir > 0 ? '🪙 De lo libre en la cuenta' : '🪙 A lo libre en la cuenta', dir > 0 ? 'Plata de la cuenta que no está en ningún sobre' + (libre !== null ? ' (' + txt(libre, 'CRC') + ')' : '') : 'Sale del sobre y queda libre en la cuenta', '') +
+      '<label class="campo"><span>Monto</span><input id="cg-monto" class="monto" data-dinero inputmode="decimal" placeholder="0" value="' + esc(montoPrev) + '" oninput="App.cgBoton()"></label>' +
+      '<div class="acciones"><button class="btn" id="cg-ok" onclick="App.guardarCargar()">' + (dir > 0 ? 'Cargar' : 'Descargar') + '</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>';
+    abrir(h);
+    if (CG.op === 'mov' && !montoPrev) cgMov(); else cgBoton();
+  }
+  function cgPend() { var f = Number(val('cg-mov')); return SB().pendientes.filter(function (p) { return p.mov.fila === f; })[0]; }
+  function cgMov() { var p = cgPend(); if (p && $('cg-monto')) { $('cg-monto').value = String(Math.round(p.falta * 100) / 100).replace('.', ','); } cgBoton(); }
+  function cgBoton() { var b = $('cg-ok'), v = C.leerNumero(val('cg-monto')); if (b && CG) b.textContent = (CG.dir > 0 ? 'Cargar ' : 'Descargar ') + (v ? txt(v, (sobreInfo(SOB.nombre) || {}).moneda || 'CRC') : ''); }
+  function guardarCargar() {
+    var s = sobreInfo(SOB.nombre), dir = CG.dir, monto = C.leerNumero(val('cg-monto'));
+    if (!monto || monto <= 0) return toast('Escribí el monto.');
+    var g = grupoNuevo(), f = new Date().toISOString(), yo = s.nombre, lista, desc, mon = s.moneda;
+    if (CG.op === 'sobre') {
+      var otro = val('cg-sobre'); if (!otro || otro === yo) return toast('Elegí otro sobre.');
+      var de = dir > 0 ? otro : yo, a = dir > 0 ? yo : otro, nota = 'De ' + de + ' a ' + a;
+      lista = [{ fecha: f, sobre: de, monto: -monto, tipo: 'Mover', grupo: g, nota: nota }, { fecha: f, sobre: a, monto: monto, tipo: 'Mover', grupo: g, nota: nota }];
+      desc = 'Mover ' + de + ' → ' + a + ' · ' + txt(monto, mon);
+    } else if (CG.op === 'mov') {
+      var p = cgPend(); if (!p) return toast('Elegí el movimiento.');
+      if (monto > p.falta + 0.005) return toast('A ese movimiento solo le faltan ' + txt(p.falta, mon) + '.');
+      lista = [{ fecha: fechaSobre(p.mov), sobre: yo, monto: dir * monto, tipo: dir > 0 ? 'Ingreso' : p.tarjeta ? 'Compra con tarjeta' : 'Gasto', movimiento: p.mov.fila, grupo: g, nota: p.mov.comercio || '' }];
+      desc = 'Asignar ' + (p.mov.comercio || p.mov.tipo) + ' → ' + yo + ' · ' + txt(monto, mon);
+    } else {
+      lista = [{ fecha: f, sobre: yo, monto: dir * monto, tipo: dir > 0 ? 'Cargar' : 'Descargar', grupo: g, nota: dir > 0 ? 'Desde lo libre de la cuenta' : 'A lo libre de la cuenta' }];
+      desc = (dir > 0 ? 'Cargar ' : 'Descargar ') + yo + ' · ' + txt(monto, mon);
+    }
+    encolar('guardarSobresMov', [lista], desc);
+    hecho('✅ ' + (dir > 0 ? 'Cargado ' : 'Descargado ') + txt(monto, mon) + (dir > 0 ? ' a ' : ' de ') + nomSobre(yo));
+  }
+
   return {
+    verSobre: verSobre, sobreFiltro: sobreFiltro, irListaSobre: irListaSobre, editarSobre: editarSobre, verSobreMov: verSobreMov, deshacerSobreMov: deshacerSobreMov, formCargarSobre: formCargarSobre, cgMov: cgMov, cgBoton: cgBoton, guardarCargar: guardarCargar,
+    formCuadrar: formCuadrar, cuadrarVista: cuadrarVista, guardarCuadrar: guardarCuadrar, formOrigenes: formOrigenes, guardarOrigenes: guardarOrigenes, verCuentaMov: verCuentaMov, cmFiltro: cmFiltro, rgMes: rgMes, rgDia: rgDia, rgAplicar: rgAplicar, movPer: movPer,
     iniciar: iniciar, ir: ir, cambiarMes: cambiarMes, cerrar: cerrar,
     buscar: function (v) { filtro.q = v; pintarLista(); },
     chip: function (c) { filtro.chip = c; pintar(); },

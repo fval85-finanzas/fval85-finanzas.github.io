@@ -1,8 +1,8 @@
 {
- "web": "2.5.4",
- "servidor": "2.5.0",
- "sha256": "ec2f873030b3b72aed8fc164d53dbcca3863312ed8780e86b99bd34e934c436e",
- "novedades": "Días de anticipo del préstamo redondeados (7 días antes).",
+ "web": "2.5.5",
+ "servidor": "2.5.5",
+ "sha256": "e544536460fee51ccee7cf56d49112f9f09ad03520a517520ea9f67336b6443d",
+ "novedades": "Cada sobre tiene su pantalla: Cargar, Descargar, movimientos tipo banco con saldo final y Deshacer.\nCuenta de ahorros con saldo vivo, \"¿cuánto está en sobres?\" y Cuadrar con el banco.\nTarjeta abierta con íconos y sus propios movimientos (desde el corte, mes, rango).\nMovimientos: buscar por Hoy, Ayer, semana, mes, 3 meses o rango con calendario; el buscador entiende meses, fechas y montos.\nNombres completos con el teléfono cerrado; la nota de la hoja Cuentas ya no sale como cuenta.\nServidor: si una fila nueva del préstamo queda sin fórmula o con #REF!, se copia sola de la fila de arriba.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
