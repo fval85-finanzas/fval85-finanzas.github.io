@@ -1,8 +1,8 @@
 {
- "web": "2.5.7",
- "servidor": "2.5.7",
- "sha256": "9a6c767ceb65c50243ba9f16ed3f6b602b0582c82c9260d3e46e7d128b1a9906",
- "novedades": "\"¿De dónde vino esta plata?\": cuando entra plata a una cuenta y la app no sabe de dónde, te pregunta en Por asignar (de otra cuenta tuya y de qué sobre, me pagaron, o de una cuenta fuera de la app) y hace el resto sola.\nSi elegís el sobre, el pago de la tarjeta por ese monto se descuenta de ese sobre solo.\nCada tarjeta se paga desde la cuenta de su mismo banco (se cambia en Ajustes → Cuentas).\nLos nombres de cuenta ya no dependen de mayúsculas ni tildes.",
+ "web": "2.5.8",
+ "servidor": "2.5.8",
+ "sha256": "debd2c28696ec895a9da69332a335da359064485e4cae0fd2baa72fb57dbd718",
+ "novedades": "Lector de correos: el \"Pago de Servicio\" de Davibank se anota completo (nombre del servicio, fecha y hora del correo y la tarjeta Davibank) aunque el correo llegue en otro formato.\nSi un correo trae una fecha futura (como el vencimiento), se usa la fecha del correo.\nActualizaciones: si tu servidor se actualiza a mano, la app te lo dice directo y te deja actualizar la app igual.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

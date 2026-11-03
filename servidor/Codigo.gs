@@ -207,8 +207,14 @@ function parsearCorreo(texto, fechaCorreo, banco) {
   var limpio = String(texto).replace(/\r/g, '').replace(/ /g, ' ');
   var monto = extraerMonto(limpio);
   if (!monto) return null;
+  // v2.5.8: si el texto trae una fecha futura (vencimiento) o un día sin hora igual al del correo, vale la fecha del correo
+  var f = extraerFecha(limpio, fechaCorreo);
+  if (fechaCorreo) {
+    var fc = new Date(fechaCorreo);
+    if (f - fc > 86400000 || (f.getUTCHours() === 6 && f.getUTCMinutes() === 0 && Math.abs(f - fc) < 86400000)) f = fc;
+  }
   return {
-    fecha: extraerFecha(limpio, fechaCorreo).toISOString(),
+    fecha: f.toISOString(),
     comercio: extraerComercio(limpio),
     lugar: extraerLugar(limpio),
     monto: monto.monto,
@@ -373,6 +379,14 @@ function parsearDavibankServicio(texto, fechaCorreo) {
   var t = String(texto).replace(/&nbsp;?/g, ' ').replace(/\r/g, '');
   if (!/pago de servicios/i.test(t)) return null;
   var m = t.match(/caracter[ií]sticas:\s*\n?\s*([^\n]+?)\s*\n[\s\S]*?(\d{4,})\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(₡|¢|\$|USD|CRC)\s*([\d.,]+)/i);
+  if (!m) {   // v2.5.8: el mismo correo cuando llega todo en una línea o con la tabla en otro orden: cada dato por separado
+    var u = t.replace(/\s+/g, ' '), ini = u.search(/caracter[ií]sticas:/i);
+    if (ini >= 0) {
+      var resto = u.slice(ini).replace(/^caracter[ií]sticas:\s*/i, '');
+      var nom = resto.match(/^(.+?)\s+Nombre\b/i), id = resto.match(/\b(\d{5,})\b/), fv = resto.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/), mo = resto.match(/(₡|¢|\$|USD|CRC)\s*([\d.,]*\d)/i);
+      if (nom && id && mo) m = [null, nom[1], id[1], fv ? fv[1] : '', mo[1], mo[2]];
+    }
+  }
   if (!m) return null;
   var servicio = m[1].replace(/\s+/g, ' ').trim();
   var monto = convertirNumero(m[5]), moneda = identificarMoneda(m[4]) || 'CRC';
@@ -1944,7 +1958,7 @@ function desactivarAutomatico() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.5.7';
+var VERSION_APP = '2.5.8';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 

@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.7';
+  var VERSION_WEB = '2.5.8';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -4031,14 +4031,22 @@ var App = (function () {
     }).catch(function (e) { msgAc('⚠️ ' + esc(e.message || e)); });
   }
   function servidorAuto() {
+    if (guardado('mf-srv-manual', '') === '1') { pasoAc(1, 'hecho'); pasoAc(2, 'mal'); servidorGuiado('MANUAL'); return Promise.resolve('guiado'); }   // v2.5.8: este servidor se actualiza a mano
     pasoAc(1, 'act');
     var base = location.href.split(/[?#]/)[0].replace(/[^/]*$/, '');
     var fijar = AJ.actualizacion && AJ.actualizacion.base ? Promise.resolve() : llamar('fijarUrlActualizacion', [base]);
     return fijar.then(function () { pasoAc(1, 'hecho'); pasoAc(2, 'act'); msgAc('Instalando el servidor ' + esc(verNueva.servidor) + '… (puede tardar un minuto)'); return llamar('actualizarServidor'); })
       .then(function (r) { pasoAc(2, 'hecho'); AJ.version = r.version; if (AJ.actualizacion) AJ.actualizacion.anterior = r.anterior; return 'ok'; })
-      .catch(function (e) { var m = e.message || String(e); pasoAc(2, 'mal'); servidorGuiado(m); return 'guiado'; });
+      .catch(function (e) { var m = e.message || String(e); if (/API_DESACTIVADA/.test(m)) { guardar('mf-srv-manual', '1'); m = 'MANUAL'; } pasoAc(2, 'mal'); servidorGuiado(m); return 'guiado'; });
   }
   function servidorGuiado(motivo) {
+    if (motivo === 'MANUAL') {
+      msgAc('Hay servidor nuevo (<b>' + esc(verNueva.servidor) + '</b>). Tu servidor se actualiza a mano, desde la PC:');
+      $('ac-extra').innerHTML = '<ol class="suave chico" style="margin:8px 0 0 18px;line-height:1.6"><li>Tocá “Copiar código nuevo” (o usá el Codigo.gs que te mandaron).</li><li>En Apps Script: <b>Código</b> → borrar todo → pegar → Guardar.</li><li>Implementar → Gestionar implementaciones → ✏ → Versión: <b>Nueva</b> → Implementar.</li></ol>' +
+        '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.copiarCodigo(this)">📋 Copiar código nuevo</button><a class="btn sec" href="https://script.google.com/home" target="_blank" rel="noopener">Abrir Apps Script ↗</a></div>' +
+        (cmpVer(verNueva.web, VERSION_WEB) > 0 ? '<button class="btn sec" style="margin-top:8px;width:100%" onclick="App.actualizarApp()">Actualizar la app ahora (' + esc(verNueva.web) + ')</button>' : '');
+      return;
+    }
     var porque = /API_DESACTIVADA/.test(motivo) ? 'Falta activar la <b>API de Google Apps Script</b> (una sola vez).' : /PERMISO_FALTA|UrlFetchApp|external_request|autorizaci/i.test(motivo) ? 'Falta darle a Google el permiso para conectarse a internet (una sola vez): en Apps Script elegí la función <b>autorizarActualizaciones</b>, tocá ▶ Ejecutar y en la ventana de Google marcá <b>Seleccionar todo</b> → Continuar.' : 'No se pudo instalar solo: ' + esc(motivo);
     msgAc(porque + ' Mientras tanto, actualizalo a mano:');
     $('ac-extra').innerHTML = '<ol class="suave chico" style="margin:8px 0 0 18px;line-height:1.6">' +
