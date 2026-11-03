@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.5';
+  var VERSION_WEB = '2.5.6';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -2495,7 +2495,7 @@ var App = (function () {
     var interesesTot = fd.lista.reduce(function (a, f) { return a + (f.intereses || 0); }, 0);
     h += '<div class="hero"><div style="display:flex;align-items:center;gap:6px"><span class="et" style="font-size:13px;font-weight:600">Total invertido</span>' + botonOjo() + '</div>' +
       '<div class="grande">' + din(fd.total.CRC, 'CRC') + '</div>' + (fd.total.USD ? '<div class="medio">' + din(fd.total.USD, 'USD') + '</div>' : '') +
-      (interesesTot ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Intereses (últimos ajustes)</span><b class="verde">+' + din(interesesTot, 'CRC') + '</b></div>' : '') +
+      (interesesTot ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Intereses (últimos ajustes)</span><b class="' + (interesesTot < 0 ? 'rojo' : 'verde') + '">' + (interesesTot < 0 ? '−' : '+') + din(Math.abs(interesesTot), 'CRC') + '</b></div>' : '') +
       (sobreF ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Sobre Fondos (sin invertir)</span><b style="color:var(--acento)">' + din(sobreF.saldo, 'CRC') + '</b></div>' : '') + '</div>';
     if (fd.lista.length) h += '<button class="btn borde" onclick="App.elegirArchivo(\'pdf\')">📄 Cargar estado de cuenta (PDF)</button>';
     if (fd.pendientes.length) h += plegable('fo-pend', '📈 <b>' + fd.pendientes.length + '</b> movimiento' + (fd.pendientes.length === 1 ? '' : 's') + ' sin subcuenta', 'Asignar', fd.pendientes.map(itemFondoPend).join(''), 'alerta');
@@ -4024,11 +4024,11 @@ var App = (function () {
       .catch(function (e) { var m = e.message || String(e); pasoAc(2, 'mal'); servidorGuiado(m); return 'guiado'; });
   }
   function servidorGuiado(motivo) {
-    var porque = /API_DESACTIVADA/.test(motivo) ? 'Falta activar la <b>API de Google Apps Script</b> (una sola vez).' : /PERMISO_FALTA/.test(motivo) ? 'Falta el permiso nuevo: pegá también el <b>appsscript.json</b> de esta versión (una sola vez).' : 'No se pudo instalar solo: ' + esc(motivo);
+    var porque = /API_DESACTIVADA/.test(motivo) ? 'Falta activar la <b>API de Google Apps Script</b> (una sola vez).' : /PERMISO_FALTA|UrlFetchApp|external_request|autorizaci/i.test(motivo) ? 'Falta darle a Google el permiso para conectarse a internet (una sola vez): en Apps Script elegí la función <b>autorizarActualizaciones</b>, tocá ▶ Ejecutar y en la ventana de Google marcá <b>Seleccionar todo</b> → Continuar.' : 'No se pudo instalar solo: ' + esc(motivo);
     msgAc(porque + ' Mientras tanto, actualizalo a mano:');
     $('ac-extra').innerHTML = '<ol class="suave chico" style="margin:8px 0 0 18px;line-height:1.6">' +
       (/API_DESACTIVADA/.test(motivo) ? '<li>Abrí <a href="https://script.google.com/home/usersettings" target="_blank" rel="noopener" class="enlace">script.google.com/home/usersettings</a> y encendé “API de Google Apps Script”. Después tocá Buscar actualizaciones otra vez.</li>' : '') +
-      '<li>Tocá “Copiar código nuevo”.</li><li>Abrí Apps Script, borrá todo en <b>Código</b> y pegá.</li><li>Guardar → Implementar → Gestionar implementaciones → ✏ → Versión: <b>Nueva</b> → Implementar.</li><li>Volvé aquí: la app lo detecta sola.</li></ol>' +
+      '<li>Tocá “Copiar código nuevo”.</li><li>Abrí Apps Script, borrá todo en <b>Código</b> y pegá.</li><li>Guardar → Implementar → Gestionar implementaciones → ✏ → Versión: <b>Nueva</b> → Implementar.</li>' + (/PERMISO_FALTA|UrlFetchApp|external_request|autorizaci/i.test(motivo) ? '<li>Arriba, junto a ▶ Ejecutar, elegí <b>autorizarActualizaciones</b> → ▶ Ejecutar → en la ventana de Google marcá <b>Seleccionar todo</b> → Continuar. Así la próxima vez se instala solo.</li>' : '') + '<li>Volvé aquí: la app lo detecta sola.</li></ol>' +
       '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.copiarCodigo(this)">📋 Copiar código nuevo</button><a class="btn sec" href="https://script.google.com/home" target="_blank" rel="noopener">Abrir Apps Script ↗</a></div>';
   }
   function copiarCodigo(b) {
@@ -4674,6 +4674,7 @@ var App = (function () {
         linea('+ Entradas (' + sc.nEntra + ')' + (principal ? ' · salario, SINPE recibidos' : ''), '+' + dosMon(sc.entra, mon), 'verde-pos') +
         linea('− Salidas (' + sc.nSale + ') · gastos, SINPE enviados', '−' + dosMon(sc.sale, mon), 'rojo') +
         linea('− Pagos de tarjeta, préstamo y fondos (' + sc.nPagos + ')', '−' + dosMon(sc.pagos, mon)) +
+        (sc.nTransf ? linea('⇄ Entre tus cuentas (' + sc.nTransf + ')', (sc.transf.CRC + sc.transf.USD >= 0 ? '+' : '−') + dosMon({ CRC: Math.abs(sc.transf.CRC), USD: Math.abs(sc.transf.USD) }, mon), sc.transf.CRC + sc.transf.USD >= 0 ? 'verde-pos' : '') : '') +
         '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea('Saldo hoy', dosMon(sc, mon));
     } else h += '<div class="aviso-tasa" style="margin:0 0 4px">Tocá <b>↻ Cuadrar con el banco</b> y poné lo que dice el banco hoy: desde ahí la app suma lo que entra y resta lo que sale.</div>';
     if (principal && D.sobresDesde && mon === 'CRC') {
@@ -4802,9 +4803,9 @@ var App = (function () {
   }
   function filaBanco(x, tj) {
     var m = x.mov, entra = x.monto >= 0, d = new Date(x.fecha);
-    var nombre = m ? (nombreBonito(m.comercio) || m.tipo) : 'Cuota del préstamo';
+    var nombre = x.texto || (m ? (m.tipo === 'Pago de tarjeta' && !tj ? 'Pago de ' + etiquetaCuenta(m.cuenta) : nombreBonito(m.comercio) || m.tipo) : 'Cuota del préstamo');
     var det = d.getDate() + ' ' + MESES_C[d.getMonth()] + (m && hora(m.fecha) ? ' · ' + hora(m.fecha) : '');
-    if (m && !tj && (m.tipo === 'Pago de tarjeta' || m.tipo === 'Inversión' || m.tipo === 'Retiro de fondo')) det += ' · ' + esc(m.tipo === 'Pago de tarjeta' ? 'Pago de ' + etiquetaCuenta(m.cuenta) : m.tipo);
+    if (m && !tj && (m.tipo === 'Inversión' || m.tipo === 'Retiro de fondo' || m.tipo === 'Transferencia')) det += ' · ' + esc(m.tipo === 'Transferencia' ? 'entre tus cuentas' : m.tipo);
     else if (m && m.tipo === 'Gasto' && m.categoria) det += ' · ' + esc(m.categoria);
     var et = m && m.tipo === 'Gasto' ? etiquetaSobre(m) : '';
     return '<button class="item fb" onclick="' + (m ? 'App.formMovimiento(' + m.fila + ')' : 'App.ir(\'prestamo\')') + '"><span class="punto ' + (entra ? 'v' : 'r') + '"></span>' +
@@ -4887,11 +4888,12 @@ var App = (function () {
     var en = hs.lista.filter(function (e) { var f = new Date(e.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]) && (SOB.f !== 'cargas' || e.monto >= 0) && (SOB.f !== 'descargas' || e.monto < 0); });
     var venia = hs.inicial; if (r[0]) hs.lista.forEach(function (e) { if (new Date(e.fecha) < r[0]) venia = e.despues; });
     var entro = 0, salio = 0; en.forEach(function (e) { if (e.monto >= 0) entro += e.monto; else salio -= e.monto; });
-    var serie = C.saldosMensualesSobre(hs, hoy, 8), mx = Math.max.apply(null, serie.map(function (x) { return Math.abs(x.saldo); }).concat([1]));
+    var serie = C.saldosMensualesSobre(hs, hoy, 8), mx = Math.max.apply(null, serie.map(function (x) { return Math.abs(x.saldo || 0); }).concat([1]));
     h += '<div class="caja" style="gap:10px"><div class="tres-c"><div><span>' + (r[0] ? 'Venía (' + r[0].getDate() + ' ' + MESES_C[r[0].getMonth()] + ')' : 'Inicial') + '</span><b>' + din(venia, mon) + '</b></div>' +
       '<div><span>Entró</span><b class="verde-pos">+' + din(entro, mon) + '</b></div><div><span>Salió</span><b class="rojo">−' + din(salio, mon) + '</b></div></div>' +
       '<div class="mini-graf" aria-label="Saldo al final de cada mes">' + serie.map(function (x, i) {
-        return '<i class="' + (i === serie.length - 1 ? 'ult' : '') + (x.saldo < 0 ? ' neg' : '') + '" style="height:' + Math.max(4, Math.abs(x.saldo) / mx * 100).toFixed(0) + '%" title="' + esc(nombreMes(x.mes)) + '"></i>';
+        if (x.saldo === null) return '<i class="nada" title="' + esc(nombreMes(x.mes)) + ': todavía no usabas sobres"></i>';
+        return '<i class="' + (i === serie.length - 1 ? 'ult' : '') + (x.saldo < 0 ? ' neg' : '') + '" style="height:' + Math.max(4, Math.abs(x.saldo) / mx * 100).toFixed(0) + '%" title="' + esc(nombreMes(x.mes)) + ': ' + esc(txt(x.saldo, mon)) + '"></i>';
       }).join('') + '</div><div class="fila suave" style="font-size:11.5px"><span>' + MESES_C[serie[0].mes.getMonth()] + '</span><span>saldo al final de cada mes</span><span>' + MESES_C[serie[serie.length - 1].mes.getMonth()] + '</span></div></div>';
     h += '<div class="chips desliza" id="sb-filtros">' + [['mes', 'Este mes'], ['pasado', 'Mes pasado'], ['todo', 'Todo'], ['cargas', 'Cargas'], ['descargas', 'Descargas']].map(function (x) {
       return '<button class="chip' + (SOB.f === x[0] ? ' on' : '') + '" onclick="App.sobreFiltro(\'' + x[0] + '\')">' + x[1] + '</button>';

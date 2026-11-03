@@ -1,8 +1,8 @@
 {
- "web": "2.5.5",
- "servidor": "2.5.5",
- "sha256": "e544536460fee51ccee7cf56d49112f9f09ad03520a517520ea9f67336b6443d",
- "novedades": "Cada sobre tiene su pantalla: Cargar, Descargar, movimientos tipo banco con saldo final y Deshacer.\nCuenta de ahorros con saldo vivo, \"¿cuánto está en sobres?\" y Cuadrar con el banco.\nTarjeta abierta con íconos y sus propios movimientos (desde el corte, mes, rango).\nMovimientos: buscar por Hoy, Ayer, semana, mes, 3 meses o rango con calendario; el buscador entiende meses, fechas y montos.\nNombres completos con el teléfono cerrado; la nota de la hoja Cuentas ya no sale como cuenta.\nServidor: si una fila nueva del préstamo queda sin fórmula o con #REF!, se copia sola de la fila de arriba.",
+ "web": "2.5.6",
+ "servidor": "2.5.6",
+ "sha256": "cfc2e6706f0ff0f13183d9308cd3250359b5e5c69c7f056d59cec7f73975378b",
+ "novedades": "Lector de correos Davibank: el aviso \"se recibió el pago a su tarjeta\" se anota como Pago de tarjeta (antes salía como ingreso de ₡329).\nLos avisos de crédito/débito de la cuenta Davibank se anotan como Transferencia: no cuentan como gasto ni ingreso.\nMontos sin separador de miles (\"32978.54\") ya se leen completos.\nSobre: el mini gráfico no muestra barras de los meses antes de empezar a usar sobres.\nFondos: intereses negativos se muestran con \"−\" en rojo.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

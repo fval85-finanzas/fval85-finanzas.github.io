@@ -84,7 +84,8 @@ function identificarMoneda(texto) {
   return null;
 }
 
-var NUM = '(\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
+// v2.5.6: "32978.54" (sin separador de miles) se leía como 329: el primer caso ahora exige al menos un grupo de miles
+var NUM = '(\\d{1,3}(?:[.,\\s]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
 var MON = '(USD|US\\$|CRC|\\$|₡|¢|COLONES|D[OÓ]LARES)';
 
 /** Busca el monto y la moneda. Devuelve { monto, moneda } o null. */
@@ -330,6 +331,43 @@ function parsearDavibankCompra(texto) {
   }];
 }
 
+/** v2.5.6 · Davibank: "se recibió el pago a su tarjeta de crédito, terminada en 1234, por CRC 32978.54, el día 02/11/26" → Pago de tarjeta. */
+function parsearDavibankPagoTarjeta(texto, fechaCorreo) {
+  var t = String(texto).replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ');
+  var m = t.match(/recibi[oó] el pago a su tarjeta de cr[eé]dito\s*,?\s*terminada en (\d{4})\s*,?\s*por\s+(USD|CRC|US\$|\$|₡|¢)\s*([\d.,]*\d)\s*,?\s*el d[ií]a (\d{1,2})\/(\d{1,2})\/(\d{2,4})/i);
+  if (!m) return null;
+  var anio = +m[6]; if (anio < 100) anio += 2000;
+  var dia = crearFechaCR(anio, +m[5] - 1, +m[4], 12, 0), fc = fechaCorreo ? new Date(fechaCorreo) : null;
+  // la hora viene del correo (el texto solo trae el día)
+  var fecha = fc && Math.abs(fc - dia) < 36 * 3600000 ? fc : dia;
+  var monto = convertirNumero(m[3]);
+  return [{
+    fecha: fecha.toISOString(), comercio: 'Pago de tarjeta', lugar: '', monto: monto, moneda: identificarMoneda(m[2]) || 'CRC',
+    tipo: 'gasto', tipoMov: 'Pago de tarjeta', ultimos4: m[1],
+    autorizacion: 'dvpago-' + m[1] + '-' + anio + ('0' + m[5]).slice(-2) + ('0' + m[4]).slice(-2) + '-' + Math.round(monto * 100),
+    banco: 'Davibank', origen: 'correo'
+  }];
+}
+/**
+ * v2.5.6 · Davibank: "Se realizó un crédito/débito a la cuenta bancaria en CRC terminada en ****1234, por un monto de CRC 32,978.54.
+ * La transacción se realizó el día 02-11-2026 20:07:42" → Transferencia (no es gasto ni ingreso: es plata tuya que pasa por esa cuenta;
+ * el pago de la tarjeta o la compra llegan en su propio correo).
+ */
+function parsearDavibankCuenta(texto) {
+  var t = String(texto).replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ');
+  var m = t.match(/Se realiz[oó] un (cr[eé]dito|d[eé]bito) a la cuenta bancaria en (CRC|USD) terminada en \**\s*(\d{4})\s*,?\s*por un monto de\s*(USD|CRC|US\$|\$|₡|¢)\s*([\d.,]*\d)\.?\s*La transacci[oó]n se realiz[oó] el d[ií]a (\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/i);
+  if (!m) return null;
+  var entra = /^cr/i.test(m[1]), monto = convertirNumero(m[5]);
+  return [{
+    fecha: crearFechaCR(+m[8], +m[7] - 1, +m[6], +m[9], +m[10]).toISOString(),
+    comercio: (entra ? 'Entró a ' : 'Salió de ') + 'cuenta Davibank ••' + m[3], lugar: '', monto: monto, moneda: identificarMoneda(m[4]) || m[2],
+    tipo: entra ? 'ingreso' : 'gasto', tipoMov: 'Transferencia', cuenta4: m[3],
+    autorizacion: 'dvcta-' + m[3] + '-' + m[8] + m[7] + m[6] + m[9] + m[10] + (m[11] || '') + '-' + (entra ? 'c' : 'd') + Math.round(monto * 100),
+    nota: 'Movimiento de tu cuenta Davibank: no cuenta como gasto ni ingreso. Si fue plata que te pagaron, cambiá el tipo a Ingreso.',
+    banco: 'Davibank', origen: 'correo'
+  }];
+}
+
 /** Davibank: pago de servicios (se paga con la tarjeta Davibank). */
 function parsearDavibankServicio(texto, fechaCorreo) {
   var t = String(texto).replace(/&nbsp;?/g, ' ').replace(/\r/g, '');
@@ -367,7 +405,7 @@ function parsearSINPE(texto) {
   var tel = g(/Tel[eé]fono (?:destino|origen):\s*(\d+)/i);
   var entidad = g(/Entidad (?:destino|origen):\s*([^\n]+)/i);
   var motivo = g(/Motivo:\s*([^\n]+)/i).replace(/[_*]+/g, ' ').replace(/\s+/g, ' ').trim();
-  var f = t.match(/realizada el (\d{1,2})\/(\d{1,2})\/(\d{4}) a las (\d{1,2}):(\d{2})\s*([AP]\.?\s?M\.?)?/i);
+  var f = t.match(/realizada el (\d{1,2})\/(\d{1,2})\/(\d{4}) a las (\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]\.?\s?M\.?)?/i);
   var fecha = null;
   if (f) {
     var h = +f[4], ap = (f[6] || '').toUpperCase().replace(/[.\s]/g, '');
@@ -378,7 +416,7 @@ function parsearSINPE(texto) {
   var nota = [motivo ? 'Motivo: ' + motivo : '', tel && tel !== '0' ? 'Tel ' + tel : '', entidad].filter(String).join(' · ');
   return {
     fecha: fecha ? fecha.toISOString() : null, monto: monto, moneda: 'CRC',
-    comercio: (debito ? 'SINPE a ' : 'SINPE de ') + (nombre || 'desconocido'),
+    comercio: (/tiempo real/i.test(t) ? (debito ? 'Débito en tiempo real · ' : 'Crédito en tiempo real · ') : debito ? 'SINPE a ' : 'SINPE de ') + (nombre || 'desconocido'),
     tipoMov: credito ? 'Ingreso' : propia ? 'Transferencia' : 'Gasto', tipo: credito ? 'ingreso' : 'gasto',
     autorizacion: g(/N[uú]mero de referencia:\s*(\d+)/i), nota: nota, banco: 'BCR', origen: 'correo', esSINPE: true
   };
@@ -412,7 +450,10 @@ function parsearCorreoBanco(texto, html, fechaCorreo, banco) {
   if (/Detalle de Transacciones/i.test(todo)) { var r = parsearBCRTabla(texto, html); if (r) return r; }
   if (/pago de servicios/i.test(todo)) { var s = parsearDavibankServicio(texto, fechaCorreo) || parsearDavibankServicio(textoDeHtml_(html), fechaCorreo); if (s) return s; }
   if (/transacci[oó]n realizada en/i.test(todo)) { var d = parsearDavibankCompra(texto) || parsearDavibankCompra(textoDeHtml_(html)); if (d) return d; }
-  if (/SINPE/i.test(todo)) { var x = parsearSINPE(texto) || parsearSINPE(textoDeHtml_(html)); if (x) return [x]; }
+  if (/recibi[oó] el pago a su tarjeta de cr[eé]dito/i.test(todo)) { var pt = parsearDavibankPagoTarjeta(texto, fechaCorreo) || parsearDavibankPagoTarjeta(textoDeHtml_(html), fechaCorreo); if (pt) return pt; }
+  if (/a la cuenta bancaria en (CRC|USD) terminada en/i.test(todo)) { var dc = parsearDavibankCuenta(texto) || parsearDavibankCuenta(textoDeHtml_(html)); if (dc) return dc; }
+  if (/env[ií]o exitoso de d[eé]bito en tiempo real/i.test(todo)) return [];   // aviso repetido del mismo SINPE (ya llega el del banco y el de la cuenta)
+  if (/SINPE|tiempo real/i.test(todo)) { var x = parsearSINPE(texto) || parsearSINPE(textoDeHtml_(html)); if (x) return [x]; }
   var tx = parsearCorreo(texto, fechaCorreo, banco);
   return tx ? [tx] : null;
 }
@@ -1626,6 +1667,10 @@ function tarjetaDeBanco_(cuentas, banco) {
 /** Aplica cuenta (por últimos 4), categoría y sobre (por reglas). */
 function completarCompra_(tx, cuentas, reglas) {
   var cuenta = tx.cuentaNombre || '';
+  if (!cuenta && tx.cuenta4) {   // v2.5.6: cuenta bancaria (no tarjeta) por sus últimos 4, si está en Cuentas
+    var cb = cuentas.filter(function (x) { return texto_(x['Últimos 4']) === tx.cuenta4; })[0];
+    if (cb) cuenta = texto_(cb['Nombre (único)']);
+  }
   if (!cuenta && tx.ultimos4) {
     var c = cuentas.filter(function (x) { return texto_(x['Últimos 4']) === tx.ultimos4; })[0];
     if (c) cuenta = texto_(c['Nombre (único)']);
@@ -1899,7 +1944,7 @@ function desactivarAutomatico() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.5.5';
+var VERSION_APP = '2.5.6';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -2325,6 +2370,18 @@ function fijarUrlActualizacion_(base) {
   if (actual && actual !== base) throw new Error('Ya hay otra dirección guardada. Para cambiarla, en Apps Script ejecutá borrarUrlActualizacion.');
   p.setProperty('URL_ACTUALIZACION', base);
   return base;
+}
+
+/**
+ * v2.5.5: ejecutar UNA vez desde el editor (▶ Ejecutar) para dar los permisos que usa "Actualizar servidor":
+ * conectarse a internet (UrlFetchApp) y manejar las implementaciones. En la ventana de Google marcá "Seleccionar todo".
+ */
+function autorizarActualizaciones() {
+  UrlFetchApp.fetch('https://www.google.com/generate_204', { muteHttpExceptions: true });
+  var token = ScriptApp.getOAuthToken();
+  var r = UrlFetchApp.fetch('https://script.googleapis.com/v1/projects/' + ScriptApp.getScriptId() + '/deployments', { muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + token } });
+  console.log(r.getResponseCode() < 300 ? '✅ Listo: permisos dados. Volvé a la app → Ajustes → Actualizaciones → Buscar actualizaciones.'
+    : 'Permisos dados, pero Google respondió: ' + r.getContentText().slice(0, 300) + ' (si dice que la API está desactivada, encendela en script.google.com/home/usersettings)');
 }
 
 /** Para cambiar de dónde se actualiza (solo desde el editor de Apps Script). */
@@ -3172,34 +3229,74 @@ var Calc = (function () {
     var n = cta ? cta.nombre : o.principal;
     return n ? { cuenta: n, signo: m.tipo === 'Ingreso' ? 1 : -1, grupo: m.tipo === 'Ingreso' ? 'entra' : 'sale' } : null;
   }
-  /** Movimientos de una cuenta de ahorro (todas las fechas): [{ fecha, monto (con signo), moneda, grupo, mov | pago }] */
-  function movsCuenta(d, c, o) {
-    var out = [];
-    (d.movimientos || []).forEach(function (m) {
-      if (!m.fecha) return;
+  /** v2.5.6: ¿la transferencia entra o sale de la cuenta anotada? (por la descripción que pone el lector o la persona) */
+  function entraTransferencia(m) { return /^\s*(entr[oó]|cr[eé]dito|sinpe de|dep[oó]sito|recib)/i.test(m.comercio || ''); }
+  /**
+   * Efectos de todos los movimientos en las cuentas de ahorro.
+   *  - Transferencias entre tus cuentas: salen de una y entran a otra (se emparejan por monto, ±2 días).
+   *  - Si a una cuenta le entra plata tuya y no se ve de dónde salió, se toma de la cuenta principal.
+   *  - Un pago de tarjeta sale de la cuenta donde se ve la salida (o donde entró esa plata justo antes); si no, de la elegida en Ajustes.
+   */
+  function efectosCuentas(d, o) {
+    var out = [], ctas = d.cuentas || [];
+    var ahorro = function (n) { var c = ctas.filter(function (x) { return x.nombre === n; })[0]; return c && esAhorro(c) && esCuentaReal(c) ? c.nombre : null; };
+    var mon = function (m) { return m.moneda === 'USD' ? 'USD' : 'CRC'; };
+    var cerca = function (a, b) { return Math.abs(new Date(a.fecha) - new Date(b.fecha)) <= 2 * 86400000 && Math.abs((a.monto || 0) - (b.monto || 0)) < 0.01 && mon(a) === mon(b); };
+    var movs = (d.movimientos || []).filter(function (m) { return m.fecha; });
+    var trans = movs.filter(function (m) { return m.tipo === 'Transferencia'; }).map(function (m) {
+      return { m: m, cuenta: ahorro(m.cuenta) || (m.cuenta && ctas.some(function (x) { return x.nombre === m.cuenta; }) ? null : o.principal), entra: entraTransferencia(m), par: null, pago: null };
+    }).filter(function (x) { return x.cuenta; });
+    trans.forEach(function (a) {   // emparejar salida ↔ entrada entre cuentas distintas
+      if (a.par || !a.entra) return;
+      var b = trans.filter(function (y) { return !y.par && !y.entra && y.cuenta !== a.cuenta && cerca(a.m, y.m); })[0];
+      if (b) { a.par = b; b.par = a; }
+    });
+    var pagos = movs.filter(function (m) { return m.tipo === 'Pago de tarjeta'; });
+    pagos.forEach(function (p) {
+      var sal = trans.filter(function (y) { return !y.entra && !y.par && !y.pago && cerca(p, y.m); })[0];
+      if (sal) { sal.pago = p; out.push({ cuenta: sal.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: sal.m.fecha, monto: p.monto, moneda: mon(p) }); return; }
+      var ent = trans.filter(function (y) { return y.entra && !y.pago && cerca(p, y.m); })[0];
+      if (ent) { ent.pago = p; out.push({ cuenta: ent.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) }); return; }
+      if (o.tarjetas) out.push({ cuenta: o.tarjetas, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) });
+    });
+    trans.forEach(function (x) {
+      if (x.pago && !x.entra) return;   // la salida ya quedó como el pago de la tarjeta
+      out.push({ cuenta: x.cuenta, signo: x.entra ? 1 : -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m) });
+      if (x.entra && !x.par && o.principal && x.cuenta !== o.principal)   // entró plata tuya sin ver de dónde: sale de la principal
+        out.push({ cuenta: o.principal, signo: -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m), texto: 'Pasó a ' + x.cuenta });
+    });
+    movs.forEach(function (m) {
+      if (m.tipo === 'Pago de tarjeta' || m.tipo === 'Transferencia') return;
       var e = efectoCuenta(d, m, o);
-      if (e && e.cuenta === c.nombre) out.push({ fecha: m.fecha, monto: e.signo * (m.monto || 0), moneda: m.moneda === 'USD' ? 'USD' : 'CRC', grupo: e.grupo, mov: m });
+      if (e) out.push({ cuenta: e.cuenta, signo: e.signo, grupo: e.grupo, mov: m, fecha: m.fecha, monto: m.monto || 0, moneda: mon(m) });
     });
-    if (o.prestamo === c.nombre && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
-      if (p.fecha && p.total) out.push({ fecha: p.fecha, monto: -p.total, moneda: 'CRC', grupo: 'pagos', pago: p });
+    if (o.prestamo && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
+      if (p.fecha && p.total) out.push({ cuenta: o.prestamo, signo: -1, grupo: 'pagos', pago: p, fecha: p.fecha, monto: p.total, moneda: 'CRC' });
     });
-    return out.sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    return out;
+  }
+  /** Movimientos de una cuenta de ahorro (todas las fechas): [{ fecha, monto (con signo), moneda, grupo, mov | pago, texto? }] */
+  function movsCuenta(d, c, o) {
+    return efectosCuentas(d, o).filter(function (e) { return e.cuenta === c.nombre; }).map(function (e) {
+      return { fecha: e.fecha, monto: e.signo * e.monto, moneda: e.moneda, grupo: e.grupo, mov: e.mov, pago: e.pago, texto: e.texto };
+    }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
   }
   /** Saldo vivo de una cuenta de ahorro: saldo anotado + lo que entra − lo que sale desde el día siguiente a la fecha del saldo. */
   function saldoCuenta(d, c, o) {
     var r = { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0, base: { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0 }, fecha: c.fechaSaldo || null, vivo: false,
-      entra: { CRC: 0, USD: 0 }, sale: { CRC: 0, USD: 0 }, pagos: { CRC: 0, USD: 0 }, nEntra: 0, nSale: 0, nPagos: 0 };
+      entra: { CRC: 0, USD: 0 }, sale: { CRC: 0, USD: 0 }, pagos: { CRC: 0, USD: 0 }, transf: { CRC: 0, USD: 0 }, nEntra: 0, nSale: 0, nPagos: 0, nTransf: 0 };
     var desde = c.fechaSaldo ? new Date(c.fechaSaldo) : null;
     if (!desde || isNaN(desde)) return r;
     r.vivo = true;
     var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
     movsCuenta(d, c, o).forEach(function (x) {
       if (new Date(x.fecha) < corte) return;
+      if (x.grupo === 'transf') { r.transf[x.moneda] += x.monto; r.nTransf++; return; }
       var k = x.grupo === 'entra' ? 'entra' : x.grupo === 'pagos' ? 'pagos' : 'sale';
       r[k][x.moneda] += Math.abs(x.monto);
       r[k === 'entra' ? 'nEntra' : k === 'pagos' ? 'nPagos' : 'nSale']++;
     });
-    ['CRC', 'USD'].forEach(function (mon) { r[mon] = r.base[mon] + r.entra[mon] - r.sale[mon] - r.pagos[mon]; });
+    ['CRC', 'USD'].forEach(function (mon) { r[mon] = r.base[mon] + r.entra[mon] - r.sale[mon] - r.pagos[mon] + r.transf[mon]; });
     return r;
   }
   /** Todo lo que pasó en un sobre, del más viejo al más nuevo, con el saldo corrido. */
@@ -3216,6 +3313,7 @@ var Calc = (function () {
     var out = [];
     for (var k = n - 1; k >= 0; k--) {
       var fin = new Date(hoy.getFullYear(), hoy.getMonth() - k + 1, 1), v = h.inicial;
+      if (h.desde && fin <= h.desde) { out.push({ mes: new Date(hoy.getFullYear(), hoy.getMonth() - k, 1), saldo: null }); continue; }   // antes de empezar los sobres: sin barra
       h.lista.forEach(function (e) { if (new Date(e.fecha) < fin) v = e.despues; });
       out.push({ mes: new Date(hoy.getFullYear(), hoy.getMonth() - k, 1), saldo: v });
     }
@@ -3293,7 +3391,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

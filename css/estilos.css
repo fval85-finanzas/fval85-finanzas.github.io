@@ -891,3 +891,5 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .ic-n { overflow-wrap: normal; word-break: keep-all; hyphens: none; font-size: clamp(10.5px, 3.15vw, 12px); }
 .item.mov .det, .item.fb .det { white-space: normal; text-overflow: clip; overflow: visible; display: block; -webkit-line-clamp: unset; }
 .item .monto .origen { white-space: normal; overflow-wrap: break-word; max-width: 34vw; margin-left: auto; } .item.mov .monto { max-width: 46%; }
+.dos > .btn, .dos > a.btn { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; line-height: 1.2; font-size: 15px; padding: 0 10px; }
+.mini-graf i.nada { height: 3px; min-height: 3px; background: none; border-bottom: 2px dashed var(--borde); border-radius: 0; }

@@ -572,34 +572,74 @@ var Calc = (function () {
     var n = cta ? cta.nombre : o.principal;
     return n ? { cuenta: n, signo: m.tipo === 'Ingreso' ? 1 : -1, grupo: m.tipo === 'Ingreso' ? 'entra' : 'sale' } : null;
   }
-  /** Movimientos de una cuenta de ahorro (todas las fechas): [{ fecha, monto (con signo), moneda, grupo, mov | pago }] */
-  function movsCuenta(d, c, o) {
-    var out = [];
-    (d.movimientos || []).forEach(function (m) {
-      if (!m.fecha) return;
+  /** v2.5.6: ¿la transferencia entra o sale de la cuenta anotada? (por la descripción que pone el lector o la persona) */
+  function entraTransferencia(m) { return /^\s*(entr[oó]|cr[eé]dito|sinpe de|dep[oó]sito|recib)/i.test(m.comercio || ''); }
+  /**
+   * Efectos de todos los movimientos en las cuentas de ahorro.
+   *  - Transferencias entre tus cuentas: salen de una y entran a otra (se emparejan por monto, ±2 días).
+   *  - Si a una cuenta le entra plata tuya y no se ve de dónde salió, se toma de la cuenta principal.
+   *  - Un pago de tarjeta sale de la cuenta donde se ve la salida (o donde entró esa plata justo antes); si no, de la elegida en Ajustes.
+   */
+  function efectosCuentas(d, o) {
+    var out = [], ctas = d.cuentas || [];
+    var ahorro = function (n) { var c = ctas.filter(function (x) { return x.nombre === n; })[0]; return c && esAhorro(c) && esCuentaReal(c) ? c.nombre : null; };
+    var mon = function (m) { return m.moneda === 'USD' ? 'USD' : 'CRC'; };
+    var cerca = function (a, b) { return Math.abs(new Date(a.fecha) - new Date(b.fecha)) <= 2 * 86400000 && Math.abs((a.monto || 0) - (b.monto || 0)) < 0.01 && mon(a) === mon(b); };
+    var movs = (d.movimientos || []).filter(function (m) { return m.fecha; });
+    var trans = movs.filter(function (m) { return m.tipo === 'Transferencia'; }).map(function (m) {
+      return { m: m, cuenta: ahorro(m.cuenta) || (m.cuenta && ctas.some(function (x) { return x.nombre === m.cuenta; }) ? null : o.principal), entra: entraTransferencia(m), par: null, pago: null };
+    }).filter(function (x) { return x.cuenta; });
+    trans.forEach(function (a) {   // emparejar salida ↔ entrada entre cuentas distintas
+      if (a.par || !a.entra) return;
+      var b = trans.filter(function (y) { return !y.par && !y.entra && y.cuenta !== a.cuenta && cerca(a.m, y.m); })[0];
+      if (b) { a.par = b; b.par = a; }
+    });
+    var pagos = movs.filter(function (m) { return m.tipo === 'Pago de tarjeta'; });
+    pagos.forEach(function (p) {
+      var sal = trans.filter(function (y) { return !y.entra && !y.par && !y.pago && cerca(p, y.m); })[0];
+      if (sal) { sal.pago = p; out.push({ cuenta: sal.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: sal.m.fecha, monto: p.monto, moneda: mon(p) }); return; }
+      var ent = trans.filter(function (y) { return y.entra && !y.pago && cerca(p, y.m); })[0];
+      if (ent) { ent.pago = p; out.push({ cuenta: ent.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) }); return; }
+      if (o.tarjetas) out.push({ cuenta: o.tarjetas, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) });
+    });
+    trans.forEach(function (x) {
+      if (x.pago && !x.entra) return;   // la salida ya quedó como el pago de la tarjeta
+      out.push({ cuenta: x.cuenta, signo: x.entra ? 1 : -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m) });
+      if (x.entra && !x.par && o.principal && x.cuenta !== o.principal)   // entró plata tuya sin ver de dónde: sale de la principal
+        out.push({ cuenta: o.principal, signo: -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m), texto: 'Pasó a ' + x.cuenta });
+    });
+    movs.forEach(function (m) {
+      if (m.tipo === 'Pago de tarjeta' || m.tipo === 'Transferencia') return;
       var e = efectoCuenta(d, m, o);
-      if (e && e.cuenta === c.nombre) out.push({ fecha: m.fecha, monto: e.signo * (m.monto || 0), moneda: m.moneda === 'USD' ? 'USD' : 'CRC', grupo: e.grupo, mov: m });
+      if (e) out.push({ cuenta: e.cuenta, signo: e.signo, grupo: e.grupo, mov: m, fecha: m.fecha, monto: m.monto || 0, moneda: mon(m) });
     });
-    if (o.prestamo === c.nombre && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
-      if (p.fecha && p.total) out.push({ fecha: p.fecha, monto: -p.total, moneda: 'CRC', grupo: 'pagos', pago: p });
+    if (o.prestamo && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
+      if (p.fecha && p.total) out.push({ cuenta: o.prestamo, signo: -1, grupo: 'pagos', pago: p, fecha: p.fecha, monto: p.total, moneda: 'CRC' });
     });
-    return out.sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    return out;
+  }
+  /** Movimientos de una cuenta de ahorro (todas las fechas): [{ fecha, monto (con signo), moneda, grupo, mov | pago, texto? }] */
+  function movsCuenta(d, c, o) {
+    return efectosCuentas(d, o).filter(function (e) { return e.cuenta === c.nombre; }).map(function (e) {
+      return { fecha: e.fecha, monto: e.signo * e.monto, moneda: e.moneda, grupo: e.grupo, mov: e.mov, pago: e.pago, texto: e.texto };
+    }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
   }
   /** Saldo vivo de una cuenta de ahorro: saldo anotado + lo que entra − lo que sale desde el día siguiente a la fecha del saldo. */
   function saldoCuenta(d, c, o) {
     var r = { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0, base: { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0 }, fecha: c.fechaSaldo || null, vivo: false,
-      entra: { CRC: 0, USD: 0 }, sale: { CRC: 0, USD: 0 }, pagos: { CRC: 0, USD: 0 }, nEntra: 0, nSale: 0, nPagos: 0 };
+      entra: { CRC: 0, USD: 0 }, sale: { CRC: 0, USD: 0 }, pagos: { CRC: 0, USD: 0 }, transf: { CRC: 0, USD: 0 }, nEntra: 0, nSale: 0, nPagos: 0, nTransf: 0 };
     var desde = c.fechaSaldo ? new Date(c.fechaSaldo) : null;
     if (!desde || isNaN(desde)) return r;
     r.vivo = true;
     var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
     movsCuenta(d, c, o).forEach(function (x) {
       if (new Date(x.fecha) < corte) return;
+      if (x.grupo === 'transf') { r.transf[x.moneda] += x.monto; r.nTransf++; return; }
       var k = x.grupo === 'entra' ? 'entra' : x.grupo === 'pagos' ? 'pagos' : 'sale';
       r[k][x.moneda] += Math.abs(x.monto);
       r[k === 'entra' ? 'nEntra' : k === 'pagos' ? 'nPagos' : 'nSale']++;
     });
-    ['CRC', 'USD'].forEach(function (mon) { r[mon] = r.base[mon] + r.entra[mon] - r.sale[mon] - r.pagos[mon]; });
+    ['CRC', 'USD'].forEach(function (mon) { r[mon] = r.base[mon] + r.entra[mon] - r.sale[mon] - r.pagos[mon] + r.transf[mon]; });
     return r;
   }
   /** Todo lo que pasó en un sobre, del más viejo al más nuevo, con el saldo corrido. */
@@ -616,6 +656,7 @@ var Calc = (function () {
     var out = [];
     for (var k = n - 1; k >= 0; k--) {
       var fin = new Date(hoy.getFullYear(), hoy.getMonth() - k + 1, 1), v = h.inicial;
+      if (h.desde && fin <= h.desde) { out.push({ mes: new Date(hoy.getFullYear(), hoy.getMonth() - k, 1), saldo: null }); continue; }   // antes de empezar los sobres: sin barra
       h.lista.forEach(function (e) { if (new Date(e.fecha) < fin) v = e.despues; });
       out.push({ mes: new Date(hoy.getFullYear(), hoy.getMonth() - k, 1), saldo: v });
     }
@@ -693,7 +734,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
