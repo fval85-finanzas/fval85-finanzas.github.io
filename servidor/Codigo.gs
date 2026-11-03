@@ -3278,19 +3278,25 @@ var Calc = (function () {
     var trans = movs.filter(function (m) { return m.tipo === 'Transferencia'; }).map(function (m) {
       return { m: m, cuenta: ahorro(m.cuenta) || (m.cuenta && ctas.some(function (x) { return normNom(x.nombre) === normNom(m.cuenta); }) ? null : o.principal), entra: entraTransferencia(m), par: null, pago: null, desde: leerDesde(m) };
     }).filter(function (x) { return x.cuenta; });
-    trans.forEach(function (a) {   // emparejar salida ↔ entrada entre cuentas distintas
-      if (a.par || !a.entra) return;
-      var b = trans.filter(function (y) { return !y.par && !y.entra && y.cuenta !== a.cuenta && cerca(a.m, y.m); })[0];
-      if (b) { a.par = b; b.par = a; }
-    });
-    var pagos = movs.filter(function (m) { return m.tipo === 'Pago de tarjeta'; });
-    pagos.forEach(function (p) {
-      var sal = trans.filter(function (y) { return !y.entra && !y.par && !y.pago && cerca(p, y.m); })[0];
-      if (sal) { sal.pago = p; out.push({ cuenta: sal.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: sal.m.fecha, monto: p.monto, moneda: mon(p) }); return; }
-      var ent = trans.filter(function (y) { return y.entra && !y.pago && cerca(p, y.m); })[0];
-      if (ent) { ent.pago = p; out.push({ cuenta: ent.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) }); return; }
-      var dePago = ahorro((o.porTarjeta || {})[ahorroTarjeta(p.cuenta)]) || o.tarjetas;
-      if (dePago) out.push({ cuenta: dePago, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) });
+    // v2.5.9: se empareja por cercanía (lo más cercano en tiempo primero), así dos operaciones iguales en días seguidos no se cruzan
+    var dt = function (a, b) { return Math.abs(new Date(a.fecha) - new Date(b.fecha)); };
+    var emparejar = function (izq, der, ok, unir) {
+      var pares = [];
+      izq.forEach(function (a) { der.forEach(function (b) { if (ok(a, b)) pares.push([dt(a.m || a, b.m || b), a, b]); }); });
+      pares.sort(function (x, y) { return x[0] - y[0]; });
+      pares.forEach(function (x) { unir(x[1], x[2]); });
+    };
+    emparejar(trans.filter(function (y) { return y.entra; }), trans.filter(function (y) { return !y.entra; }),
+      function (a, b) { return a.cuenta !== b.cuenta && cerca(a.m, b.m); },
+      function (a, b) { if (!a.par && !b.par) { a.par = b; b.par = a; } });   // salida ↔ entrada entre cuentas distintas
+    var pagos = movs.filter(function (m) { return m.tipo === 'Pago de tarjeta'; }).map(function (m) { return { m: m, de: null }; });
+    emparejar(pagos, trans.filter(function (y) { return !y.entra && !y.par; }), function (p, y) { return cerca(p.m, y.m); },
+      function (p, y) { if (!p.de && !y.pago) { y.pago = p.m; p.de = { cuenta: y.cuenta, fecha: y.m.fecha }; } });   // el débito de la cuenta es el pago
+    emparejar(pagos, trans.filter(function (y) { return y.entra; }), function (p, y) { return cerca(p.m, y.m); },
+      function (p, y) { if (!p.de && !y.pago) { y.pago = p.m; p.de = { cuenta: y.cuenta, fecha: p.m.fecha }; } });   // la plata entró a esa cuenta para pagar
+    pagos.forEach(function (x) {
+      var p = x.m, de = x.de ? x.de.cuenta : (ahorro((o.porTarjeta || {})[ahorroTarjeta(p.cuenta)]) || o.tarjetas);
+      if (de) out.push({ cuenta: de, signo: -1, grupo: 'pagos', mov: p, fecha: x.de ? x.de.fecha : p.fecha, monto: p.monto, moneda: mon(p) });
     });
     trans.forEach(function (x) {
       if (x.pago && !x.entra) return;   // la salida ya quedó como el pago de la tarjeta

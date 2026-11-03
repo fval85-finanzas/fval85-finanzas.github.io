@@ -1,8 +1,8 @@
 {
- "web": "2.5.8",
+ "web": "2.5.9",
  "servidor": "2.5.8",
- "sha256": "debd2c28696ec895a9da69332a335da359064485e4cae0fd2baa72fb57dbd718",
- "novedades": "Lector de correos: el \"Pago de Servicio\" de Davibank se anota completo (nombre del servicio, fecha y hora del correo y la tarjeta Davibank) aunque el correo llegue en otro formato.\nSi un correo trae una fecha futura (como el vencimiento), se usa la fecha del correo.\nActualizaciones: si tu servidor se actualiza a mano, la app te lo dice directo y te deja actualizar la app igual.",
+ "sha256": "7f01ca72da8dffc1e423d73263a29bdb026c67ed22f959d67f5145b71e0ae80f",
+ "novedades": "Cuentas: las transferencias y pagos de tarjeta se emparejan por el más cercano en tiempo; dos operaciones iguales en días seguidos ya no se cruzan (arregla el doble débito en Ahorros Davibank).",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
