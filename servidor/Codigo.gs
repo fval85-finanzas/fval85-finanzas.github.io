@@ -238,6 +238,7 @@ function textoDeHtml_(h) {
     Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú', ntilde: 'ñ', Ntilde: 'Ñ', uuml: 'ü', iexcl: '¡', iquest: '¿', colon: '₡' };
   return String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ')
     .replace(/&#(\d+);/g, function (m, n) { return String.fromCharCode(+n); })
+    .replace(/&#x([0-9a-f]+);/gi, function (m, n) { return String.fromCharCode(parseInt(n, 16)); })
     .replace(/&([a-zA-Z]+);?/g, function (m, n) { return ent[n] !== undefined ? ent[n] : m; });
 }
 /** Filas de las tablas de un correo HTML: [[celda, celda, …], …] */
@@ -337,9 +338,13 @@ function parsearDavibankCompra(texto) {
   }];
 }
 
+/** v2.5.10: texto de Gmail "limpio": sin los * de negrita del texto plano, sin &nbsp, espacios juntos y sin espacio antes de , . ; : */
+function limpioDavi_(texto) {
+  return String(texto || '').replace(/\*/g, '').replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+}
 /** v2.5.6 · Davibank: "se recibió el pago a su tarjeta de crédito, terminada en 1234, por CRC 32978.54, el día 02/11/26" → Pago de tarjeta. */
 function parsearDavibankPagoTarjeta(texto, fechaCorreo) {
-  var t = String(texto).replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ');
+  var t = limpioDavi_(texto);
   var m = t.match(/recibi[oó] el pago a su tarjeta de cr[eé]dito\s*,?\s*terminada en (\d{4})\s*,?\s*por\s+(USD|CRC|US\$|\$|₡|¢)\s*([\d.,]*\d)\s*,?\s*el d[ií]a (\d{1,2})\/(\d{1,2})\/(\d{2,4})/i);
   if (!m) return null;
   var anio = +m[6]; if (anio < 100) anio += 2000;
@@ -360,7 +365,7 @@ function parsearDavibankPagoTarjeta(texto, fechaCorreo) {
  * el pago de la tarjeta o la compra llegan en su propio correo).
  */
 function parsearDavibankCuenta(texto) {
-  var t = String(texto).replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ');
+  var t = limpioDavi_(texto);
   var m = t.match(/Se realiz[oó] un (cr[eé]dito|d[eé]bito) a la cuenta bancaria en (CRC|USD) terminada en \**\s*(\d{4})\s*,?\s*por un monto de\s*(USD|CRC|US\$|\$|₡|¢)\s*([\d.,]*\d)\.?\s*La transacci[oó]n se realiz[oó] el d[ií]a (\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/i);
   if (!m) return null;
   var entra = /^cr/i.test(m[1]), monto = convertirNumero(m[5]);
@@ -380,10 +385,10 @@ function parsearDavibankServicio(texto, fechaCorreo) {
   if (!/pago de servicios/i.test(t)) return null;
   var m = t.match(/caracter[ií]sticas:\s*\n?\s*([^\n]+?)\s*\n[\s\S]*?(\d{4,})\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(₡|¢|\$|USD|CRC)\s*([\d.,]+)/i);
   if (!m) {   // v2.5.8: el mismo correo cuando llega todo en una línea o con la tabla en otro orden: cada dato por separado
-    var u = t.replace(/\s+/g, ' '), ini = u.search(/caracter[ií]sticas:/i);
+    var u = limpioDavi_(t), ini = u.search(/caracter[ií]sticas:/i);
     if (ini >= 0) {
       var resto = u.slice(ini).replace(/^caracter[ií]sticas:\s*/i, '');
-      var nom = resto.match(/^(.+?)\s+Nombre\b/i), id = resto.match(/\b(\d{5,})\b/), fv = resto.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/), mo = resto.match(/(₡|¢|\$|USD|CRC)\s*([\d.,]*\d)/i);
+      var nom = resto.match(/^(.+?)\s+Nombre\b/i), id = resto.match(/Identificador\s+(\d[\d-]{4,}\d)/i) || resto.match(/\b(\d{5,}(?:-\d+)?)\b/), fv = resto.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/), mo = resto.match(/(₡|¢|\$|USD|CRC)\s*([\d.,]*\d)/i);
       if (nom && id && mo) m = [null, nom[1], id[1], fv ? fv[1] : '', mo[1], mo[2]];
     }
   }
@@ -975,8 +980,22 @@ function guardarMovimiento_(m) {
       'Nota': m.nota || ''
     });
     if (m.recordarRegla && m.comercio && (m.categoria || m.sobre)) guardarRegla_(m.comercio, m.categoria, m.sobre);
+    if (m.fila) { try { fechaSobresDeMov_(m.fila, m.fecha); } catch (e) { console.log(e); } }
     return fila;
   });
+}
+
+/** v2.6.0: si cambia la fecha de un movimiento, sus filas en "Movimientos de sobres" toman la fecha nueva. */
+function fechaSobresDeMov_(fila, fecha) {
+  if (!fecha || !libro_().getSheetByName('Movimientos de sobres')) return 0;
+  var t = leerTabla_('Movimientos de sobres', 'Fecha'), c = t.cols['Movimiento'], f = fechaDe_(fecha), n = 0;
+  if (!c) return 0;
+  t.filas.forEach(function (r) {
+    if (String(num_(r['Movimiento'])) !== String(fila)) return;
+    var antes = r['Fecha'] instanceof Date ? r['Fecha'].getTime() : null;
+    if (antes !== f.getTime()) { t.hoja.getRange(r._fila, t.cols['Fecha']).setValue(f); n++; }
+  });
+  return n;
 }
 
 /** Evita editar/borrar la fila equivocada si la hoja cambió mientras la app estaba abierta. */
@@ -1958,7 +1977,7 @@ function desactivarAutomatico() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.5.8';
+var VERSION_APP = '2.6.0';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 

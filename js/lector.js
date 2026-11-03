@@ -77,7 +77,22 @@ var Lector = (function () {
       if (ah && r.tipo !== 'Pago de tarjeta') r.cuenta = r.cuenta || ah.nombre;
       if (ah) r.origenCuenta = ah.nombre;
     }
+    // v2.6.0: la cuenta de DESTINO es tuya → plata que te entró (o transferencia entre tus cuentas si el origen también es tuyo)
+    var ld0 = lineaCon(lineas, /cuenta (destino|de destino|destinataria|acreditada|beneficiaria|a acreditar)|destino:/);
+    if (ld0 && r.tipo !== 'Pago de tarjeta') {
+      var ib = (ld0.match(/CR\s?\d[\d\s]{8,}/i) || [''])[0].replace(/\s/g, ''), u4 = ib ? ib.slice(-4) : ((ld0.match(/(\d{4})\D*$/) || [])[1] || '');
+      var dest = u4 ? (cuentas || []).filter(function (x) { return x.activa !== false && x.ultimos4 === u4 && !/tarjeta/i.test(x.tipo || ''); })[0] : null;
+      if (dest) {
+        var o4 = lo ? ((lo.match(/CR\s?\d[\d\s]{8,}/i) || [''])[0].replace(/\s/g, '').slice(-4)) : '';
+        var mia = o4 ? (cuentas || []).filter(function (x) { return x.ultimos4 === o4 && x.nombre !== dest.nombre; })[0] : null;
+        var origenMio = !!mia; if (mia) r.origenCuenta = mia.nombre;
+        r.tipo = origenMio ? 'Transferencia' : 'Ingreso'; r.cuenta = dest.nombre;
+        r.comercio = origenMio ? 'Entró desde ' + r.origenCuenta : 'Transferencia recibida';
+        r.destino = dest.nombre;
+      }
+    }
     if (r.tipo === 'Pago de tarjeta') r.comercio = 'Pago de tarjeta' + (r.ultimos4 ? ' ••' + r.ultimos4 : '');
+    else if (r.destino) { /* ya tiene descripción */ }
     else {
       var ld = lineaCon(lineas, /destinatario|beneficiario|para:|comercio|a nombre de/);
       r.comercio = ld ? ld.replace(/^.*?(destinatario|beneficiario|para:|comercio|a nombre de)\s*:?\s*/i, '').trim() : (r.tipo === 'Gasto' ? 'Pago' : r.tipo);

@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.9';
+  var VERSION_WEB = '2.6.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -170,7 +170,7 @@ var App = (function () {
       var m = args[0];
       var datos = { fecha: m.fecha, comercio: m.comercio, lugar: m.lugar, monto: m.monto, moneda: m.moneda, tipo: m.tipo, cuenta: m.cuenta,
         categoria: m.categoria, sobre: m.sobre, origen: m.origen, autorizacion: m.autorizacion, nota: m.nota };
-      if (m.fila) { var o = movF(m.fila); if (o) Object.assign(o, datos); }
+      if (m.fila) { var o = movF(m.fila); if (o) Object.assign(o, datos); (D.sobresMov || []).forEach(function (x) { if (x.movimiento === m.fila && m.fecha) x.fecha = m.fecha; }); }
       else if (!movF(it.temp)) D.movimientos.push(Object.assign({ fila: it.temp, subcuenta: '', viaje: '' }, datos));
     },
     marcarMovimiento: function (args) { var o = movF(args[0]); if (o) o[{ 'Subcuenta': 'subcuenta', 'Viaje': 'viaje', 'Para otra persona': 'para', 'Cobro': 'cobro', 'Nota': 'nota', 'Desde': 'desde' }[args[1]] || 'x'] = args[2]; },
@@ -287,7 +287,7 @@ var App = (function () {
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
       intentarRepartoSalario(); finPlanPendiente(); autoSobreDesde();
       var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
-      if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); if (irA === 'revisar') ir('movimientos', 'revisar'); else ir(irA); }
+      if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); ir(irA); }
       if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
     }, null, function () { sincronizando(false); });
   }
@@ -369,7 +369,7 @@ var App = (function () {
     document.querySelectorAll('.pantalla').forEach(function (s) { s.classList.toggle('activa', s.id === 'p-' + pantalla); });
     ({
       inicio: pInicio, movimientos: pMovimientos, tarjetas: pTarjetas, sobres: pSobres, prestamo: pPrestamo, ajustes: pAjustes,
-      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, plan: pPlan, sobre: pSobre, ctamov: pCtaMov, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
+      mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, plan: pPlan, sobre: pSobre, ctamov: pCtaMov, revisar: pRevisar, aldia: pAlDia, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
     formatearMontos();
   }
@@ -518,8 +518,7 @@ var App = (function () {
     var linea = function (icono, texto, accion, alerta) {
       return '<button class="linea-aviso' + (alerta ? ' alerta' : '') + '" onclick="' + accion + '"><span class="li-ic">' + icono + '</span><span class="li-t">' + texto + '</span><span class="enlace">Ver ›</span></button>';
     };
-    if (res.porRevisar) h += linea('⚠️', '<b>' + res.porRevisar + '</b> por revisar <span class="suave">· sin categoría</span>', "App.ir('movimientos','revisar')", true);
-    if (!sinServidorSobres()) { var n = SB().pendientes.length; if (n) h += linea('✉', '<b>' + n + '</b> por asignar a sobres', "App.ir('porasignar')"); }
+    // v2.6.0: "sin categoría" y "por asignar" ahora están en la tarjeta «Para revisar» de arriba
     if (D.fondos) { var f = FD().pendientes.length; if (f) h += linea('📈', '<b>' + f + '</b> ' + (f > 1 ? 'inversiones' : 'inversión') + ' sin subcuenta', "App.ir('fondos')"); }
     return h ? '<div class="ancho avisos">' + h + '</div>' : '';
   }
@@ -543,6 +542,7 @@ var App = (function () {
           (tams.length > 1 ? '<button class="wi-tam" onclick="App.iniTam(\'' + w.k + '\')">' + nomTam(w.k, w.t) + ' ⤢</button>' : '') : '') + '</div>';
     });
     if (!avisosPuestos) cuerpo += avisos();
+    if (!ed) h += tarjetaRevisar(res);   // v2.6.0
     h += (ed ? '<div class="ayuda-edit">Mantené presionado y arrastrá (o usá ↑ ↓) · × quita · Tamaño cambia</div>' : '') + '<div class="widgets' + (ed ? ' editando' : '') + '">' + cuerpo + '</div>';
     h += ed ? '<div class="barra-edit"><button onclick="App.iniAgregarW()">＋ Widget</button><button onclick="App.iniAgregarA()">＋ Acceso</button><button class="ok" onclick="App.iniListo()">Listo</button></div><div style="height:90px"></div>'
       : '<button class="enlace-editar" onclick="App.editarInicio()">✏ Editar Inicio</button>';
@@ -1528,7 +1528,26 @@ var App = (function () {
   // ------------------------------------------------------------ MOVIMIENTOS
   // ---- v2.0: lista más fácil de leer
   var SIGLAS = /^(BCR|BAC|BN|SINPE|CR|SA|S\.A\.|MC|USA|KFC|AM|PM|II|III|IVA|ATM|POS|CCSS|ICE|INS|AYA|CNFL|ESPH|JASEC|SAFI|TC|USD|CRC|-I-)$/;
+  // v2.6.0: nombres largos de servicios → cortos ("INSTITUTO COSTARRICENSE DE ELECTRICIDAD - COBRO DE SERVICIOS ELECTRICOS" → "ICE · Electricidad")
+  var CORTOS = [[/instituto costarricense de electricidad/i, 'ICE'], [/compa[nñ][ií]a nacional de fuerza y luz/i, 'CNFL'], [/acueductos y alcantarillados/i, 'AyA'],
+    [/caja costarricense de seguro social/i, 'CCSS'], [/instituto nacional de seguros/i, 'INS'], [/servicios p[uú]blicos de heredia/i, 'ESPH'], [/radiograf[ií]a costarricense/i, 'RACSA'],
+    [/junta administrativa del servicio el[eé]ctrico/i, 'JASEC'], [/cooperativa de electrificaci[oó]n rural/i, 'Coope electrificación']];
+  function nombreCorto(s) {
+    var p = String(s || '').split(/\s+-\s+/);
+    var izq = p[0].trim(), der = (p[1] || '').trim(), k = CORTOS.filter(function (x) { return x[0].test(izq); })[0];
+    if (!k && !(der && s.length > 26)) return '';
+    izq = k ? k[1] : nombreBonitoBase(izq.replace(/\s+(s\.?\s?a\.?|sociedad an[oó]nima)$/i, ''));
+    if (!der) return izq;
+    var d = der.replace(/^cobro de\s+/i, '').replace(/^servicios?\s+/i, '');
+    d = /el[eé]ctric/i.test(d) ? 'Electricidad' : /agua|acueduct/i.test(d) ? 'Agua' : /tel[eé]f|celular|m[oó]vil/i.test(d) ? 'Teléfono' : nombreBonitoBase(d).replace(/\bE\b/, 'e');
+    return izq + ' · ' + d;
+  }
   function nombreBonito(s) {
+    s = String(s || '');
+    var c = s.length > 26 || /\s-\s/.test(s) ? nombreCorto(s) : '';
+    return c || nombreBonitoBase(s);
+  }
+  function nombreBonitoBase(s) {
     s = String(s || '');
     if (!s || /[a-záéíóúñ]/.test(s)) return s;    // ya viene con minúsculas: se deja igual
     return s.toLowerCase().replace(/[^\s]+/g, function (w) {
@@ -5095,7 +5114,243 @@ var App = (function () {
     if (cambios) { guardar('mf-auto-sobre', JSON.stringify(hechos.slice(-200))); toast('✉ Pago de tarjeta descontado solo del sobre elegido.', 3500); if (D) pintar(); }
   }
 
+  // ==================================================================== v2.6.0 · PARA REVISAR + TODO AL DÍA
+  function claveMov(m) { return m.autorizacion ? 'a:' + m.autorizacion : 'f:' + m.fila + '|' + m.monto + '|' + String(m.fecha || '').slice(0, 10); }
+  var DIAS_REV = 30;
+  function vistos() {
+    var v = leerJSONSeguro('mf-vistos');
+    if (!v && D) {   // la primera vez: lo de más de 2 días se da por visto (no se llena de cosas viejas)
+      v = {}; var lim = hoy.getTime() - 2 * 86400000;
+      D.movimientos.forEach(function (m) { if (m.fecha && new Date(m.fecha).getTime() < lim) v[claveMov(m)] = 1; });
+      guardar('mf-vistos', JSON.stringify(v));
+    }
+    return v || {};
+  }
+  function marcarVistos(lista) {
+    var v = vistos(), lim = hoy.getTime() - (DIAS_REV + 5) * 86400000, vivos = {};
+    lista.forEach(function (m) { v[claveMov(m)] = 1; });
+    D.movimientos.forEach(function (m) { var k = claveMov(m); if (v[k] && m.fecha && new Date(m.fecha).getTime() >= lim) vivos[k] = 1; });
+    guardar('mf-vistos', JSON.stringify(vivos));
+  }
+  function revisarData() {
+    var vacio = { accion: [], listos: [], nuevos: [] };
+    if (!D) return vacio;
+    var v = vistos(), lim = hoy.getTime() - DIAS_REV * 86400000;
+    var sb = sinServidorSobres() ? null : SB(), pendFila = {}, accion = [], listos = [];
+    if (sb) sb.pendientes.forEach(function (p) { if (p.mov.fila > 0) { pendFila[p.mov.fila] = p; accion.push({ tipo: p.sentido === 'entra' ? 'entra' : 'sobre', mov: p.mov, p: p }); } });
+    var so = sinOrigen(), soFila = {};
+    so.forEach(function (x) { soFila[x.mov.fila] = 1; accion.push({ tipo: 'origen', mov: x.mov, cuenta: x.cuenta }); });
+    var nuevos = D.movimientos.filter(function (m) { return m.fila > 0 && m.fecha && new Date(m.fecha).getTime() >= lim && !v[claveMov(m)]; });
+    nuevos.forEach(function (m) {
+      if (pendFila[m.fila] || soFila[m.fila]) return;
+      if (m.tipo === 'Gasto' && !m.categoria && !m.para) accion.push({ tipo: 'categoria', mov: m }); else listos.push(m);
+    });
+    var porFecha = function (a, b) { return new Date((b.mov || b).fecha) - new Date((a.mov || a).fecha); };
+    accion.sort(porFecha); listos.sort(porFecha);
+    return { accion: accion, listos: listos, nuevos: nuevos };
+  }
+  /** Lo que la app hizo sola con un movimiento (una línea) */
+  function queHizo(m, ef) {
+    var sb = sinServidorSobres() ? null : SB();
+    var mios = ef.filter(function (e) { return e.mov === m; });
+    if (m.tipo === 'Pago de tarjeta') {
+      var de = mios.filter(function (e) { return e.grupo === 'pagos'; })[0];
+      return (sb && sb.cubierto[m.fila] ? 'Cubierto con lo reservado en sobres' : 'Pago asignado') + (de ? ' · sale de ' + de.cuenta : '');
+    }
+    if (m.tipo === 'Transferencia') {
+      var pago = D.movimientos.filter(function (p) { return p.tipo === 'Pago de tarjeta' && Math.abs(p.monto - m.monto) < 0.01 && Math.abs(new Date(p.fecha) - new Date(m.fecha)) < 2 * 86400000; })[0];
+      if (!C.entraTransferencia(m) && pago && !mios.length) return 'Es el pago de ' + etiquetaCuenta(pago.cuenta);
+      var d = C.leerDesde(m);
+      return 'Entre tus cuentas' + (d && d.cuenta ? ' · vino de ' + d.cuenta : d && d.tipo === 'fuera' ? ' · de fuera de la app' : '');
+    }
+    if (m.para) return '🤝 Para ' + m.para + ' (Me deben)';
+    var filas = sb ? (sb.porMov[m.fila] || []).filter(function (x) { return x.sobre; }) : [];
+    var nombres = []; filas.forEach(function (x) { if (nombres.indexOf(x.sobre) < 0) nombres.push(x.sobre); });
+    if (nombres.length) return '✉ ' + nombres.map(nomSobre).join(', ');
+    if (m.sobre) return '✉ ' + nomSobre(m.sobre) + ' (recordado)';
+    if (sb && sb.cubierto[m.fila]) return 'Cubierto con lo reservado';
+    return (m.categoria ? m.categoria + ' · ' : '') + (m.cuenta ? etiquetaCuenta(m.cuenta) : 'sin cuenta');
+  }
+  /** Sobres sugeridos para un movimiento: regla, el último usado con ese comercio, uno con el nombre de la categoría */
+  function sugerirSobres(m, sentido) {
+    var nombres = SB().lista.map(function (s) { return s.nombre; }), out = [];
+    var add = function (n) { if (n && nombres.indexOf(n) >= 0 && out.indexOf(n) < 0) out.push(n); };
+    if (m.tipo === 'Pago de tarjeta') add(sobreTarjetas());
+    add(m.sobre);
+    var com = sinTildes(m.comercio || '').slice(0, 14);
+    if (com) {
+      var porFila = {}; D.movimientos.forEach(function (x) { porFila[x.fila] = x; });
+      (D.sobresMov || []).slice().reverse().forEach(function (x) {
+        var mm = x.movimiento ? porFila[x.movimiento] : null;
+        if (mm && mm !== m && x.sobre && sinTildes(mm.comercio || '').slice(0, 14) === com && (sentido === 'entra') === (x.monto > 0)) add(x.sobre);
+      });
+    }
+    var cat = sinTildes(m.categoria || '');
+    if (cat) nombres.forEach(function (n) { var s = sinTildes(nomSobre(n)); if (s.indexOf(cat.slice(0, 5)) >= 0 || (/servic/.test(cat) && /servic|luz|agua|internet/.test(s))) add(n); });
+    return out.slice(0, 2);
+  }
+  function sugerirCategorias(m) {
+    var out = [], cats = D.categorias || [], cuenta = {};
+    var com = sinTildes(m.comercio || '').slice(0, 10);
+    D.movimientos.forEach(function (x) { if (x !== m && x.categoria && x.tipo === 'Gasto') { cuenta[x.categoria] = (cuenta[x.categoria] || 0) + 1; if (com && sinTildes(x.comercio || '').slice(0, 10) === com && out.indexOf(x.categoria) < 0) out.push(x.categoria); } });
+    Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; }).forEach(function (c) { if (out.indexOf(c) < 0) out.push(c); });
+    if (!out.length) out = cats.slice();
+    return out.slice(0, 3);
+  }
+  function tarjetaRevisar(res) {
+    var r = revisarData(), n = r.accion.length, l = r.listos.length;
+    if (!n && !l) return '';
+    var nuevos = r.nuevos.length;
+    return '<button class="caja rev-ini' + (n ? ' borde-acento' : '') + '" onclick="App.ir(\'revisar\')"><span class="av-rev">📥</span><span class="cuerpo"><b>' +
+      (nuevos ? 'Llegaron ' + nuevos + ' movimiento' + (nuevos === 1 ? '' : 's') : 'Para revisar') + '</b><span class="chico">' +
+      (l ? '<span class="verde-pos">' + l + ' listo' + (l === 1 ? '' : 's') + ' ✓</span>' : '') + (l && n ? ' · ' : '') +
+      (n ? '<span class="acento">' + n + ' necesita' + (n === 1 ? '' : 'n') + ' un toque</span>' : '') + '</span></span><span class="flecha acento">›</span></button>';
+  }
+  function chipRev(txt, accion, on) { return '<button class="chip' + (on ? ' on' : '') + '" onclick="' + accion + '">' + txt + '</button>'; }
+  function q(s) { return esc(s).replace(/'/g, "\\'"); }
+  function pRevisar() {
+    var r = revisarData(), ef = C.efectosCuentas(D, ORIG());
+    var h = cabSimple('Para revisar', 'Lo que llegó');
+    if (!r.accion.length && !r.listos.length) {
+      h += '<div class="caja" style="text-align:center;gap:6px;padding:22px"><div style="font-size:36px">✅</div><b style="font-size:17px">Todo al día</b><span class="suave chico">No llegó nada nuevo y no hay nada pendiente.</span>' +
+        (leerJSONSeguro('mf-ultimo-lote') ? '<button class="btn sec" style="margin-top:10px" onclick="App.ir(\'aldia\')">Ver cómo quedó lo último</button>' : '') + '</div>';
+      $('p-revisar').innerHTML = h; return;
+    }
+    var cab = function (m, x) {
+      var ic = iconoMov(m), entra = m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo' || (m.tipo === 'Transferencia' && C.entraTransferencia(m));
+      return '<div class="rev-cab" onclick="App.formMovimiento(' + m.fila + ')"><span class="ico-cat" style="background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span>' +
+        '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(x || nombreBonito(m.comercio) || m.tipo) + '</span><span class="det" style="display:block">' +
+        fechaCorta(m.fecha).replace(/ \d{4}$/, '') + (hora(m.fecha) ? ' ' + hora(m.fecha) : '') + (m.cuenta ? ' · ' + esc(etiquetaCuenta(m.cuenta)) : '') + '</span></span>' +
+        '<span class="monto"><b class="' + (entra ? 'verde-pos' : '') + '">' + (entra ? '+' : m.tipo === 'Gasto' ? '−' : '') + din(m.monto, m.moneda).replace('−', '') + '</b></span></div>';
+    };
+    if (r.accion.length) {
+      h += '<div class="seccion-t">NECESITAN UN TOQUE · ' + r.accion.length + '</div>';
+      h += r.accion.map(function (a) {
+        var m = a.mov, f = m.fila, cuerpo = '';
+        if (a.tipo === 'sobre') {
+          var sug = sugerirSobres(m, 'sale');
+          if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c, i) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
+          cuerpo += '<div class="rev-q">' + (m.tipo === 'Pago de tarjeta' ? '¿De qué sobre sale lo que falta (' + txt(a.p.falta, m.moneda) + ')?' : a.p.asignado > 0.005 ? '¿De qué sobre sale lo que falta (' + txt(a.p.falta, m.moneda) + ')?' : '¿De qué sobre?') + '</div><div class="chips">' +
+            sug.map(function (s, i) { return chipRev(iconoSobre(s) + ' ' + esc(nomSobre(s)), 'App.rvSobre(' + f + ',\'' + q(s) + '\')', i === 0); }).join('') +
+            chipRev(sug.length ? 'Otro…' : 'Elegir sobre…', 'App.formAsignar(' + f + ')') + '</div>' +
+            (m.comercio && m.tipo !== 'Pago de tarjeta' ? '<label class="check chico rev-rec"><input type="checkbox" id="rv-rec-' + f + '" checked> Recordar para «' + esc(nombreBonito(m.comercio)) + '»</label>' : '');
+        } else if (a.tipo === 'entra') {
+          var sug2 = sugerirSobres(m, 'entra');
+          cuerpo = '<div class="rev-q">¿A qué sobre va' + (a.p.asignado > 0.005 ? ' lo que falta (' + txt(a.p.falta, m.moneda) + ')' : '') + '?</div><div class="chips">' +
+            (C.esSalario(m) || m.monto >= 100000 ? chipRev('↔ Repartir como siempre', 'App.rvRepartir(' + f + ')', true) : '') +
+            sug2.map(function (s, i) { return chipRev(iconoSobre(s) + ' ' + esc(nomSobre(s)), 'App.rvSobre(' + f + ',\'' + q(s) + '\')', i === 0 && !(C.esSalario(m) || m.monto >= 100000)); }).join('') +
+            chipRev('Elegir…', 'App.formAsignar(' + f + ')') + '</div>';
+        } else if (a.tipo === 'origen') {
+          var monA = m.moneda === 'USD' ? 'USD' : 'CRC';
+          var otras = cuentasAhorro().filter(function (c) { return (c.moneda === 'USD' ? 'USD' : 'CRC') === monA; }).map(function (c) { return c.nombre; }).filter(function (n) { return n !== a.cuenta; });
+          var pri = ORIG().principal; otras.sort(function (x, y) { return (y === pri) - (x === pri); });
+          cuerpo = '<div class="rev-q">¿De dónde vino esta plata?</div><div class="chips">' +
+            otras.slice(0, 2).map(function (n, i) { return chipRev('🏦 ' + esc(n), 'App.rvOrigen(' + f + ',\'cuenta\',\'' + q(n) + '\')', i === 0); }).join('') +
+            chipRev('💰 Me pagaron', 'App.rvOrigen(' + f + ',\'ingreso\')') + chipRev('🔁 Otra cuenta mía', 'App.rvOrigen(' + f + ',\'fuera\')') + '</div>' +
+            '<button class="enlace chico" onclick="App.formOrigenPlata(' + f + ')">¿Era plata de un sobre? Elegirlo ›</button>';
+          return '<div class="caja rev-it borde-acento">' + cab(m, 'Entró a ' + a.cuenta) + cuerpo + '</div>';
+        } else {
+          cuerpo = '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c, i) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\')', i === 0); }).join('') +
+            chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
+        }
+        return '<div class="caja rev-it borde-acento">' + cab(m) + cuerpo + '</div>';
+      }).join('');
+    }
+    if (r.listos.length) {
+      h += '<div class="seccion-t">LISTOS SOLOS · ' + r.listos.length + '</div>' + r.listos.map(function (m) {
+        return '<div class="caja rev-it">' + cab(m) + '<div class="rev-ok">✓ ' + esc(queHizo(m, ef)) + '</div></div>';
+      }).join('');
+    }
+    h += '<div class="rev-barra"><button class="btn" onclick="App.rvTodoBien()">' + (r.accion.length ? 'Listo por ahora ✓' : 'Todo bien ✓') + '</button>' +
+      '<button class="btn sec" onclick="App.rvRaro()">Algo está raro</button></div>' +
+      (r.accion.length ? '<div class="suave chico" style="text-align:center">Lo que necesita un toque se queda aquí hasta que lo resolvás.</div>' : '');
+    $('p-revisar').innerHTML = h;
+  }
+  function rvSobre(fila, sobre) {
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p) return pintar();
+    var m = p.mov, entra = p.sentido === 'entra';
+    var lista = [{ fecha: fechaSobre(m), sobre: sobre, monto: (entra ? 1 : -1) * Math.round(p.falta * 100) / 100, tipo: entra ? 'Ingreso' : m.tipo === 'Pago de tarjeta' ? 'Pago tarjeta' : p.tarjeta ? 'Compra con tarjeta' : 'Gasto', movimiento: fila, grupo: grupoNuevo(), nota: m.comercio || '' }];
+    encolar('guardarSobresMov', [lista], 'Asignar ' + (m.comercio || m.tipo) + ' → ' + sobre + ' · ' + txt(p.falta, m.moneda));
+    var rec = $('rv-rec-' + fila);
+    if (rec && rec.checked && m.comercio) encolar('guardarReglaSobre', [m.comercio, sobre], 'Recordar ' + m.comercio + ' → ' + sobre);
+    marcarVistos([m]); sbMemo = null; pintar();
+    toast('✉ ' + nomSobre(sobre) + (rec && rec.checked ? ' · la próxima vez se asigna solo' : ''), 2500);
+  }
+  function rvRepartir(fila) { marcarVistos([movPorFila(fila)].filter(Boolean)); irReparto(fila); }
+  function rvOrigen(fila, op, cuenta) { OP = { fila: fila, op: op, cuenta: cuenta || '', sobre: '' }; marcarVistos([movPorFila(fila)].filter(Boolean)); guardarOrigenPlata(fila); }
+  function rvCategoria(fila, cat, seguir) {
+    var m = movPorFila(fila); if (!m) return;
+    var nm = { fila: fila, control: { monto: m.monto }, fecha: m.fecha, monto: m.monto, moneda: m.moneda, tipo: m.tipo, comercio: m.comercio, lugar: m.lugar, cuenta: m.cuenta,
+      categoria: cat, sobre: m.sobre, nota: m.nota, origen: m.origen, autorizacion: m.autorizacion, recordarRegla: !!m.comercio };
+    encolar('guardarMovimiento', [nm], 'Categoría ' + cat + ' · ' + (m.comercio || m.tipo));
+    if (!seguir) marcarVistos([m]); pintar(); toast('✓ ' + cat + (m.comercio ? ' · la próxima vez se pone sola' : ''), 2500);
+  }
+  function rvTodoBien() {
+    var r = revisarData();
+    var lote = r.listos.concat(r.accion.map(function (a) { return a.mov; })).concat(r.nuevos);
+    var filas = []; lote.forEach(function (m) { if (filas.indexOf(m.fila) < 0) filas.push(m.fila); });
+    if (filas.length) guardar('mf-ultimo-lote', JSON.stringify({ filas: filas, fecha: new Date().toISOString() }));
+    marcarVistos(r.nuevos.concat(r.listos));
+    ir('aldia');
+  }
+  function rvRaro() { toast('Tocá el movimiento que está mal: se abre aquí para corregirlo (tipo, cuenta, fecha…). No hace falta entrar a la hoja.', 6000); }
+  function rvCubrir(nombre) { SOB = { nombre: nombre, f: 'mes', vista: [] }; formCargarSobre(1); }
+  function pAlDia() {
+    var lote = leerJSONSeguro('mf-ultimo-lote') || { filas: [] }, set = {};
+    lote.filas.forEach(function (f) { set[f] = 1; });
+    var movs = D.movimientos.filter(function (m) { return set[m.fila]; });
+    var pend = revisarData().accion.length;
+    var h = cabSimple(pend ? 'Casi al día' : 'Todo al día ✓', lote.fecha ? 'Revisado ' + fechaCorta(lote.fecha).replace(/ \d{4}$/, '') + (hora(lote.fecha) ? ' ' + hora(lote.fecha) : '') : 'Hoy');
+    h += pend ? '<button class="caja borde-acento rev-ini" onclick="App.ir(\'revisar\')"><span class="av-rev">⚠</span><span class="cuerpo"><b>Quedan ' + pend + ' por resolver</b><span class="chico suave">Tocá para terminarlos</span></span><span class="flecha acento">›</span></button>'
+      : '<div class="caja" style="text-align:center;gap:4px;padding:18px"><div style="font-size:34px">✅</div><b style="font-size:17px">Listo, no hay nada pendiente</b><span class="suave chico">Así quedaron tus cuentas con lo que revisaste</span></div>';
+    var fila = function (a, b, cls, d, accion) {
+      return '<div class="ad-fila"' + (accion ? ' onclick="' + accion + '"' : '') + '><span class="ad-n">' + a + '</span><span class="ad-v"><b class="' + (cls || '') + '">' + b + '</b>' + (d ? '<span class="suave">' + d + '</span>' : '') + '</span></div>';
+    };
+    var sumas = function (lista, fn) { var o = { CRC: 0, USD: 0 }; lista.forEach(function (m) { if (fn(m)) o[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto; }); return o; };
+    var tm = function (o) { return [o.CRC ? txt(o.CRC, 'CRC') : '', o.USD ? txt(o.USD, 'USD') : ''].filter(String).join(' + '); };
+    // tarjetas
+    var tjs = D.cuentas.filter(function (c) { return c.activa && c.tipo === 'Tarjeta de crédito'; });
+    var tjH = tjs.map(function (c) {
+      var mm = movs.filter(function (m) { return m.cuenta === c.nombre; });
+      var dt = C.deudaTarjeta(D, c), comp = sumas(mm, function (m) { return m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero'; }), pag = sumas(mm, function (m) { return m.tipo === 'Pago de tarjeta' || m.tipo === 'Ingreso'; });
+      var d = mm.length ? [comp.CRC || comp.USD ? '+' + tm(comp) + ' compras' : '', pag.CRC || pag.USD ? '−' + tm(pag) + ' pagos' : ''].filter(String).join(' · ') : 'sin cambios';
+      return { cambio: mm.length > 0, h: fila(esc(c.nombre), dosMon(dt), mm.length ? 'acento' : '', d, 'App.verCuentaMov(\'' + q(c.nombre) + '\')') };
+    });
+    tjH.sort(function (a, b) { return b.cambio - a.cambio; });
+    if (tjH.length) h += '<div class="seccion-t">TARJETAS</div><div class="caja ad-caja">' + tjH.map(function (x) { return x.h; }).join('') + '</div>';
+    // cuentas
+    var o = ORIG(), ef = C.efectosCuentas(D, o);
+    var ctH = cuentasAhorro().map(function (c) {
+      var e = ef.filter(function (x) { return x.cuenta === c.nombre && ((x.mov && set[x.mov.fila]) || (x.pago && false)); });
+      var ent = 0, sal = 0, mon = c.moneda === 'USD' ? 'USD' : 'CRC';
+      e.forEach(function (x) { if (x.moneda !== mon) return; if (x.signo > 0) ent += x.monto; else sal += x.monto; });
+      var sc = C.saldoCuenta(D, c, o);
+      var d = e.length ? [ent ? '+' + txt(ent, mon) : '', sal ? '−' + txt(sal, mon) : ''].filter(String).join(' · ') : 'sin cambios';
+      return { cambio: e.length > 0, h: fila(esc(c.nombre), sc.vivo ? dosMon(sc, mon) : '—', '', d + (sc.vivo ? '' : ' · sin saldo anotado'), 'App.verCuentaMov(\'' + q(c.nombre) + '\')') };
+    });
+    ctH.sort(function (a, b) { return b.cambio - a.cambio; });
+    if (ctH.length) h += '<div class="seccion-t">CUENTAS</div><div class="caja ad-caja">' + ctH.map(function (x) { return x.h; }).join('') + '</div>';
+    // sobres que cambiaron
+    if (!sinServidorSobres()) {
+      var sbh = C.saldosSobres(D, hoy, hoy), tocados = {};
+      (D.sobresMov || []).forEach(function (x) { if (x.movimiento && set[x.movimiento] && x.sobre) tocados[x.sobre] = 1; });
+      movs.forEach(function (m) { if (m.sobre) tocados[m.sobre] = 1; });
+      var neg = sbh.lista.filter(function (s) { return s.saldo < -0.005 && tocados[s.nombre]; });
+      var lista = sbh.lista.filter(function (s) { return tocados[s.nombre]; });
+      if (lista.length) {
+        h += '<div class="seccion-t">SOBRES QUE CAMBIARON</div><div class="caja ad-caja">' + lista.map(function (s) {
+          var i = SB().lista.map(function (x) { return x.nombre; }).indexOf(s.nombre);
+          return fila(iconoSobre(s.nombre) + ' ' + esc(nomSobre(s.nombre)), din(s.saldo, s.moneda), s.saldo < -0.005 ? 'rojo' : '', s.saldo < -0.005 ? 'falta cubrir' : '', i >= 0 ? 'App.verSobre(' + i + ')' : '');
+        }).join('') + '</div>';
+        neg.slice(0, 2).forEach(function (s) { h += '<button class="btn" onclick="App.rvCubrir(\'' + q(s.nombre) + '\')">Cubrir ' + esc(nomSobre(s.nombre)) + ' (' + txt(-s.saldo, s.moneda) + ')</button>'; });
+      }
+    }
+    h += '<button class="btn sec" onclick="App.ir(\'inicio\')">Volver a Inicio</button>';
+    $('p-aldia').innerHTML = h;
+  }
+
   return {
+    rvSobre: rvSobre, rvRepartir: rvRepartir, rvOrigen: rvOrigen, rvCategoria: rvCategoria, rvTodoBien: rvTodoBien, rvRaro: rvRaro, rvCubrir: rvCubrir,
     formOrigenPlata: formOrigenPlata, guardarOrigenPlata: guardarOrigenPlata,
     verSobre: verSobre, sobreFiltro: sobreFiltro, irListaSobre: irListaSobre, editarSobre: editarSobre, verSobreMov: verSobreMov, deshacerSobreMov: deshacerSobreMov, formCargarSobre: formCargarSobre, cgMov: cgMov, cgBoton: cgBoton, guardarCargar: guardarCargar,
     formCuadrar: formCuadrar, cuadrarVista: cuadrarVista, guardarCuadrar: guardarCuadrar, formOrigenes: formOrigenes, guardarOrigenes: guardarOrigenes, verCuentaMov: verCuentaMov, cmFiltro: cmFiltro, rgMes: rgMes, rgDia: rgDia, rgAplicar: rgAplicar, movPer: movPer,

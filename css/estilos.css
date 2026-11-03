@@ -894,3 +894,25 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .dos > .btn, .dos > a.btn { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; line-height: 1.2; font-size: 15px; padding: 0 10px; }
 .mini-graf i.nada { height: 3px; min-height: 3px; background: none; border-bottom: 2px dashed var(--borde); border-radius: 0; }
 .caja.borde-acento { border-color: var(--acento); }
+/* ================= v2.6.0 · Para revisar / Todo al día ================= */
+.rev-ini { display: flex; flex-direction: row; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer; color: var(--texto); font: inherit; padding: 14px; }
+.rev-ini .cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; } .rev-ini b { font-size: 16px; }
+.av-rev { width: 42px; height: 42px; border-radius: 12px; background: color-mix(in srgb, var(--acento) 18%, transparent); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.rev-ini .flecha { font-size: 22px; font-weight: 800; }
+.rev-it { gap: 8px; padding: 12px; }
+.rev-cab { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.rev-cab .cuerpo { flex: 1; min-width: 0; } .rev-cab .nombre { font-weight: 700; font-size: 15px; overflow-wrap: break-word; } .rev-cab .det { font-size: 12.5px; color: var(--suave); }
+.rev-cab .monto { flex-shrink: 0; white-space: nowrap; text-align: right; }
+.rev-q { font-size: 13.5px; color: var(--suave); }
+.rev-it .chips { flex-wrap: wrap; gap: 6px; }
+.rev-ok { font-size: 13px; color: var(--positivo); overflow-wrap: break-word; }
+.rev-rec { margin: 0; font-size: 12.5px; color: var(--suave); }
+.rev-barra { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.ad-caja { padding: 4px 14px; gap: 0; }
+.ad-fila { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--linea); cursor: pointer; }
+.ad-fila:last-child { border-bottom: 0; }
+.ad-n { min-width: 0; font-size: 14.5px; overflow-wrap: break-word; }
+.ad-v { display: flex; flex-direction: column; align-items: flex-end; text-align: right; flex-shrink: 0; max-width: 60%; }
+.ad-v b { white-space: nowrap; } .ad-v .suave { font-size: 11.5px; }
+@media (max-width: 370px) { .rev-barra { grid-template-columns: 1fr; } }
+.rev-it button.enlace { background: none; border: 0; padding: 4px 0; text-align: left; color: var(--acento); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
