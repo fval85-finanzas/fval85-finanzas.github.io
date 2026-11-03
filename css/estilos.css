@@ -893,3 +893,4 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .item .monto .origen { white-space: normal; overflow-wrap: break-word; max-width: 34vw; margin-left: auto; } .item.mov .monto { max-width: 46%; }
 .dos > .btn, .dos > a.btn { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; line-height: 1.2; font-size: 15px; padding: 0 10px; }
 .mini-graf i.nada { height: 3px; min-height: 3px; background: none; border-bottom: 2px dashed var(--borde); border-radius: 0; }
+.caja.borde-acento { border-color: var(--acento); }

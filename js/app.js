@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.5.6';
+  var VERSION_WEB = '2.5.7';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -173,7 +173,7 @@ var App = (function () {
       if (m.fila) { var o = movF(m.fila); if (o) Object.assign(o, datos); }
       else if (!movF(it.temp)) D.movimientos.push(Object.assign({ fila: it.temp, subcuenta: '', viaje: '' }, datos));
     },
-    marcarMovimiento: function (args) { var o = movF(args[0]); if (o) o[{ 'Subcuenta': 'subcuenta', 'Viaje': 'viaje', 'Para otra persona': 'para', 'Cobro': 'cobro', 'Nota': 'nota' }[args[1]] || 'x'] = args[2]; },
+    marcarMovimiento: function (args) { var o = movF(args[0]); if (o) o[{ 'Subcuenta': 'subcuenta', 'Viaje': 'viaje', 'Para otra persona': 'para', 'Cobro': 'cobro', 'Nota': 'nota', 'Desde': 'desde' }[args[1]] || 'x'] = args[2]; },
     actualizarSaldoCuenta: function (args) { var c = D.cuentas.filter(function (x) { return x.fila === args[0]; })[0]; if (c) { c.saldoCRC = args[1]; c.saldoUSD = args[2]; c.fechaSaldo = args[3]; } },
     guardarAbonoTC: function (args, it) {
       var x = args[0];
@@ -254,7 +254,17 @@ var App = (function () {
   // ---- datos guardados en el teléfono: la app abre al instante y se actualiza por detrás
   function leerJSONSeguro(k) { try { var t = localStorage.getItem(k); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
   function leerCache() { try { var t = localStorage.getItem('mf-cache'); return t ? limpiarD(JSON.parse(t)) : null; } catch (e) { return null; } }
-  function limpiarD(d) { if (d && d.sobres) d.sobres = d.sobres.filter(C.esSobreReal); if (d && d.cuentas) d.cuentas = d.cuentas.filter(C.esCuentaReal); return d; }   // v2.4: sin filas de totales/notas
+  function limpiarD(d) {
+    if (d && d.sobres) d.sobres = d.sobres.filter(C.esSobreReal);
+    if (d && d.cuentas) {
+      d.cuentas = d.cuentas.filter(C.esCuentaReal);
+      // v2.5.7: "Ahorros BCR colones" y "Ahorros BCR Colones" son la misma cuenta (mayúsculas, tildes, espacios)
+      var canon = {}; d.cuentas.forEach(function (c) { canon[C.normNom(c.nombre)] = c.nombre; });
+      (d.movimientos || []).forEach(function (m) { var k = m.cuenta && canon[C.normNom(m.cuenta)]; if (k) m.cuenta = k; });
+      (d.tasaCero || []).forEach(function (x) { var k = x.tarjeta && canon[C.normNom(x.tarjeta)]; if (k) x.tarjeta = k; });
+    }
+    return d;
+  }   // v2.4: sin filas de totales/notas
   function guardarCache(json) { try { localStorage.setItem('mf-cache', json); } catch (e) { /* sin espacio: no pasa nada */ } }
   var pintarPendiente = false;
   function sincronizando() { /* v1.9: la descarga es silenciosa */ }
@@ -275,7 +285,7 @@ var App = (function () {
       if (cb) cb();
       if (cola.length) enviarCola();
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
-      intentarRepartoSalario(); finPlanPendiente();
+      intentarRepartoSalario(); finPlanPendiente(); autoSobreDesde();
       var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
       if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); if (irA === 'revisar') ir('movimientos', 'revisar'); else ir(irA); }
       if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
@@ -1846,7 +1856,7 @@ var App = (function () {
     var h = cabMes('Sobres', botonNuevo('Nuevo sobre', 'App.formSobre()'));
     if (sinServidorSobres()) { $('p-sobres').innerHTML = h + avisoServidor(); return; }
     var sb = SB();
-    var nPend = sb.pendientes.length;
+    var nPend = sb.pendientes.length + sinOrigen().length;
     h += '<div class="hero"><div style="display:flex;align-items:center;gap:6px"><span class="et" style="font-size:13px;font-weight:600">Dinero en sobres</span>' + botonOjo() + '</div>' +
       '<div style="display:flex;gap:18px;align-items:baseline;flex-wrap:wrap"><span class="grande">' + din(sb.total.CRC, 'CRC') + '</span>' + (sb.total.USD ? '<span class="medio">' + din(sb.total.USD, 'USD') + '</span>' : '') + '</div>' +
       '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Por asignar' + (nPend ? ' (' + nPend + ')' : '') + '</span><b style="color:var(--acento)">' + din(sb.porAsignar.CRC, 'CRC') + (sb.porAsignar.USD ? ' + ' + din(sb.porAsignar.USD, 'USD') : '') + '</b></div>' +
@@ -1881,8 +1891,13 @@ var App = (function () {
   function pPorAsignar() {
     var h = cabSimple('Por asignar', 'Sobres', 'App.ir(\'sobres\')');
     if (sinServidorSobres()) { $('p-porasignar').innerHTML = h + avisoServidor(); return; }
-    var sb = SB();
-    if (!sb.pendientes.length) h += '<div class="caja vacio">Todo está asignado. 🎉</div>';
+    var sb = SB(), so = sinOrigen();
+    if (so.length) h += '<div class="seccion-t">ENTRÓ PLATA A TUS CUENTAS · ¿DE DÓNDE VINO?</div><div class="caja sinpad borde-acento">' + so.map(function (x) {
+      var m = x.mov;
+      return '<button class="item" onclick="App.formOrigenPlata(' + m.fila + ')"><span class="ico" style="background:rgba(91,141,239,.15)">🏦</span><span class="cuerpo"><span class="nombre" style="display:block">Entró a ' + esc(x.cuenta) + '</span>' +
+        '<span class="det" style="display:block">' + esc(fechaCorta(m.fecha).replace(/ \d{4}$/, '') + (hora(m.fecha) ? ' ' + hora(m.fecha) : '') + ' · ¿de dónde vino?') + '</span></span><span class="monto"><b class="verde" style="display:block">+' + din(m.monto, m.moneda) + '</b></span></button>';
+    }).join('') + '</div>';
+    if (!sb.pendientes.length && !so.length) h += '<div class="caja vacio">Todo está asignado. 🎉</div>';
     else {
       var entra = sb.pendientes.filter(function (p) { return p.sentido === 'entra'; }), sale = sb.pendientes.filter(function (p) { return p.sentido === 'sale'; });
       if (entra.length) h += '<div class="seccion-t">ENTRÓ DINERO</div><div class="caja sinpad">' + entra.map(itemPend).join('') + '</div>';
@@ -4733,7 +4748,9 @@ var App = (function () {
     var o = ORIG(), sel = function (id, v) { return '<select id="' + id + '">' + opciones(ah, v) + '</select>'; };
     abrir('<h2>🏦 Cuentas de dónde salen los pagos</h2><div class="suave">Los pagos de tarjeta y del préstamo se anotan en la tarjeta o el préstamo, pero la plata sale de tu cuenta. Elegí de cuál:</div>' +
       '<label class="campo"><span>Cuenta principal (salario, SINPE y movimientos sin cuenta)</span>' + sel('or-pr', o.principal) + '</label>' +
-      '<label class="campo"><span>Pagos de tarjetas salen de</span>' + sel('or-tj', o.tarjetas) + '</label>' +
+      '<label class="campo"><span>Pagos de tarjetas salen de (por defecto)</span>' + sel('or-tj', o.tarjetas) + '</label>' +
+      (Object.keys(o.porTarjeta).length ? '<div class="caja" style="background:var(--fondo);gap:2px;margin-top:10px"><b style="font-size:14px">Cada tarjeta se paga desde</b><span class="suave chico">Se usa cuando el pago no tiene al lado un débito de cuenta por el mismo monto. Por defecto, la cuenta del mismo banco.</span>' +
+        Object.keys(o.porTarjeta).map(function (n, i) { return '<label class="campo compacto"><span>' + esc(etiquetaCuenta(n)) + '</span><select id="or-pt' + i + '" data-tarjeta="' + esc(n) + '">' + opciones(ah, o.porTarjeta[n]) + '</select></label>'; }).join('') + '</div>' : '') +
       '<label class="campo"><span>Cuota del préstamo sale de</span>' + sel('or-pt', o.prestamo) + '</label>' +
       '<label class="campo"><span>Aportes a fondos salen de (y los retiros entran a)</span>' + sel('or-fo', o.fondos) + '</label>' +
       '<div class="caja" style="background:var(--fondo);gap:4px;margin-top:12px;font-size:13.5px"><b>Qué suma y qué resta</b>' +
@@ -4742,7 +4759,8 @@ var App = (function () {
       '<div class="acciones"><button class="btn" onclick="App.guardarOrigenes()">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function guardarOrigenes() {
-    guardarPrefs({ origenes: { principal: val('or-pr'), tarjetas: val('or-tj'), prestamo: val('or-pt'), fondos: val('or-fo') } }, 'Cuentas de dónde salen los pagos');
+    var pt = {}; Array.prototype.forEach.call(document.querySelectorAll('select[data-tarjeta]'), function (s) { pt[s.getAttribute('data-tarjeta')] = s.value; });
+    guardarPrefs({ origenes: { principal: val('or-pr'), tarjetas: val('or-tj'), prestamo: val('or-pt'), fondos: val('or-fo'), porTarjeta: pt } }, 'Cuentas de dónde salen los pagos');
     hecho('✅ Guardado');
   }
 
@@ -4993,7 +5011,84 @@ var App = (function () {
     hecho('✅ ' + (dir > 0 ? 'Cargado ' : 'Descargado ') + txt(monto, mon) + (dir > 0 ? ' a ' : ' de ') + nomSobre(yo));
   }
 
+  // ---- v2.5.7: ¿de dónde vino esta plata? (entradas a una cuenta que la app no puede explicar sola)
+  function sinOrigen() {
+    if (!D) return [];
+    var ef = C.efectosCuentas(D, ORIG()), lim = new Date(hoy.getTime() - 60 * 86400000);
+    return (ef.sinOrigen || []).filter(function (x) {
+      var c = cuentaPorNombre(x.cuenta), desde = c && c.fechaSaldo ? new Date(c.fechaSaldo) : null;
+      var f = new Date(x.mov.fecha);
+      return f >= lim && (!desde || f > desde) && x.mov.fila > 0;
+    }).sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+  }
+  var OP = null;
+  function formOrigenPlata(fila, op) {
+    var m = movPorFila(fila); if (!m) return;
+    var x = sinOrigen().filter(function (y) { return y.mov.fila === fila; })[0], dest = x ? x.cuenta : m.cuenta;
+    var otras = cuentasAhorro().map(function (c) { return c.nombre; }).filter(function (n) { return n !== dest; });
+    if (!OP || OP.fila !== fila) OP = { fila: fila, op: otras.length ? 'cuenta' : 'ingreso', cuenta: otras.indexOf(ORIG().principal) >= 0 ? ORIG().principal : otras[0], sobre: '' };
+    if ($('op-cuenta')) OP.cuenta = val('op-cuenta');
+    if ($('op-sobre')) OP.sobre = val('op-sobre');
+    if (op) OP.op = op;
+    var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
+    var bloque = function (k, tit, det, extra, apagado) {
+      return '<div class="op-g' + (OP.op === k ? ' on' : '') + (apagado ? ' apagado' : '') + '" role="button" tabindex="0" onclick="' + (apagado ? '' : 'App.formOrigenPlata(' + fila + ',\'' + k + '\')') + '"><b>' + tit + '</b><span>' + det + '</span>' + (OP.op === k && extra ? '<div class="op-x" onclick="event.stopPropagation()">' + extra + '</div>' : '') + '</div>';
+    };
+    var selC = '<select id="op-cuenta">' + opciones(otras, OP.cuenta) + '</select>';
+    var selS = sinServidorSobres() ? '' : '<label class="campo compacto" style="margin-top:8px"><span>¿Era plata de un sobre?</span><select id="op-sobre"><option value="__sin">No, era plata libre</option>' + opcionesSobre(mon, OP.sobre, true) + '</select></label>' +
+      '<div class="suave chico" style="margin-top:6px">✓ Si elegís un sobre, cuando llegue el pago de la tarjeta por este monto se descuenta de ese sobre solo.</div>';
+    abrir('<div class="suave chico">' + esc(etiquetaCuenta(dest)) + ' · ' + fechaCorta(m.fecha) + (hora(m.fecha) ? ' ' + hora(m.fecha) : '') + '</div><h2>¿De dónde vino esta plata?</h2>' +
+      '<div class="cifra-g verde-pos">+' + din(m.monto, mon) + '</div>' +
+      bloque('cuenta', '🏦 De mi cuenta' + (otras.length === 1 ? ' ' + esc(otras[0]) : ''), otras.length ? 'La resto de esa cuenta.' : 'No tenés otra cuenta de ahorro en la app.', (otras.length > 1 ? selC : '') + selS, !otras.length) +
+      bloque('ingreso', '💰 Me pagaron (venta, me devolvieron…)', 'Es ingreso: la repartís en sobres como cualquier entrada.') +
+      bloque('fuera', '🔁 De otra cuenta mía que no está en la app', 'Suma en ' + esc(dest) + ' sin restar de ninguna cuenta.') +
+      '<div class="acciones"><button class="btn" id="op-ok" onclick="App.guardarOrigenPlata(' + fila + ')">Listo</button><button class="btn sec" onclick="App.cerrar()">Ahora no</button></div>');
+    if (OP.sobre && $('op-sobre')) $('op-sobre').value = OP.sobre;
+  }
+  function guardarOrigenPlata(fila) {
+    var m = movPorFila(fila); if (!m || !OP) return;
+    if ($('op-cuenta')) OP.cuenta = val('op-cuenta');
+    if ($('op-sobre')) OP.sobre = val('op-sobre');
+    var sobre = OP.sobre && OP.sobre.indexOf('__') !== 0 ? OP.sobre : '';
+    if (OP.op === 'cuenta') {
+      if (!OP.cuenta) return toast('Elegí la cuenta.');
+      encolar('marcarMovimiento', [fila, 'Desde', 'Cuenta: ' + OP.cuenta + (sobre ? ' | Sobre: ' + sobre : ''), { monto: m.monto }], 'De dónde vino: ' + OP.cuenta + (sobre ? ' · sobre ' + sobre : ''));
+      OP = null; hecho('✅ Listo: la plata salió de ' + OP_cuentaTxt(m, fila) + (sobre ? '. El pago de la tarjeta se descuenta de ' + nomSobre(sobre) + ' solo.' : '.'));
+      autoSobreDesde();
+    } else if (OP.op === 'fuera') {
+      encolar('marcarMovimiento', [fila, 'Desde', 'Fuera de la app', { monto: m.monto }], 'De dónde vino: otra cuenta fuera de la app');
+      OP = null; hecho('✅ Listo: suma en la cuenta sin restar de ninguna otra.');
+    } else {
+      var nm = { fila: fila, control: { monto: m.monto }, fecha: m.fecha, monto: m.monto, moneda: m.moneda, tipo: 'Ingreso', comercio: /^entr[oó] a/i.test(m.comercio || '') ? 'Me pagaron (' + (m.cuenta || 'cuenta') + ')' : m.comercio,
+        lugar: m.lugar, cuenta: m.cuenta, categoria: m.categoria, sobre: '', nota: m.nota, origen: m.origen, autorizacion: m.autorizacion };
+      encolar('guardarMovimiento', [nm], 'Ingreso: ' + (nm.comercio || 'me pagaron') + ' · ' + txt(m.monto, m.moneda));
+      OP = null; cerrar(); pintar(); toast('💰 Es ingreso. Ahora repartilo en sobres.', 3500);
+      setTimeout(function () { formAsignar(fila); }, 350);
+    }
+  }
+  function OP_cuentaTxt(m, fila) { var d = C.leerDesde(movPorFila(fila) || {}); return d && d.cuenta ? d.cuenta : 'tu cuenta'; }
+  /** Pago de tarjeta pendiente de sobre que se pagó con plata pasada desde un sobre → se asigna solo a ese sobre. */
+  function autoSobreDesde() {
+    if (!D || sinServidorSobres()) return;
+    var hechos = leerJSONSeguro('mf-auto-sobre') || [], cambios = 0;
+    D.movimientos.forEach(function (t) {
+      var de = t.tipo === 'Transferencia' ? C.leerDesde(t) : null;
+      if (!de || !de.sobre || t.fila < 0) return;
+      var p = SB().pendientes.filter(function (x) {
+        return x.mov.tipo === 'Pago de tarjeta' && x.mov.fila > 0 && x.falta > 0.005 && Math.abs(x.mov.monto - t.monto) < 0.01 && (x.mov.moneda || 'CRC') === (t.moneda || 'CRC') &&
+          Math.abs(new Date(x.mov.fecha) - new Date(t.fecha)) <= 3 * 86400000 && hechos.indexOf(x.mov.fila + '|' + t.fila) < 0;
+      })[0];
+      if (!p) return;
+      hechos.push(p.mov.fila + '|' + t.fila); cambios++;
+      encolar('guardarSobresMov', [[{ fecha: fechaSobre(p.mov), sobre: de.sobre, monto: -Math.round(p.falta * 100) / 100, tipo: 'Pago tarjeta', movimiento: p.mov.fila, grupo: grupoNuevo(), nota: 'Plata pasada desde ' + de.cuenta }]],
+        'Pago de ' + etiquetaCuenta(p.mov.cuenta) + ' → sobre ' + de.sobre + ' (solo)');
+      sbMemo = null;
+    });
+    if (cambios) { guardar('mf-auto-sobre', JSON.stringify(hechos.slice(-200))); toast('✉ Pago de tarjeta descontado solo del sobre elegido.', 3500); if (D) pintar(); }
+  }
+
   return {
+    formOrigenPlata: formOrigenPlata, guardarOrigenPlata: guardarOrigenPlata,
     verSobre: verSobre, sobreFiltro: sobreFiltro, irListaSobre: irListaSobre, editarSobre: editarSobre, verSobreMov: verSobreMov, deshacerSobreMov: deshacerSobreMov, formCargarSobre: formCargarSobre, cgMov: cgMov, cgBoton: cgBoton, guardarCargar: guardarCargar,
     formCuadrar: formCuadrar, cuadrarVista: cuadrarVista, guardarCuadrar: guardarCuadrar, formOrigenes: formOrigenes, guardarOrigenes: guardarOrigenes, verCuentaMov: verCuentaMov, cmFiltro: cmFiltro, rgMes: rgMes, rgDia: rgDia, rgAplicar: rgAplicar, movPer: movPer,
     iniciar: iniciar, ir: ir, cambiarMes: cambiarMes, cerrar: cerrar,

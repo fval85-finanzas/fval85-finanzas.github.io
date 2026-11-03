@@ -187,7 +187,7 @@ var Calc = (function () {
    *  - Los pagos del préstamo salen solos del sobre de la cuota de la casa.
    */
   function esTarjeta(d, nombre) {
-    return (d.cuentas || []).some(function (c) { return c.nombre === nombre && c.tipo === 'Tarjeta de crédito'; });
+    return (d.cuentas || []).some(function (c) { return normNom(c.nombre) === normNom(nombre) && c.tipo === 'Tarjeta de crédito'; });
   }
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
@@ -465,7 +465,7 @@ var Calc = (function () {
     // la fecha del saldo es un día: cuenta lo de después de ese día
     var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
     (d.movimientos || []).forEach(function (m) {
-      if (m.cuenta !== c.nombre || !m.fecha || new Date(m.fecha) < corte) return;
+      if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha || new Date(m.fecha) < corte) return;
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
       if (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') { r.sube[mon] += m.monto; r.compras++; }
       else if (m.tipo === 'Pago de tarjeta' || m.tipo === 'Ingreso') r.baja[mon] += m.monto;   // pagos y devoluciones
@@ -552,17 +552,34 @@ var Calc = (function () {
   var NO_AHORRO = ['Tarjeta de crédito', 'Préstamo', 'Inversión'];
   function esAhorro(c) { return !!c && NO_AHORRO.indexOf(c.tipo) < 0; }
   /** Cuenta principal y de dónde sale cada pago. o = { principal, tarjetas, prestamo, fondos } (nombres). */
+  /** v2.5.7: nombres de cuenta iguales sin importar mayúsculas, tildes ni espacios */
+  function normNom(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  /** Cuenta principal y de dónde sale cada pago. o = { principal, tarjetas, prestamo, fondos, porTarjeta: { tarjeta: cuenta } } (nombres). */
   function origenes(d, pref) {
     var ah = (d.cuentas || []).filter(function (c) { return c.activa !== false && esAhorro(c) && esCuentaReal(c); });
-    var existe = function (n) { return n && ah.some(function (c) { return c.nombre === n; }); };
+    var canon = function (n) { var c = n && ah.filter(function (x) { return normNom(x.nombre) === normNom(n); })[0]; return c ? c.nombre : ''; };
     pref = pref || {};
     var def = (ah.filter(function (c) { return (c.moneda || 'CRC') === 'CRC' && /ahorro/i.test(c.tipo + ' ' + c.nombre); })[0] || ah.filter(function (c) { return (c.moneda || 'CRC') === 'CRC'; })[0] || ah[0] || {}).nombre || '';
-    var principal = existe(pref.principal) ? pref.principal : def;
-    return { principal: principal, tarjetas: existe(pref.tarjetas) ? pref.tarjetas : principal, prestamo: existe(pref.prestamo) ? pref.prestamo : principal, fondos: existe(pref.fondos) ? pref.fondos : principal };
+    var principal = canon(pref.principal) || def, tarjetas = canon(pref.tarjetas) || principal;
+    var porTarjeta = {}, elegidas = pref.porTarjeta || {};
+    (d.cuentas || []).filter(function (c) { return c.tipo === 'Tarjeta de crédito' && esCuentaReal(c); }).forEach(function (c) {
+      var k = Object.keys(elegidas).filter(function (x) { return normNom(x) === normNom(c.nombre); })[0];
+      var mismoBanco = c.banco ? ah.filter(function (a) { return normNom(a.banco) === normNom(c.banco) && (a.moneda || 'CRC') === 'CRC'; })[0] : null;
+      porTarjeta[c.nombre] = (k && canon(elegidas[k])) || (mismoBanco ? mismoBanco.nombre : tarjetas);
+    });
+    return { principal: principal, tarjetas: tarjetas, prestamo: canon(pref.prestamo) || principal, fondos: canon(pref.fondos) || principal, porTarjeta: porTarjeta };
+  }
+  /** v2.5.7: "Cuenta: Ahorros BCR | Sobre: Ventas" / "Fuera de la app" (lo que la persona contestó a "¿de dónde vino esta plata?") */
+  function leerDesde(m) {
+    var s = String((m && m.desde) || '').trim();
+    if (!s) return null;
+    if (/^fuera/i.test(s)) return { tipo: 'fuera' };
+    var mm = s.match(/^cuenta:\s*(.+?)\s*(?:\|\s*sobre:\s*(.+))?$/i);
+    return mm ? { tipo: 'cuenta', cuenta: mm[1].trim(), sobre: (mm[2] || '').trim() } : null;
   }
   /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
   function efectoCuenta(d, m, o) {
-    var cta = (d.cuentas || []).filter(function (c) { return c.nombre === m.cuenta; })[0];
+    var cta = m.cuenta ? (d.cuentas || []).filter(function (c) { return normNom(c.nombre) === normNom(m.cuenta); })[0] : null;
     if (cta && !esCuentaReal(cta)) cta = null;
     if (m.tipo === 'Pago de tarjeta') return o.tarjetas ? { cuenta: o.tarjetas, signo: -1, grupo: 'pagos' } : null;
     if (m.tipo === 'Inversión') return o.fondos ? { cuenta: o.fondos, signo: -1, grupo: 'pagos' } : null;
@@ -582,12 +599,13 @@ var Calc = (function () {
    */
   function efectosCuentas(d, o) {
     var out = [], ctas = d.cuentas || [];
-    var ahorro = function (n) { var c = ctas.filter(function (x) { return x.nombre === n; })[0]; return c && esAhorro(c) && esCuentaReal(c) ? c.nombre : null; };
+    var ahorro = function (n) { var c = n && ctas.filter(function (x) { return normNom(x.nombre) === normNom(n); })[0]; return c && esAhorro(c) && esCuentaReal(c) ? c.nombre : null; };
     var mon = function (m) { return m.moneda === 'USD' ? 'USD' : 'CRC'; };
+    var ahorroTarjeta = function (n) { var c = n && ctas.filter(function (x) { return normNom(x.nombre) === normNom(n); })[0]; return c ? c.nombre : n; };
     var cerca = function (a, b) { return Math.abs(new Date(a.fecha) - new Date(b.fecha)) <= 2 * 86400000 && Math.abs((a.monto || 0) - (b.monto || 0)) < 0.01 && mon(a) === mon(b); };
     var movs = (d.movimientos || []).filter(function (m) { return m.fecha; });
     var trans = movs.filter(function (m) { return m.tipo === 'Transferencia'; }).map(function (m) {
-      return { m: m, cuenta: ahorro(m.cuenta) || (m.cuenta && ctas.some(function (x) { return x.nombre === m.cuenta; }) ? null : o.principal), entra: entraTransferencia(m), par: null, pago: null };
+      return { m: m, cuenta: ahorro(m.cuenta) || (m.cuenta && ctas.some(function (x) { return normNom(x.nombre) === normNom(m.cuenta); }) ? null : o.principal), entra: entraTransferencia(m), par: null, pago: null, desde: leerDesde(m) };
     }).filter(function (x) { return x.cuenta; });
     trans.forEach(function (a) {   // emparejar salida ↔ entrada entre cuentas distintas
       if (a.par || !a.entra) return;
@@ -600,14 +618,19 @@ var Calc = (function () {
       if (sal) { sal.pago = p; out.push({ cuenta: sal.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: sal.m.fecha, monto: p.monto, moneda: mon(p) }); return; }
       var ent = trans.filter(function (y) { return y.entra && !y.pago && cerca(p, y.m); })[0];
       if (ent) { ent.pago = p; out.push({ cuenta: ent.cuenta, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) }); return; }
-      if (o.tarjetas) out.push({ cuenta: o.tarjetas, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) });
+      var dePago = ahorro((o.porTarjeta || {})[ahorroTarjeta(p.cuenta)]) || o.tarjetas;
+      if (dePago) out.push({ cuenta: dePago, signo: -1, grupo: 'pagos', mov: p, fecha: p.fecha, monto: p.monto, moneda: mon(p) });
     });
     trans.forEach(function (x) {
       if (x.pago && !x.entra) return;   // la salida ya quedó como el pago de la tarjeta
       out.push({ cuenta: x.cuenta, signo: x.entra ? 1 : -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m) });
-      if (x.entra && !x.par && o.principal && x.cuenta !== o.principal)   // entró plata tuya sin ver de dónde: sale de la principal
-        out.push({ cuenta: o.principal, signo: -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m), texto: 'Pasó a ' + x.cuenta });
+      if (!x.entra || x.par) return;
+      // entró plata tuya sin ver de dónde: lo que contestaste a "¿de dónde vino?"; si no contestaste, de la principal
+      if (x.desde && x.desde.tipo === 'fuera') return;
+      var de = x.desde && x.desde.tipo === 'cuenta' ? ahorro(x.desde.cuenta) : o.principal;
+      if (de && de !== x.cuenta) out.push({ cuenta: de, signo: -1, grupo: 'transf', mov: x.m, fecha: x.m.fecha, monto: x.m.monto, moneda: mon(x.m), texto: 'Pasó a ' + x.cuenta });
     });
+    out.sinOrigen = trans.filter(function (x) { return x.entra && !x.par && !x.desde; }).map(function (x) { return { mov: x.m, cuenta: x.cuenta }; });
     movs.forEach(function (m) {
       if (m.tipo === 'Pago de tarjeta' || m.tipo === 'Transferencia') return;
       var e = efectoCuenta(d, m, o);
@@ -734,7 +757,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
