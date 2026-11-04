@@ -193,9 +193,11 @@ var Calc = (function () {
   /** ¿Este movimiento se reparte en sobres? 'entra' | 'sale' | null */
   function esCobro(m) { return /^Pago de /.test(m.cobro || ''); }
   function sentidoSobre(d, m) {
+    if (esSacarMeter(m) || esCompraTarjeta(d, m)) return null;   // v2.8.0
     if (m.para && m.tipo !== 'Ingreso') return null;   // v2.2: comprado para otra persona: no toca sobres
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
     if (m.tipo === 'Inversión' || m.tipo === 'Pago de tarjeta' || m.tipo === 'Gasto') return 'sale';
+    if (m.tipo === 'Transferencia') return entraTransferencia(m) ? 'entra' : 'sale';
     return null;
   }
   /**
@@ -203,48 +205,69 @@ var Calc = (function () {
    * "reservado" para la tarjeta. Cuando llega el pago de la tarjeta, lo reservado lo cubre solo (no se descuenta dos veces);
    * solo se pregunta por lo que falte (intereses, cuotas tasa cero, compras sin sobre).
    */
-  function analizarSobres(d) {
+  /**
+   * v2.8.0 · ESPEJO DEL BANCO: los sobres son los sobres del BCR.
+   *  - Las compras con tarjeta NO tocan sobres (solo deuda). Lo que se haya asignado antes a compras con tarjeta se ignora.
+   *  - Se pregunta por sobre solo lo que entra o sale de la cuenta principal (salario, SINPE, transferencias, pagos desde el BCR).
+   *  - "Sobre → disponible" (sacar) y "Disponible → sobre" (meter) son filas de Movimientos que mueven el sobre sin tocar el total de la cuenta.
+   */
+  var TIPO_SACAR = 'Sobre → disponible', TIPO_METER = 'Disponible → sobre';
+  function esSacarMeter(m) { return m && (m.tipo === TIPO_SACAR || m.tipo === TIPO_METER); }
+  function esCompraTarjeta(d, m) { return !!m && (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && esTarjeta(d, m.cuenta); }
+  function origenesDe(d) { return origenes(d, ((d.ajustes || {}).prefs || {}).origenes); }
+  function analizarSobres(d, o) {
     var desde = d.sobresDesde ? soloFecha(new Date(d.sobresDesde)) : null;
-    var efectos = [], porMov = {}, pendientes = [], reservado = {}, cubierto = {};
+    var efectos = [], porMov = {}, pendientes = [], porFila = {};
+    (d.movimientos || []).forEach(function (m) { porFila[m.fila] = m; });
     (d.sobresMov || []).forEach(function (x) {
+      var mm = x.movimiento ? porFila[x.movimiento] : null;
+      if (mm && esCompraTarjeta(d, mm)) return;   // asignaciones viejas de compras con tarjeta: ya no cuentan
       if (x.movimiento) (porMov[x.movimiento] = porMov[x.movimiento] || []).push(x);
       if (x.sobre) efectos.push({ sobre: x.sobre, monto: x.monto, fecha: x.fecha, tipo: x.tipo, grupo: x.grupo, movimiento: x.movimiento || null, nota: x.nota });
     });
+    (d.movimientos || []).forEach(function (m) {   // sacar / meter
+      if (!esSacarMeter(m) || !m.sobre || !m.fecha) return;
+      efectos.push({ sobre: m.sobre, monto: m.tipo === TIPO_SACAR ? -m.monto : m.monto, fecha: m.fecha, tipo: m.tipo === TIPO_SACAR ? 'Sacar' : 'Meter', movimiento: m.fila, nota: m.comercio });
+    });
     if (!desde) return { efectos: efectos, pendientes: [], porMov: porMov, desde: null, reservado: {}, cubierto: {} };
-    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && sentidoSobre(d, m); })
+    o = o || origenesDe(d);
+    var neto = {};   // lo que cada movimiento hizo en la cuenta principal
+    if (o.principal) efectosCuentas(d, o).forEach(function (e) { if (e.cuenta === o.principal && e.mov && e.mov.fila) neto[e.mov.fila] = (neto[e.mov.fila] || 0) + e.signo * e.monto; });
+    else (d.movimientos || []).forEach(function (m) {   // sin cuenta de ahorro en la hoja: como antes, por el tipo
+      var s = sentidoSobre(d, m); if (s) neto[m.fila] = (s === 'entra' ? 1 : -1) * (m.monto || 0);
+    });
+    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && !esSacarMeter(m) && !esCompraTarjeta(d, m) && !(m.para && m.tipo !== 'Ingreso') && Math.abs(neto[m.fila] || 0) > 0.005; })
       .slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
     movs.forEach(function (m) {
-      var sentido = sentidoSobre(d, m), tarjeta = m.tipo === 'Gasto' && esTarjeta(d, m.cuenta);
+      var n = neto[m.fila], sentido = n > 0 ? 'entra' : 'sale', total = Math.abs(n);
       var filas = porMov[m.fila] || [];
       var explicito = filas.reduce(function (a, x) { return a + Math.abs(x.monto); }, 0);
-      var aSobres = filas.reduce(function (a, x) { return a + (x.sobre ? Math.abs(x.monto) : 0); }, 0);
       if (!filas.length && m.sobre && m.tipo !== 'Pago de tarjeta') {
         var nombre = m.sobre;
-        // inversiones anotadas antes de elegir el sobre de fondos (quedaron con el nombre "Fondos")
         if (m.tipo === 'Inversión' && (d.sobreEspecial || {}).fondos && !(d.sobres || []).some(function (s) { return s.nombre === nombre; })) nombre = d.sobreEspecial.fondos;
-        efectos.push({ sobre: nombre, monto: sentido === 'entra' ? m.monto : -m.monto, fecha: m.fecha, tipo: m.tipo === 'Inversión' ? 'Inversión' : tarjeta ? 'Compra con tarjeta' : 'Regla', movimiento: m.fila });
-        explicito = aSobres = m.monto;
+        efectos.push({ sobre: nombre, monto: sentido === 'entra' ? total : -total, fecha: m.fecha, tipo: m.tipo === 'Inversión' ? 'Inversión' : 'Regla', movimiento: m.fila });
+        explicito = total;
       }
-      var clave = m.cuenta + '|' + (m.moneda === 'USD' ? 'USD' : 'CRC');   // lo reservado se lleva por tarjeta y moneda
-      if (tarjeta) reservado[clave] = (reservado[clave] || 0) + aSobres;
-      var auto = 0;
-      if (m.tipo === 'Pago de tarjeta') {
-        auto = Math.max(0, Math.min(reservado[clave] || 0, m.monto - explicito));
-        if (auto) { reservado[clave] -= auto; cubierto[m.fila] = auto; }
-      }
-      var falta = m.monto - explicito - auto;
-      if (falta > 0.005) pendientes.push({ mov: m, sentido: sentido, falta: falta, asignado: explicito + auto, reservadoUsado: auto, tarjeta: tarjeta });
+      var falta = total - explicito;
+      if (falta > 0.005) pendientes.push({ mov: m, sentido: sentido, falta: falta, asignado: explicito, reservadoUsado: 0, tarjeta: false });
     });
     var esp = (d.sobreEspecial || {}).prestamo;
     if (esp && d.prestamo) (d.prestamo.pagos || []).forEach(function (p) {
       if (p.fecha && soloFecha(new Date(p.fecha)) >= desde && p.total) efectos.push({ sobre: esp, monto: -p.total, fecha: p.fecha, tipo: 'Préstamo' });
     });
     pendientes.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
-    return { efectos: efectos, pendientes: pendientes, porMov: porMov, desde: desde, reservado: reservado, cubierto: cubierto };
+    return { efectos: efectos, pendientes: pendientes, porMov: porMov, desde: desde, reservado: {}, cubierto: {} };
+  }
+  /** Lo que había en los sobres (en colones) al final del día `fecha` */
+  function sobresAl(d, fecha, o) {
+    var corte = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() + 1), an = analizarSobres(d, o), tot = 0, cr = {};
+    (d.sobres || []).forEach(function (s) { if ((s.moneda || 'CRC') === 'CRC') { cr[s.nombre] = 1; tot += s.saldoInicial || 0; } });
+    an.efectos.forEach(function (e) { if (cr[e.sobre] && e.fecha && new Date(e.fecha) < corte) tot += e.monto; });
+    return tot;
   }
   /** Saldo de cada sobre al final del mes `mes` (o hoy) y lo que entró / salió en ese mes. */
-  function saldosSobres(d, mes, hoy) {
-    var an = analizarSobres(d);
+  function saldosSobres(d, mes, hoy, o) {
+    var an = analizarSobres(d, o);
     var ini = new Date(mes.getFullYear(), mes.getMonth(), 1), fin = new Date(mes.getFullYear(), mes.getMonth() + 1, 1);
     var lista = (d.sobres || []).map(function (s) {
       var o = { fila: s.fila, nombre: s.nombre, moneda: s.moneda, tipo: s.tipo, asignado: s.asignado || 0, asignadoAuto: s.asignadoAuto,
@@ -567,7 +590,7 @@ var Calc = (function () {
       var mismoBanco = c.banco ? ah.filter(function (a) { return normNom(a.banco) === normNom(c.banco) && (a.moneda || 'CRC') === 'CRC'; })[0] : null;
       porTarjeta[c.nombre] = (k && canon(elegidas[k])) || (mismoBanco ? mismoBanco.nombre : tarjetas);
     });
-    return { principal: principal, tarjetas: tarjetas, prestamo: canon(pref.prestamo) || principal, fondos: canon(pref.fondos) || principal, porTarjeta: porTarjeta };
+    return { principal: principal, tarjetas: tarjetas, prestamo: canon(pref.prestamo) || principal, fondos: canon(pref.fondos) || principal, porTarjeta: porTarjeta, dispAnotado: pref.dispAnotado || {} };
   }
   /** v2.5.7: "Cuenta: Ahorros BCR | Sobre: Ventas" / "Fuera de la app" (lo que la persona contestó a "¿de dónde vino esta plata?") */
   function leerDesde(m) {
@@ -661,6 +684,11 @@ var Calc = (function () {
     if (!desde || isNaN(desde)) return r;
     r.vivo = true;
     var corte = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 1);
+    // v2.8.0: si lo que se anotó fue el DISPONIBLE (como en la app del banco), el total = disponible + lo que había en sobres ese día
+    var dia = desde.getFullYear() + '-' + ('0' + (desde.getMonth() + 1)).slice(-2) + '-' + ('0' + desde.getDate()).slice(-2);
+    if (o && o.principal === c.nombre && (o.dispAnotado || {})[c.nombre] === dia && (c.moneda || 'CRC') === 'CRC') {
+      r.dispBase = r.base.CRC; r.base.CRC = r.base.CRC + sobresAl(d, desde, o);
+    }
     movsCuenta(d, c, o).forEach(function (x) {
       if (new Date(x.fecha) < corte) return;
       if (x.grupo === 'transf') { r.transf[x.moneda] += x.monto; r.nTransf++; return; }
@@ -763,7 +791,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

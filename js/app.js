@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.7.0';
+  var VERSION_WEB = '2.8.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -285,7 +285,7 @@ var App = (function () {
       if (cb) cb();
       if (cola.length) enviarCola();
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
-      intentarRepartoSalario(); finPlanPendiente(); autoSobreDesde(); autoIVA();
+      intentarRepartoSalario(); finPlanPendiente(); migrarEspejo(); autoIVA(); autoSacado();
       var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
       if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); ir(irA); }
       if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
@@ -1567,6 +1567,8 @@ var App = (function () {
     if (m.tipo === 'Gasto' && !m.categoria) return ['?', 'var(--rojo)'];
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return ['↓', 'var(--positivo)'];
     if (m.tipo === 'Transferencia') return ['⇄', '#5B8DEF'];
+    if (m.tipo === C.TIPO_SACAR) return ['📤', '#F5B82E'];
+    if (m.tipo === C.TIPO_METER) return ['📥', '#3DD68C'];
     if (m.tipo === 'Pago de tarjeta') return ['💳', '#B794F6'];
     if (m.tipo === 'Inversión') return ['📈', '#B794F6'];
     if (m.tipo === 'Compra tasa cero') return ['◷', '#FF8A3D'];
@@ -1577,6 +1579,8 @@ var App = (function () {
   /** Etiqueta del sobre: verde si ya está asignado, amarilla si falta */
   function etiquetaSobre(m) {
     if (sinServidorSobres()) return '';
+    if (C.esCompraTarjeta(D, m)) return '';
+    if (C.esSacarMeter(m)) return '<span class="et-sobre ok">✉ ' + esc(nomSobre(m.sobre)) + '</span>';
     var sb = SB();
     if (!sb.desde || new Date(m.fecha) < sb.desde) return '';
     var p = sb.pendientes.filter(function (x) { return x.mov.fila === m.fila; })[0];
@@ -1802,8 +1806,7 @@ var App = (function () {
     var h = '<div class="cab"><div><div class="sobretitulo">' + nombreMes(mes) + '</div><h1 class="titulo">Tarjetas</h1></div><div class="mesnav">' + botonOjo().replace('class="ojo"', 'class="btn-icono"') + botonMas() + '</div></div>';
     if (datos.length) {
       h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Deuda total hoy</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span class="suave chico" style="white-space:nowrap;display:inline-block">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
-        (D.sobresDesde ? '<div style="text-align:right"><div class="suave chico">Cubierto por sobres</div><div class="fuerte verde-pos" style="font-size:21px">' + Math.round(pctCub * 100) + '%</div></div>' : '') + '</div>' +
-        (D.sobresDesde ? '<div class="barra"><i style="width:' + Math.min(100, pctCub * 100).toFixed(1) + '%;background:var(--positivo)"></i></div>' : '') + '</div>';
+        '</div></div>';
     }
     h += '<div class="caja sinpad">' + datos.map(function (x) {
       var c = x.c, ab = tarjetaAbierta === c.fila, g = res.porCuenta[c.nombre] || { CRC: 0, USD: 0, cuotasTC: { CRC: 0, USD: 0 } };
@@ -1834,8 +1837,7 @@ var App = (function () {
           (c.limiteCRC ? linea('Disponible', din(c.limiteCRC - Math.max(0, dt.CRC), 'CRC'), 'verde-pos') : '') +
           linea('Compras del mes', din(g.CRC, 'CRC') + (g.USD ? ' + ' + din(g.USD, 'USD') : '')) +
           (g.cuotasTC.CRC || g.cuotasTC.USD ? linea('Cuotas tasa cero del mes', din(g.cuotasTC.CRC, 'CRC') + (g.cuotasTC.USD ? ' + ' + din(g.cuotasTC.USD, 'USD') : '')) : '') +
-          (D.sobresDesde ? linea('Reservado en sobres', [x.rC > 0.005 || !x.rU ? din(x.rC, 'CRC') : '', x.rU > 0.005 ? din(x.rU, 'USD') : ''].filter(String).join(' + '), 'verde-pos') +
-            linea('Falta cubrir', [faltaC > 0.005 || !faltaU ? din(faltaC, 'CRC') : '', faltaU > 0.005 ? din(faltaU, 'USD') : ''].filter(String).join(' + '), faltaC + faltaU > 0.005 ? 'acento' : 'verde-pos') : '') +
+
           (x.uso !== null ? linea('Límite', din(c.limiteCRC, 'CRC') + ' · usado ' + Math.round(x.uso * 100) + '%') : '') +
           linea('Corte y pago', (c.diaCorte ? 'día ' + c.diaCorte : '—') + ' · ' + (c.diaPago ? 'día ' + c.diaPago : '—')) +
           (tcs.length ? '<div class="suave chico fuerte" style="margin-top:6px">CUOTAS TASA CERO</div>' + tcs.map(function (y) {
@@ -1894,7 +1896,7 @@ var App = (function () {
         '<span class="fuerte' + (neg ? ' rojo' : '') + '">' + din(s.saldo, s.moneda) + '</span></span>' +
         barra(avance, !s.meta && s.pct >= 0.85) + '<span class="chico suave">' + det + '</span></button>';
     }).join('') + '</div>';
-    h += '<div class="suave chico" style="text-align:center">Saldos desde el ' + fechaCorta(D.sobresDesde) + '. Las compras con tarjeta bajan el sobre al asignarlas; lo reservado paga la tarjeta.</div>';
+    h += '<div class="suave chico" style="text-align:center">Saldos desde el ' + fechaCorta(D.sobresDesde) + '. Los sobres son como los del BCR: las compras con tarjeta no los tocan; la plata sale cuando la sacás para pagar.</div>';
     $('p-sobres').innerHTML = h;
   }
 
@@ -1924,7 +1926,7 @@ var App = (function () {
       if (sale.length) h += '<div class="seccion-t">SALIÓ DINERO</div><div class="caja sinpad">' + sale.map(itemPend).join('') + '</div>';
     }
     if (D.fondos && FD().pendientes.length) h += '<div class="seccion-t">FONDOS: ¿A QUÉ SUBCUENTA?</div><div class="caja sinpad">' + FD().pendientes.map(itemFondoPend).join('') + '</div>';
-    h += '<div class="suave chico" style="text-align:center">Las compras con tarjeta bajan el sobre en el momento y quedan reservadas para pagar la tarjeta. Con «Recordar», las próximas del mismo comercio se asignan solas.</div>';
+    h += '<div class="suave chico" style="text-align:center">Aquí solo aparece lo que entra o sale de tu cuenta principal. Las compras con tarjeta no tocan los sobres.</div>';
     $('p-porasignar').innerHTML = h;
   }
 
@@ -4773,7 +4775,15 @@ var App = (function () {
     var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
     var banco = C.leerNumero(val('cq-banco'));
     if (banco === null) return toast('Escribí el saldo que dice el banco.');
-    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG()), es = enSobresDe(c) || 0;
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG()), es = enSobresDe(c);
+    if (es !== null) {   // v2.8.0: la principal guarda el DISPONIBLE; el total se calcula con los sobres de ese día (aunque se anote algo después)
+      var hoyD = new Date(), dia = hoyD.getFullYear() + '-' + ('0' + (hoyD.getMonth() + 1)).slice(-2) + '-' + ('0' + hoyD.getDate()).slice(-2);
+      var da = {}; da[c.nombre] = dia;
+      guardarPrefs({ origenes: Object.assign({}, PREFS().origenes || {}, { dispAnotado: Object.assign({}, (PREFS().origenes || {}).dispAnotado || {}, da) }) }, 'Disponible de ' + c.nombre);
+      encolar('actualizarSaldoCuenta', [fila, Math.round(banco * 100) / 100, Math.round((sc.vivo ? sc.USD : c.saldoUSD || 0) * 100) / 100, desdeInput(localInput())], 'Disponible de ' + c.nombre + ' · ' + txt(banco, mon));
+      return hecho('✅ Cuadrado: disponible ' + txt(banco, mon) + ' (igual que en el banco). Desde mañana se mueve solo.');
+    }
+    es = 0;
     var crc = mon === 'CRC' ? banco + es : (sc.vivo ? sc.CRC : c.saldoCRC || 0), usd = mon === 'USD' ? banco : (sc.vivo ? sc.USD : c.saldoUSD || 0);
     encolar('actualizarSaldoCuenta', [fila, Math.round(crc * 100) / 100, Math.round(usd * 100) / 100, desdeInput(localInput())], 'Saldo de ' + c.nombre + ' · ' + txt(banco, mon));
     hecho('✅ Cuadrado con el banco' + (es ? ' (disponible ' + txt(banco, mon) + ' + sobres ' + txt(es, 'CRC') + ')' : '') + '. Desde mañana se mueve solo.');
@@ -4830,10 +4840,15 @@ var App = (function () {
       var sale = m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero';
       return { fecha: m.fecha, mov: m, moneda: m.moneda === 'USD' ? 'USD' : 'CRC', monto: (sale ? -1 : 1) * m.monto, grupo: sale ? 'sale' : 'entra' };
     }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); }) : C.movsCuenta(D, c, o);
+    if (!tj && o.principal === c.nombre) {   // v2.8.0: sacar / meter de sobres (como en la app del banco)
+      items = items.concat(D.movimientos.filter(function (m) { return C.esSacarMeter(m) && m.fecha; }).map(function (m) {
+        return { fecha: m.fecha, mov: m, moneda: 'CRC', monto: (m.tipo === C.TIPO_SACAR ? 1 : -1) * m.monto, grupo: 'sobre' };
+      })).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    }
     var r = rangoCM(c);
     var lista = items.filter(function (x) { var f = new Date(x.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]); });
     var sum = { e: { CRC: 0, USD: 0 }, s: { CRC: 0, USD: 0 } };
-    lista.forEach(function (x) { sum[x.monto >= 0 ? 'e' : 's'][x.moneda] += Math.abs(x.monto); });
+    lista.forEach(function (x) { if (x.grupo !== 'sobre') sum[x.monto >= 0 ? 'e' : 's'][x.moneda] += Math.abs(x.monto); });
     var h = cabSimple('Movimientos', esc(c.nombre));
     var hoyV = tj ? C.deudaTarjeta(D, c) : C.saldoCuenta(D, c, o), mon = c.moneda === 'USD' && !tj ? 'USD' : 'CRC';
     var col = function (t, v, cls) { return '<div><span>' + t + '</span><b class="' + (cls || '') + '">' + v + '</b></div>'; };
@@ -4861,7 +4876,8 @@ var App = (function () {
     var det = d.getDate() + ' ' + MESES_C[d.getMonth()] + (m && hora(m.fecha) ? ' · ' + hora(m.fecha) : '');
     if (m && !tj && (m.tipo === 'Inversión' || m.tipo === 'Retiro de fondo' || m.tipo === 'Transferencia')) det += ' · ' + esc(m.tipo === 'Transferencia' ? 'entre tus cuentas' : m.tipo);
     else if (m && m.tipo === 'Gasto' && m.categoria) det += ' · ' + esc(m.categoria);
-    var et = m && m.tipo === 'Gasto' ? etiquetaSobre(m) : '';
+    var et = m && (m.tipo === 'Gasto' || C.esSacarMeter(m)) ? etiquetaSobre(m) : '';
+    if (x.grupo === 'sobre') det += ' · ' + (m.tipo === C.TIPO_SACAR ? 'del sobre al disponible' : 'del disponible al sobre');
     return '<button class="item fb" onclick="' + (m ? 'App.formMovimiento(' + m.fila + ')' : 'App.ir(\'prestamo\')') + '"><span class="punto ' + (entra ? 'v' : 'r') + '"></span>' +
       '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombre) + '</span><span class="det" style="display:block">' + det + (et ? ' ' + et : '') + '</span></span>' +
       '<span class="monto"><b class="' + (entra ? 'verde-pos' : '') + '">' + (entra ? '+' : '−') + din(Math.abs(x.monto), x.moneda) + '</b></span></button>';
@@ -4917,6 +4933,7 @@ var App = (function () {
     if (e.tipo === 'Limpiar') return e.monto >= 0 ? 'Limpieza: llegó lo que sobró' : 'Limpieza: lo que sobró se fue';
     if (e.tipo === 'Préstamo') return 'Cuota del préstamo';
     if (e.tipo === 'Cargar' || e.tipo === 'Descargar') return e.nota || (e.monto >= 0 ? 'Desde lo libre de la cuenta' : 'A lo libre de la cuenta');
+    if (e.tipo === 'Sacar' || e.tipo === 'Meter') return (e.nota || (e.tipo === 'Sacar' ? 'Sacado al disponible' : 'Metido desde el disponible')).replace(/^(Sacado del sobre|Metido al sobre) [^·]+· ?/, function (x, y) { return y === 'Sacado del sobre' ? 'Sacado · ' : 'Metido · '; });
     if (m) {
       if (m.tipo === 'Ingreso') return (e.tipo === 'Reparto' ? (C.esSalario(m) ? 'Reparto del salario' : 'Reparto · ' + (nombreBonito(m.comercio) || 'ingreso')) : (nombreBonito(m.comercio) || 'Ingreso'));
       if (m.tipo === 'Pago de tarjeta') return 'Pago de ' + etiquetaCuenta(m.cuenta);
@@ -4936,7 +4953,7 @@ var App = (function () {
       (meta ? ' · meta ' + din(meta, mon) : '') + (s.asignado ? ' · ' + din(s.asignado, mon) + '/mes' : '') + '</span></div></div>' +
       '<div class="sb-et">Saldo del sobre</div><div class="cifra-g' + (neg ? ' rojo' : '') + '">' + din(hs.saldo, mon) + '</div>' +
       (meta ? barra(pm) + '<div class="sb-et">' + Math.max(0, Math.round(pm * 100)) + '% de la meta' + (pm < 1 ? ' · faltan ' + din(meta - hs.saldo, mon) : ' · ¡lograda!') + '</div>' : '') +
-      iconos([['📥', 'Cargar', 'App.formCargarSobre(1)', true], ['📤', 'Descargar', 'App.formCargarSobre(-1)'], ['🧾', 'Movimientos', 'App.irListaSobre()'], ['✏️', 'Editar', 'App.editarSobre()']]) + '</div>';
+      iconos([['📥', 'Meter', 'App.formSacarMeter(1)', true], ['📤', 'Sacar', 'App.formSacarMeter(-1)'], ['🧾', 'Movimientos', 'App.irListaSobre()'], ['✏️', 'Editar', 'App.editarSobre()']]) + '</div>';
     // período
     var r = SOB.f === 'mes' ? C.rangoPeriodo('mes', hoy) : SOB.f === 'pasado' ? C.rangoPeriodo('pasado', hoy) : [null, null];
     var en = hs.lista.filter(function (e) { var f = new Date(e.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]) && (SOB.f !== 'cargas' || e.monto >= 0) && (SOB.f !== 'descargas' || e.monto < 0); });
@@ -5071,7 +5088,7 @@ var App = (function () {
       return '<div class="op-g' + (OP.op === k ? ' on' : '') + (apagado ? ' apagado' : '') + '" role="button" tabindex="0" onclick="' + (apagado ? '' : 'App.formOrigenPlata(' + fila + ',\'' + k + '\')') + '"><b>' + tit + '</b><span>' + det + '</span>' + (OP.op === k && extra ? '<div class="op-x" onclick="event.stopPropagation()">' + extra + '</div>' : '') + '</div>';
     };
     var selC = '<select id="op-cuenta">' + opciones(otras, OP.cuenta) + '</select>';
-    var selS = sinServidorSobres() ? '' : '<label class="campo compacto" style="margin-top:8px"><span>¿Era plata de un sobre?</span><select id="op-sobre"><option value="__sin">No, era plata libre</option>' + opcionesSobre(mon, OP.sobre, true) + '</select></label>' +
+    var selS = true ? '' : '<label class="campo compacto" style="margin-top:8px"><span>¿Era plata de un sobre?</span><select id="op-sobre"><option value="__sin">No, era plata libre</option>' + opcionesSobre(mon, OP.sobre, true) + '</select></label>' +
       '<div class="suave chico" style="margin-top:6px">✓ Si elegís un sobre, cuando llegue el pago de la tarjeta por este monto se descuenta de ese sobre solo.</div>';
     abrir('<div class="suave chico">' + esc(etiquetaCuenta(dest)) + ' · ' + fechaCorta(m.fecha) + (hora(m.fecha) ? ' ' + hora(m.fecha) : '') + '</div><h2>¿De dónde vino esta plata?</h2>' +
       '<div class="cifra-g verde-pos">+' + din(m.monto, mon) + '</div>' +
@@ -5105,6 +5122,7 @@ var App = (function () {
   function OP_cuentaTxt(m, fila) { var d = C.leerDesde(movPorFila(fila) || {}); return d && d.cuenta ? d.cuenta : 'tu cuenta'; }
   /** Pago de tarjeta pendiente de sobre que se pagó con plata pasada desde un sobre → se asigna solo a ese sobre. */
   function autoSobreDesde() {
+    return;   // v2.8.0: ya no se usa (el sobre se elige al sacar la plata)
     if (!D || sinServidorSobres()) return;
     var hechos = leerJSONSeguro('mf-auto-sobre') || [], cambios = 0;
     D.movimientos.forEach(function (t) {
@@ -5170,7 +5188,8 @@ var App = (function () {
     var mios = ef.filter(function (e) { return e.mov === m; });
     if (m.tipo === 'Pago de tarjeta') {
       var de = mios.filter(function (e) { return e.grupo === 'pagos'; })[0];
-      return (sb && sb.cubierto[m.fila] ? 'Cubierto con lo reservado en sobres' : 'Pago asignado') + (de ? ' · sale de ' + de.cuenta : '');
+      var sc0 = sb ? (sb.porMov[m.fila] || []).filter(function (x) { return /Con lo sacado de /.test(x.nota || ''); })[0] : null;
+      return 'Pago de la tarjeta' + (sc0 ? ' con lo que sacaste de ' + nomSobre(sc0.nota.replace(/^Con lo sacado de /, '').replace(/ · .*$/, '')) : '') + (de ? ' · sale de ' + de.cuenta : '');
     }
     if (m.tipo === 'Transferencia') {
       var pago = D.movimientos.filter(function (p) { return p.tipo === 'Pago de tarjeta' && Math.abs(p.monto - m.monto) < 0.01 && Math.abs(new Date(p.fecha) - new Date(m.fecha)) < 2 * 86400000; })[0];
@@ -5179,6 +5198,12 @@ var App = (function () {
       return 'Entre tus cuentas' + (d && d.cuenta ? ' · vino de ' + d.cuenta : d && d.tipo === 'fuera' ? ' · de fuera de la app' : '');
     }
     if (m.para) return '🤝 Para ' + m.para + ' (Me deben)';
+    if (C.esCompraTarjeta(D, m)) return 'Suma a la deuda de ' + etiquetaCuenta(m.cuenta) + (m.categoria ? ' · ' + m.categoria : '');
+    if (C.esSacarMeter(m)) return (m.tipo === C.TIPO_SACAR ? '📤 Sale del sobre ' : '📥 Entra al sobre ') + nomSobre(m.sobre) + (m.tipo === C.TIPO_SACAR ? ' → disponible' : ' ← disponible');
+    var fs0 = sb ? (sb.porMov[m.fila] || []) : [];
+    var sac = fs0.filter(function (x) { return /Con lo sacado de /.test(x.nota || ''); })[0];
+    if (sac) return '✓ Con lo que sacaste de ' + nomSobre(sac.nota.replace(/^Con lo sacado de /, '').replace(/ · .*$/, ''));
+    if (fs0.length && fs0.every(function (x) { return !x.sobre; })) return '🪙 ' + (fs0[0].monto > 0 ? 'Quedó en el disponible' : 'Salió del disponible');
     var filas = sb ? (sb.porMov[m.fila] || []).filter(function (x) { return x.sobre; }) : [];
     var nombres = []; filas.forEach(function (x) { if (nombres.indexOf(x.sobre) < 0) nombres.push(x.sobre); });
     if (nombres.length) return '✉ ' + nombres.map(nomSobre).join(', ');
@@ -5202,7 +5227,9 @@ var App = (function () {
     }
     var cat = sinTildes(m.categoria || '');
     if (cat) nombres.forEach(function (n) { var s = sinTildes(nomSobre(n)); if (s.indexOf(cat.slice(0, 5)) >= 0 || (/servic/.test(cat) && /servic|luz|agua|internet/.test(s))) add(n); });
-    return out.slice(0, 2);
+    if (out.length < 2) SB().lista.filter(function (s) { return s.moneda === (m.moneda === 'USD' ? 'USD' : 'CRC') && (sentido === 'entra' || s.saldo > 0.005); })   // v2.8.0: si no hay pista, los sobres con más plata
+      .sort(function (a, b) { return b.saldo - a.saldo; }).forEach(function (s) { add(s.nombre); });
+    return out.slice(0, sentido === 'entra' ? 2 : 3);
   }
   function sugerirCategorias(m) {
     var out = [], cats = D.categorias || [], cuenta = {};
@@ -5244,25 +5271,23 @@ var App = (function () {
         var m = a.mov, f = m.fila, cuerpo = '';
         if (a.tipo === 'sobre') {
           var sug = sugerirSobres(m, 'sale');
-          if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c, i) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
-          cuerpo += '<div class="rev-q">' + (m.tipo === 'Pago de tarjeta' ? '¿De qué sobre sale lo que falta (' + txt(a.p.falta, m.moneda) + ')?' : a.p.asignado > 0.005 ? '¿De qué sobre sale lo que falta (' + txt(a.p.falta, m.moneda) + ')?' : '¿De qué sobre?') + '</div><div class="chips">' +
-            sug.map(function (s, i) { return chipRev(iconoSobre(s) + ' ' + esc(nomSobre(s)), 'App.rvSobre(' + f + ',\'' + q(s) + '\')', i === 0); }).join('') +
-            chipRev(sug.length ? 'Otro…' : 'Elegir sobre…', 'App.formAsignar(' + f + ')') + '</div>' +
-            (m.comercio && m.tipo !== 'Pago de tarjeta' ? '<label class="check chico rev-rec"><input type="checkbox" id="rv-rec-' + f + '" checked> Recordar para «' + esc(nombreBonito(m.comercio)) + '»</label>' : '');
+          if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
+          cuerpo += '<div class="rev-q">Salió de ' + esc(cuentaPrincipal() || 'la cuenta') + '. ¿La sacaste de un sobre?' + (a.p.asignado > 0.005 ? ' (faltan ' + txt(a.p.falta, m.moneda) + ')' : '') + '</div><div class="chips">' +
+            sug.map(function (s, i) { return chipRev('✉ ' + esc(nomSobre(s)), 'App.rvSacar(' + f + ',\'' + q(s) + '\')', i === 0); }).join('') +
+            chipRev(sug.length ? 'Otro sobre…' : 'Elegir sobre…', 'App.formAsignar(' + f + ')') + chipRev('🪙 No, del disponible', 'App.rvDisponible(' + f + ')') + '</div>';
         } else if (a.tipo === 'entra') {
           var sug2 = sugerirSobres(m, 'entra');
-          cuerpo = '<div class="rev-q">¿A qué sobre va' + (a.p.asignado > 0.005 ? ' lo que falta (' + txt(a.p.falta, m.moneda) + ')' : '') + '?</div><div class="chips">' +
+          cuerpo = '<div class="rev-q">Entró a ' + esc(cuentaPrincipal() || 'la cuenta') + '. ¿La metiste a un sobre?' + (a.p.asignado > 0.005 ? ' (faltan ' + txt(a.p.falta, m.moneda) + ')' : '') + '</div><div class="chips">' +
             (C.esSalario(m) || m.monto >= 100000 ? chipRev('↔ Repartir como siempre', 'App.rvRepartir(' + f + ')', true) : '') +
-            sug2.map(function (s, i) { return chipRev(iconoSobre(s) + ' ' + esc(nomSobre(s)), 'App.rvSobre(' + f + ',\'' + q(s) + '\')', i === 0 && !(C.esSalario(m) || m.monto >= 100000)); }).join('') +
-            chipRev('Elegir…', 'App.formAsignar(' + f + ')') + '</div>';
+            sug2.map(function (s, i) { return chipRev('✉ ' + esc(nomSobre(s)), 'App.rvMeter(' + f + ',\'' + q(s) + '\')', i === 0 && !(C.esSalario(m) || m.monto >= 100000)); }).join('') +
+            chipRev('Otro sobre…', 'App.formAsignar(' + f + ')') + chipRev('🪙 Dejarla disponible', 'App.rvDisponible(' + f + ')') + '</div>';
         } else if (a.tipo === 'origen') {
           var monA = m.moneda === 'USD' ? 'USD' : 'CRC';
           var otras = cuentasAhorro().filter(function (c) { return (c.moneda === 'USD' ? 'USD' : 'CRC') === monA; }).map(function (c) { return c.nombre; }).filter(function (n) { return n !== a.cuenta; });
           var pri = ORIG().principal; otras.sort(function (x, y) { return (y === pri) - (x === pri); });
           cuerpo = '<div class="rev-q">¿De dónde vino esta plata?</div><div class="chips">' +
             otras.slice(0, 2).map(function (n, i) { return chipRev('🏦 ' + esc(n), 'App.rvOrigen(' + f + ',\'cuenta\',\'' + q(n) + '\')', i === 0); }).join('') +
-            chipRev('💰 Me pagaron', 'App.rvOrigen(' + f + ',\'ingreso\')') + chipRev('🔁 Otra cuenta mía', 'App.rvOrigen(' + f + ',\'fuera\')') + '</div>' +
-            '<button class="enlace chico" onclick="App.formOrigenPlata(' + f + ')">¿Era plata de un sobre? Elegirlo ›</button>';
+            chipRev('💰 Me pagaron', 'App.rvOrigen(' + f + ',\'ingreso\')') + chipRev('🔁 Otra cuenta mía', 'App.rvOrigen(' + f + ',\'fuera\')') + '</div>';
           return '<div class="caja rev-it borde-acento">' + cab(m, 'Entró a ' + a.cuenta) + cuerpo + '</div>';
         } else if (a.tipo === 'iva') {
           cuerpo = '<div class="rev-q">Llegó en dólares' + (/cobro original/i.test(m.nota || '') ? ' (lo pasé a colones)' : '') + '. ¿El banco le cobra el IVA aparte?</div><div class="chips">' +
@@ -5321,7 +5346,7 @@ var App = (function () {
     ir('aldia');
   }
   function rvRaro() { toast('Tocá el movimiento que está mal: se abre aquí para corregirlo (tipo, cuenta, fecha…). No hace falta entrar a la hoja.', 6000); }
-  function rvCubrir(nombre) { SOB = { nombre: nombre, f: 'mes', vista: [] }; formCargarSobre(1); }
+  function rvCubrir(nombre) { SOB = { nombre: nombre, f: 'mes', vista: [] }; formSacarMeter(1); }
   function pAlDia() {
     var lote = leerJSONSeguro('mf-ultimo-lote') || { filas: [] }, set = {};
     lote.filas.forEach(function (f) { set[f] = 1; });
@@ -5479,7 +5504,130 @@ var App = (function () {
     return { disponible: sc.CRC - enS - res, enSobres: enS, reservado: res, total: sc.CRC };
   }
 
+  // ==================================================================== v2.8.0 · ESPEJO DEL BANCO (sobres como en el BCR)
+  function cuentaPrincipal() { return ORIG().principal || ''; }
+  /** Una sola vez: quitar las asignaciones viejas de compras con tarjeta (grupos que solo tienen compras con tarjeta) */
+  function migrarEspejo() {
+    if (!D || sinServidorSobres() || guardado('mf-mig-espejo', '') === '1') return;
+    var porFila = {}; D.movimientos.forEach(function (m) { porFila[m.fila] = m; });
+    var grupos = {};
+    (D.sobresMov || []).forEach(function (x) {
+      if (!x.grupo) return;
+      var g = grupos[x.grupo] = grupos[x.grupo] || { todas: true, n: 0 };
+      var mm = x.movimiento ? porFila[x.movimiento] : null;
+      g.n++; if (!(mm && C.esCompraTarjeta(D, mm))) g.todas = false;
+    });
+    var borrar = Object.keys(grupos).filter(function (k) { return grupos[k].todas; });
+    borrar.forEach(function (g) { encolar('eliminarGrupoSobres', [g], 'Quitar asignación vieja de compra con tarjeta'); });
+    guardar('mf-mig-espejo', '1');
+    if (borrar.length) toast('✉ Quité ' + borrar.length + ' asignación' + (borrar.length === 1 ? '' : 'es') + ' vieja' + (borrar.length === 1 ? '' : 's') + ' de compras con tarjeta. Los sobres ahora son como en el banco.', 6000);
+  }
+  /** Fila nueva en Movimientos: sacar de un sobre (→ disponible) o meter (← disponible) */
+  function filaSobre(tipo, sobre, monto, comercio, fecha, aut, nota) {
+    var m = { fila: null, control: null, fecha: fecha || new Date().toISOString(), monto: Math.round(monto * 100) / 100, moneda: 'CRC', tipo: tipo, comercio: comercio, lugar: '',
+      cuenta: cuentaPrincipal(), categoria: '', sobre: sobre, nota: nota || '', origen: 'Manual', autorizacion: aut || ('SOB-' + grupoNuevo()), recordarRegla: false };
+    encolar('guardarMovimiento', [m], comercio + ' · ' + txt(monto, 'CRC'));
+    marcarVistos([m]);
+    return m;
+  }
+  function descMov(m) { return m.tipo === 'Pago de tarjeta' ? 'pagar ' + etiquetaCuenta(m.cuenta) : m.tipo === 'Transferencia' ? (nombreBonito(m.comercio) || 'transferencia').replace(/^entr[oó] (a|desde) /i, 'pasar a ') : (nombreBonito(m.comercio) || m.tipo); }
+  /** "¿La sacaste de un sobre?" → sacar del sobre + la salida queda pagada con eso */
+  function rvSacar(fila, sobre) {
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p) return pintar();
+    var m = p.mov, f = new Date(new Date(m.fecha).getTime() - 60000).toISOString();
+    var s = filaSobre(C.TIPO_SACAR, sobre, p.falta, 'Sacado del sobre ' + nomSobre(sobre) + ' · para ' + descMov(m), f, 'SAC-' + (m.autorizacion || m.fila));
+    encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: -Math.round(p.falta * 100) / 100, tipo: 'Del disponible', movimiento: fila, grupo: grupoNuevo(), nota: 'Con lo sacado de ' + sobre + ' · ' + s.autorizacion }]], 'Salió con lo sacado de ' + sobre);
+    marcarVistos([m]); sbMemo = null; pintar(); toast('📤 Sacado de ' + nomSobre(sobre) + ' y anotado el pago', 2500);
+  }
+  function rvDisponible(fila) {
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p) return pintar();
+    var m = p.mov, entra = p.sentido === 'entra';
+    encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: (entra ? 1 : -1) * Math.round(p.falta * 100) / 100, tipo: entra ? 'Queda disponible' : 'Del disponible', movimiento: fila, grupo: grupoNuevo(), nota: m.comercio || '' }]], (entra ? 'Queda disponible: ' : 'Del disponible: ') + (m.comercio || m.tipo));
+    marcarVistos([m]); sbMemo = null; pintar(); toast(entra ? '🪙 Queda en el disponible' : '🪙 Salió del disponible', 2000);
+  }
+  /** "¿La metiste a un sobre?" → meter al sobre (fila en Movimientos) + el ingreso queda resuelto */
+  function rvMeter(fila, sobre) {
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p) return pintar();
+    var m = p.mov, f = new Date(new Date(m.fecha).getTime() + 60000).toISOString();
+    var s = filaSobre(C.TIPO_METER, sobre, p.falta, 'Metido al sobre ' + nomSobre(sobre) + ' · de ' + (nombreBonito(m.comercio) || 'ingreso'), f, 'MET-' + (m.autorizacion || m.fila));
+    encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: Math.round(p.falta * 100) / 100, tipo: 'Al sobre', movimiento: fila, grupo: grupoNuevo(), nota: 'Metido a ' + sobre + ' · ' + s.autorizacion }]], 'Ingreso metido a ' + sobre);
+    marcarVistos([m]); sbMemo = null; pintar(); toast('📥 Metido a ' + nomSobre(sobre), 2000);
+  }
+  /** Si ya sacaste de un sobre (📤 Sacar) y después sale esa plata, se une sola */
+  function autoSacado() {
+    if (!D || sinServidorSobres()) return;
+    var usados = {};
+    (D.sobresMov || []).forEach(function (x) { var mm = /(SOB-[\w-]+|SAC-[\w-]+)/.exec(x.nota || ''); if (mm) usados[mm[1]] = 1; });
+    var sacados = D.movimientos.filter(function (m) { return m.tipo === C.TIPO_SACAR && m.fila > 0 && !usados[m.autorizacion] && /para (pagar|pasar)/i.test(m.comercio || ''); });
+    if (!sacados.length) return;
+    var n = 0;
+    SB().pendientes.forEach(function (p) {
+      if (p.sentido !== 'sale' || p.mov.fila <= 0) return;
+      var t = new Date(p.mov.fecha).getTime();
+      var s = sacados.filter(function (x) { var tx = new Date(x.fecha).getTime(); return !usados[x.autorizacion] && Math.abs(x.monto - p.falta) < 0.01 && tx <= t + 3600000 && tx >= t - 4 * 86400000; })[0];
+      if (!s) return;
+      usados[s.autorizacion] = 1; n++;
+      encolar('guardarSobresMov', [[{ fecha: fechaSobre(p.mov), sobre: '', monto: -Math.round(p.falta * 100) / 100, tipo: 'Del disponible', movimiento: p.mov.fila, grupo: grupoNuevo(), nota: 'Con lo sacado de ' + s.sobre + ' · ' + s.autorizacion }]], 'Salió con lo sacado de ' + s.sobre);
+      marcarVistos([p.mov]);
+    });
+    if (n) { sbMemo = null; toast('✓ ' + n + ' pago' + (n === 1 ? '' : 's') + ' unido' + (n === 1 ? '' : 's') + ' con lo que sacaste del sobre', 3500); pintar(); }
+  }
+  // ---- Sacar / Meter desde la pantalla del sobre
+  var SM = null;
+  function formSacarMeter(dir, op, para) {
+    var s = sobreInfo(SOB.nombre); if (!s) return;
+    var montoPrev = $('sm-monto') ? val('sm-monto') : '';
+    if (!SM || SM.dir !== dir) SM = { dir: dir, op: dir < 0 ? 'disponible' : 'disponible', para: '' };
+    if (op) SM.op = op; if (para !== undefined) SM.para = para;
+    var mon = s.moneda === 'USD' ? 'USD' : 'CRC', sb = SB();
+    var otrosS = sb.lista.filter(function (x) { return x.nombre !== s.nombre && x.moneda === s.moneda; });
+    var tjs = D.cuentas.filter(function (c) { return c.activa && c.tipo === 'Tarjeta de crédito'; }).map(function (c) { return c.nombre; });
+    var ctas = cuentasAhorro().filter(function (c) { return (c.moneda === 'USD' ? 'USD' : 'CRC') === mon; }).map(function (c) { return c.nombre; }).filter(function (n) { return n !== cuentaPrincipal(); });
+    var pend = sb.pendientes.filter(function (p) { return p.sentido === 'entra' && (p.mov.moneda === 'USD' ? 'USD' : 'CRC') === mon; });
+    var bloque = function (k, tit, det, extra, apagado) {
+      return '<div class="op-g' + (SM.op === k ? ' on' : '') + (apagado ? ' apagado' : '') + '" role="button" tabindex="0" onclick="' + (apagado ? '' : 'App.formSacarMeter(' + dir + ',\'' + k + '\')') + '"><b>' + tit + '</b><span>' + det + '</span>' + (SM.op === k && extra ? '<div class="op-x" onclick="event.stopPropagation()">' + extra + '</div>' : '') + '</div>';
+    };
+    var chipsPara = '<div class="chips" style="flex-wrap:wrap;gap:6px">' + tjs.map(function (n) { return chipRev('💳 Pagar ' + esc(n), 'App.formSacarMeter(-1,\'disponible\',\'pagar ' + q(n) + '\')', SM.para === 'pagar ' + n); }).join('') +
+      ctas.map(function (n) { return chipRev('🏦 Pasar a ' + esc(n), 'App.formSacarMeter(-1,\'disponible\',\'pasar a ' + q(n) + '\')', SM.para === 'pasar a ' + n); }).join('') +
+      chipRev('Solo dejarlo disponible', 'App.formSacarMeter(-1,\'disponible\',\'\')', !SM.para) + '</div>';
+    var selS = '<select id="sm-sobre">' + otrosS.map(function (x) { return '<option value="' + esc(x.nombre) + '">' + esc(nomSobre(x.nombre)) + ' · ' + txt(x.saldo, x.moneda) + '</option>'; }).join('') + '</select>';
+    var selM = '<select id="sm-mov" onchange="App.smMov()">' + pend.map(function (p) { return '<option value="' + p.mov.fila + '">' + esc((nombreBonito(p.mov.comercio) || p.mov.tipo) + ' · ' + fechaCorta(p.mov.fecha).replace(/ \d{4}$/, '') + ' · ' + txt(p.falta, mon)) + '</option>'; }).join('') + '</select>';
+    var h = '<h2>' + (dir < 0 ? '📤 Sacar de' : '📥 Meter a') + ' «' + esc(nomSobre(s.nombre)) + '»</h2><div class="suave">' + (dir < 0 ? 'Igual que en la app del banco: sale del sobre y queda disponible en ' + esc(cuentaPrincipal() || 'la cuenta') + '.' : 'Igual que en la app del banco: sale del disponible y queda en el sobre.') + '</div>' +
+      '<label class="campo"><span>Monto</span><input id="sm-monto" class="monto" data-dinero inputmode="decimal" placeholder="0" value="' + esc(montoPrev) + '" oninput="App.smBoton()"></label>' +
+      (dir < 0 ? bloque('disponible', '🪙 Al disponible', '¿Para qué es? (opcional: así se une solo cuando llegue el pago o la transferencia)', chipsPara) +
+          bloque('sobre', '⇄ A otro sobre', 'Mover de este sobre a otro', selS, !otrosS.length)
+        : bloque('disponible', '🪙 Desde el disponible', 'Plata que ya está en la cuenta', '') +
+          bloque('mov', '💰 De un ingreso por asignar', pend.length ? pend.length + ' por asignar' : 'No hay ingresos por asignar', selM, !pend.length) +
+          bloque('sobre', '⇄ Desde otro sobre', 'Mover de otro sobre a este', selS, !otrosS.length)) +
+      '<div class="acciones"><button class="btn" id="sm-ok" onclick="App.guardarSacarMeter()">' + (dir < 0 ? 'Sacar' : 'Meter') + '</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>';
+    abrir(h); smBoton();
+  }
+  function smMov() { var f = Number(val('sm-mov')), p = SB().pendientes.filter(function (x) { return x.mov.fila === f; })[0]; if (p && $('sm-monto')) $('sm-monto').value = String(Math.round(p.falta * 100) / 100).replace('.', ','); smBoton(); }
+  function smBoton() { var b = $('sm-ok'), v = C.leerNumero(val('sm-monto')); if (b && SM) b.textContent = (SM.dir < 0 ? 'Sacar ' : 'Meter ') + (v ? txt(v, (sobreInfo(SOB.nombre) || {}).moneda || 'CRC') : ''); }
+  function guardarSacarMeter() {
+    var s = sobreInfo(SOB.nombre), monto = C.leerNumero(val('sm-monto'));
+    if (!s) return; if (!monto || monto <= 0) return toast('Escribí el monto.');
+    var yo = s.nombre, g = grupoNuevo(), f = new Date().toISOString();
+    if (SM.op === 'sobre') {
+      var otro = val('sm-sobre'); if (!otro || otro === yo) return toast('Elegí otro sobre.');
+      var de = SM.dir < 0 ? yo : otro, a = SM.dir < 0 ? otro : yo, nota = 'De ' + de + ' a ' + a;
+      encolar('guardarSobresMov', [[{ fecha: f, sobre: de, monto: -monto, tipo: 'Mover', grupo: g, nota: nota }, { fecha: f, sobre: a, monto: monto, tipo: 'Mover', grupo: g, nota: nota }]], 'Mover ' + de + ' → ' + a + ' · ' + txt(monto, s.moneda));
+      return hecho('⇄ Movido ' + txt(monto, s.moneda) + (SM.dir < 0 ? ' a ' + nomSobre(otro) : ' desde ' + nomSobre(otro)));
+    }
+    if (SM.op === 'mov') {
+      var fl = Number(val('sm-mov')), p = SB().pendientes.filter(function (x) { return x.mov.fila === fl; })[0];
+      if (!p) return toast('Elegí el ingreso.');
+      if (monto > p.falta + 0.005) return toast('A ese ingreso solo le faltan ' + txt(p.falta, s.moneda) + '.');
+      encolar('guardarSobresMov', [[{ fecha: fechaSobre(p.mov), sobre: yo, monto: monto, tipo: 'Ingreso', movimiento: fl, grupo: g, nota: p.mov.comercio || '' }]], 'Ingreso → ' + yo + ' · ' + txt(monto, s.moneda));
+      return hecho('📥 ' + txt(monto, s.moneda) + ' a ' + nomSobre(yo));
+    }
+    if (SM.dir < 0) filaSobre(C.TIPO_SACAR, yo, monto, 'Sacado del sobre ' + nomSobre(yo) + (SM.para ? ' · para ' + SM.para : ''), f);
+    else filaSobre(C.TIPO_METER, yo, monto, 'Metido al sobre ' + nomSobre(yo) + ' · desde el disponible', f);
+    hecho(SM.dir < 0 ? '📤 Sacaste ' + txt(monto, 'CRC') + ' de ' + nomSobre(yo) + (SM.para ? '. Cuando llegue el movimiento de ' + SM.para + ', se une solo.' : '. Queda disponible.') : '📥 Metiste ' + txt(monto, 'CRC') + ' a ' + nomSobre(yo));
+  }
+
   return {
+    rvSacar: rvSacar, rvDisponible: rvDisponible, rvMeter: rvMeter, formSacarMeter: formSacarMeter, smMov: smMov, smBoton: smBoton, guardarSacarMeter: guardarSacarMeter,
     rvIVA: rvIVA, formIVA: formIVA, ivaCambiar: ivaCambiar, formConfirmar: formConfirmar, guardarConfirmar: guardarConfirmar, rvDireccion: rvDireccion,
     rvSobre: rvSobre, rvRepartir: rvRepartir, rvOrigen: rvOrigen, rvCategoria: rvCategoria, rvTodoBien: rvTodoBien, rvRaro: rvRaro, rvCubrir: rvCubrir,
     formOrigenPlata: formOrigenPlata, guardarOrigenPlata: guardarOrigenPlata,

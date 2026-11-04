@@ -1,8 +1,8 @@
 {
- "web": "2.7.0",
- "servidor": "2.7.0",
- "sha256": "998425b4dc76705871feddf9a22673ebe677b09e32f5de451888e919c12144f4",
- "novedades": "Tarjetas que cobran todo en colones: un cobro que llega en dólares ($15,99) se anota en colones (monto estimado) y se confirma con el monto real.\nIVA aparte: vos elegís a qué cobros (Netflix, Disney+…) y la app anota el \"IVA estimado\" sola; lo confirmás cuando el banco lo aplique.\nPara revisar: nueva sección \"Por confirmar\" y la pregunta \"¿Entró o salió?\" en transferencias dudosas.\nFoto de transferencia entre cuentas: si la cuenta destino es tuya se anota como Ingreso (aunque la etiqueta venga partida).\nCuenta principal como en la app del banco: arriba el Disponible (lo que no está en sobres); Cuadrar pide el disponible.",
+ "web": "2.8.0",
+ "servidor": "2.8.0",
+ "sha256": "a5e54d9612355c16e5a6bca0348945df2873e94297f7cc17e1d5a16faf41394d",
+ "novedades": "Espejo del banco: los sobres son como los del BCR. Las compras con tarjeta ya no tocan los sobres (solo la deuda); se quitaron las asignaciones viejas de compras con tarjeta.\n📤 Sacar de un sobre (al disponible, para pagar una tarjeta o pasar a otra cuenta) y 📥 Meter: cada paso queda como fila en Movimientos (\"Sobre → disponible\" / \"Disponible → sobre\").\nCuando sale plata del BCR, Para revisar pregunta \"¿La sacaste de un sobre?\"; si ya la sacaste antes, se une sola.\nCuadrar guarda el disponible tal cual: lo que anotes después con fecha anterior ya no descuadra.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
