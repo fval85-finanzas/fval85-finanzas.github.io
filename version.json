@@ -1,8 +1,8 @@
 {
- "web": "2.6.0",
- "servidor": "2.6.0",
- "sha256": "59de31164c167c5b88ffcaf66ad5a0ab07dd67b5d67cafcb1a1defa15644fdcb",
- "novedades": "Para revisar: en Inicio ves qué llegó (\"Llegaron N · X listos · Y necesitan un toque\"); una sola pantalla con botones para el sobre, la categoría o de dónde vino la plata, y lo que la app hizo sola.\nTodo al día: cómo quedaron tarjetas, cuentas y sobres después de revisar, con botón para cubrir un sobre en negativo.\nLector Davibank con el formato real de Gmail (pago de servicio, crédito y débito de la cuenta).\nAl cambiar la fecha de un movimiento, también cambia en sus sobres.\nFoto de una transferencia que te llegó: se reconoce como Ingreso en tu cuenta.\nNombres largos más cortos (\"ICE · Electricidad\", \"Telecable · Cable e Internet\").",
+ "web": "2.7.0",
+ "servidor": "2.7.0",
+ "sha256": "998425b4dc76705871feddf9a22673ebe677b09e32f5de451888e919c12144f4",
+ "novedades": "Tarjetas que cobran todo en colones: un cobro que llega en dólares ($15,99) se anota en colones (monto estimado) y se confirma con el monto real.\nIVA aparte: vos elegís a qué cobros (Netflix, Disney+…) y la app anota el \"IVA estimado\" sola; lo confirmás cuando el banco lo aplique.\nPara revisar: nueva sección \"Por confirmar\" y la pregunta \"¿Entró o salió?\" en transferencias dudosas.\nFoto de transferencia entre cuentas: si la cuenta destino es tuya se anota como Ingreso (aunque la etiqueta venga partida).\nCuenta principal como en la app del banco: arriba el Disponible (lo que no está en sobres); Cuadrar pide el disponible.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

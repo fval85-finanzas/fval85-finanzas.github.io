@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.6.0';
+  var VERSION_WEB = '2.7.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -285,7 +285,7 @@ var App = (function () {
       if (cb) cb();
       if (cola.length) enviarCola();
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
-      intentarRepartoSalario(); finPlanPendiente(); autoSobreDesde();
+      intentarRepartoSalario(); finPlanPendiente(); autoSobreDesde(); autoIVA();
       var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
       if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); ir(irA); }
       if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
@@ -1599,6 +1599,7 @@ var App = (function () {
     var extra = [cta && cta.ultimos4 ? '••' + esc(cta.ultimos4) : '', hora(m.fecha)].filter(String);
     if (!et && m.cuenta && !(cta && cta.ultimos4)) extra.unshift(esc(m.cuenta));
     var et = m.para && m.tipo !== 'Ingreso' ? '<span class="et-sobre otro">🤝 ' + esc(m.para) + (m.cobro ? ' · pagado' : '') + '</span>' : C.esCobro(m) ? '<span class="et-sobre otro">🤝 ' + esc(m.cobro) + '</span>' : etiquetaSobre(m);
+    if (porConfirmar(m)) et = (et ? et + ' ' : '') + '<span class="et-sobre falta">≈ estimado</span>';
     var enSel = selMov && pantalla === 'movimientos';
     return '<button class="item mov' + (enSel ? ' modo-sel' + (selMov[m.fila] ? ' sel' : '') : '') + '" onclick="App.formMovimiento(' + m.fila + ')">' + (enSel ? '<span class="sel-ck">' + (selMov[m.fila] ? '✓' : '') + '</span>' : '') + '<span class="ico-cat" style="background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span>' +
       '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || m.tipo) + '</span>' +
@@ -3351,7 +3352,8 @@ var App = (function () {
     if (cuentasAhorro().length) {
       var og = ORIG();
       h += grupo('cu', '🏦', '#5B8DEF', 'Cuentas', 'Principal: ' + esc(og.principal),
-        opcion('tarjeta', 'Cuentas de dónde salen los pagos', 'Tarjetas: ' + esc(og.tarjetas) + ' · Préstamo: ' + esc(og.prestamo) + ' · Fondos: ' + esc(og.fondos), '<span class="flecha">›</span>', 'App.formOrigenes()'));
+        opcion('tarjeta', 'Cuentas de dónde salen los pagos', 'Tarjetas: ' + esc(og.tarjetas) + ' · Préstamo: ' + esc(og.prestamo) + ' · Fondos: ' + esc(og.fondos), '<span class="flecha">›</span>', 'App.formOrigenes()') +
+        opcion('hoja', 'Cobros con IVA aparte', Object.keys(ivaPrefs()).filter(function (k) { return ivaPrefs()[k]; }).join(', ') || 'Ninguno todavía', '<span class="flecha">›</span>', 'App.formIVA()'));
     }
     var ult = AJ.ultimaRevision ? new Date(Number(AJ.ultimaRevision) + 10 * 60000) : null;
     h += grupo('co', '📧', '#5B8DEF', 'Correos de los bancos', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE',
@@ -4704,10 +4706,11 @@ var App = (function () {
   function filaAhorro(c) {
     var o = ORIG(), sc = C.saldoCuenta(D, c, o), mon = c.moneda === 'USD' ? 'USD' : 'CRC', ab = tarjetaAbierta === c.fila;
     var principal = o.principal === c.nombre;
-    var sub = sc.vivo ? 'Saldo hoy · desde ' + fechaCorta(sc.fecha).replace(/ \d{4}$/, '') : 'Sin saldo anotado';
+    var dp = disponibleDe(c, sc);   // v2.7.0: la principal muestra el DISPONIBLE (como la app del banco)
+    var sub = sc.vivo ? (dp ? 'Disponible · total con sobres ' + txt(dp.total, 'CRC') : 'Saldo hoy · desde ' + fechaCorta(sc.fecha).replace(/ \d{4}$/, '')) : 'Sin saldo anotado';
     var h = '<button class="tj" onclick="App.alternarTarjeta(' + c.fila + ')" aria-expanded="' + ab + '"><span class="ico-cat tj-ic" style="background:var(--linea)">' + (mon === 'USD' ? '💵' : '🏦') + '</span>' +
-      '<span class="tj-nom">' + esc(c.nombre) + '</span><span class="tj-sub suave chico">' + sub + (principal ? ' · principal' : '') + '</span>' +
-      '<span class="monto"><b>' + dosMon(sc, mon) + '</b></span></button>';
+      '<span class="tj-nom">' + esc(c.nombre) + '</span><span class="tj-sub suave chico">' + sub + (principal && !dp ? ' · principal' : '') + '</span>' +
+      '<span class="monto"><b class="' + (dp && dp.disponible < -0.005 ? 'rojo' : '') + '">' + (dp ? din(dp.disponible, 'CRC') : dosMon(sc, mon)) + '</b></span></button>';
     if (!ab) return '<div class="tj-fila">' + h + '</div>';
     var linea = function (a, b, cls) { return '<div class="fila chico"><span class="suave">' + a + '</span><span class="fuerte ' + (cls || '') + '">' + b + '</span></div>'; };
     h += '<div class="tj-det">';
@@ -4717,14 +4720,14 @@ var App = (function () {
         linea('− Salidas (' + sc.nSale + ') · gastos, SINPE enviados', '−' + dosMon(sc.sale, mon), 'rojo') +
         linea('− Pagos de tarjeta, préstamo y fondos (' + sc.nPagos + ')', '−' + dosMon(sc.pagos, mon)) +
         (sc.nTransf ? linea('⇄ Entre tus cuentas (' + sc.nTransf + ')', (sc.transf.CRC + sc.transf.USD >= 0 ? '+' : '−') + dosMon({ CRC: Math.abs(sc.transf.CRC), USD: Math.abs(sc.transf.USD) }, mon), sc.transf.CRC + sc.transf.USD >= 0 ? 'verde-pos' : '') : '') +
-        '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea('Saldo hoy', dosMon(sc, mon));
+        '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea(dp ? 'Total en la cuenta (con sobres)' : 'Saldo hoy', dosMon(sc, mon));
     } else h += '<div class="aviso-tasa" style="margin:0 0 4px">Tocá <b>↻ Cuadrar con el banco</b> y poné lo que dice el banco hoy: desde ahí la app suma lo que entra y resta lo que sale.</div>';
     if (principal && D.sobresDesde && mon === 'CRC') {
       var sbH = C.saldosSobres(D, hoy, hoy), enS = sbH.total.CRC, res = sbH.reservadoTotal || 0, libre = sc.CRC - enS - res;
-      h += '<div class="caja-int"><div class="sec-int">¿CUÁNTO ESTÁ EN SOBRES?</div>' + linea('✉ En tus sobres', din(enS, 'CRC')) +
-        (res > 0.005 ? linea('💳 Reservado para pagar tarjetas', din(res, 'CRC')) : '') +
-        linea('🪙 Libre (fuera de sobres)', din(libre, 'CRC'), libre < -0.005 ? 'rojo' : 'verde-pos') +
-        '<div class="suave chico">' + (libre < -0.005 ? '⚠ Tus sobres dicen tener más plata de la que hay en la cuenta. Cuadrá el saldo o revisá lo que falta asignar.' : 'Si «Libre» queda en negativo, tus sobres dicen tener más plata de la que hay en la cuenta.') + '</div></div>';
+      h += '<div class="caja-int"><div class="sec-int">COMO EN LA APP DEL BANCO</div>' + linea('Total en la cuenta', din(sc.CRC, 'CRC')) + linea('✉ En tus sobres', din(-enS, 'CRC')) +
+        (res > 0.005 ? linea('💳 En sobres para pagar tarjetas', din(-res, 'CRC')) : '') +
+        '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea('🪙 Disponible', din(libre, 'CRC'), libre < -0.005 ? 'rojo' : 'verde-pos') +
+        '<div class="suave chico">' + (libre < -0.005 ? '⚠ Los sobres dicen tener más plata de la que hay. Cuadrá con el disponible del banco o revisá lo que falta asignar.' : 'Meter plata a un sobre la saca del disponible; pagar desde un sobre no lo cambia. Para cuadrar, usá el disponible que ves en el banco.') + '</div></div>';
     }
     if (principal) h += '<div class="suave chico">Cuenta principal: aquí entran el salario y los SINPE, y se toman los movimientos sin cuenta.</div>';
     var n = esc(c.nombre).replace(/'/g, "\\'");
@@ -4732,22 +4735,28 @@ var App = (function () {
       ['🏦', 'Origen de pagos', 'App.formOrigenes()'], ['✏️', 'Editar', 'App.formCuenta(' + c.fila + ')']]) + '</div>';
     return '<div class="tj-fila abierta">' + h + '</div>';
   }
+  /** v2.7.0: en la cuenta principal, lo que está en sobres (y lo reservado para tarjetas) no está en el disponible del banco */
+  function enSobresDe(c) {
+    if (!c || ORIG().principal !== c.nombre || sinServidorSobres() || c.moneda === 'USD') return null;
+    var sbH = C.saldosSobres(D, hoy, hoy); return (sbH.total.CRC || 0) + (sbH.reservadoTotal || 0);
+  }
   function formCuadrar(fila) {
     var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
-    var mon = c.moneda === 'USD' ? 'USD' : 'CRC';
-    abrir('<h2>↻ Cuadrar ' + esc(c.nombre) + '</h2><div class="suave">Poné lo que dice la app del banco hoy.</div>' +
-      '<label class="campo"><span>Saldo en el banco (' + (mon === 'USD' ? '$' : '₡') + ')</span><input id="cq-banco" class="monto" data-dinero inputmode="decimal" placeholder="0" oninput="App.cuadrarVista(' + fila + ')"></label>' +
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', es = enSobresDe(c);
+    abrir('<h2>↻ Cuadrar ' + esc(c.nombre) + '</h2><div class="suave">' + (es !== null ? 'Poné el <b>disponible</b> que ves en la app del banco (lo que no está en sobres).' : 'Poné lo que dice la app del banco hoy.') + '</div>' +
+      '<label class="campo"><span>' + (es !== null ? 'Disponible en el banco' : 'Saldo en el banco') + ' (' + (mon === 'USD' ? '$' : '₡') + ')</span><input id="cq-banco" class="monto" data-dinero inputmode="decimal" placeholder="0" oninput="App.cuadrarVista(' + fila + ')"></label>' +
       '<div id="cq-vista"></div>');
     cuadrarVista(fila);
     setTimeout(function () { var e = $('cq-banco'); if (e) e.focus(); }, 80);
   }
   function cuadrarVista(fila) {
     var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
-    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG()), banco = C.leerNumero(val('cq-banco'));
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG()), banco = C.leerNumero(val('cq-banco')), es = enSobresDe(c);
     var h = '';
     if (sc.vivo) {
-      var dif = banco === null ? null : banco - sc[mon];
-      h += '<div class="caja" style="gap:6px;margin-top:10px"><div class="fila"><span>La app calcula</span><b>' + din(sc[mon], mon) + '</b></div>' +
+      var app = sc[mon] - (es || 0);
+      var dif = banco === null ? null : banco - app;
+      h += '<div class="caja" style="gap:6px;margin-top:10px"><div class="fila"><span>La app calcula' + (es !== null ? ' (disponible)' : '') + '</span><b>' + din(app, mon) + '</b></div>' +
         '<div class="fila"><span>El banco dice</span><b>' + (banco === null ? '—' : din(banco, mon)) + '</b></div>' +
         '<div class="fila"><span>Diferencia</span><b class="' + (dif === null || Math.abs(dif) < 0.005 ? 'verde-pos' : 'acento') + '">' + (dif === null ? '—' : Math.abs(dif) < 0.005 ? '✓ cuadra' : (dif > 0 ? '+' : '−') + din(Math.abs(dif), mon)) + '</b></div></div>';
       h += '<div class="sec-int" style="margin-top:14px">¿QUÉ HAGO CON LA DIFERENCIA?</div>' +
@@ -4764,10 +4773,10 @@ var App = (function () {
     var c = D.cuentas.filter(function (x) { return x.fila === fila; })[0]; if (!c) return;
     var banco = C.leerNumero(val('cq-banco'));
     if (banco === null) return toast('Escribí el saldo que dice el banco.');
-    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG());
-    var crc = mon === 'CRC' ? banco : (sc.vivo ? sc.CRC : c.saldoCRC || 0), usd = mon === 'USD' ? banco : (sc.vivo ? sc.USD : c.saldoUSD || 0);
+    var mon = c.moneda === 'USD' ? 'USD' : 'CRC', sc = C.saldoCuenta(D, c, ORIG()), es = enSobresDe(c) || 0;
+    var crc = mon === 'CRC' ? banco + es : (sc.vivo ? sc.CRC : c.saldoCRC || 0), usd = mon === 'USD' ? banco : (sc.vivo ? sc.USD : c.saldoUSD || 0);
     encolar('actualizarSaldoCuenta', [fila, Math.round(crc * 100) / 100, Math.round(usd * 100) / 100, desdeInput(localInput())], 'Saldo de ' + c.nombre + ' · ' + txt(banco, mon));
-    hecho('✅ Cuadrado con el banco. Desde mañana se mueve solo.');
+    hecho('✅ Cuadrado con el banco' + (es ? ' (disponible ' + txt(banco, mon) + ' + sobres ' + txt(es, 'CRC') + ')' : '') + '. Desde mañana se mueve solo.');
   }
   function formOrigenes() {
     var ah = cuentasAhorro().map(function (c) { return c.nombre; });
@@ -4829,7 +4838,7 @@ var App = (function () {
     var hoyV = tj ? C.deudaTarjeta(D, c) : C.saldoCuenta(D, c, o), mon = c.moneda === 'USD' && !tj ? 'USD' : 'CRC';
     var col = function (t, v, cls) { return '<div><span>' + t + '</span><b class="' + (cls || '') + '">' + v + '</b></div>'; };
     h += '<div class="resumen-mov">' + (tj ? col('Compras', dosMon(sum.s)) + col('Pagos', dosMon(sum.e), 'verde-pos') + col('Deuda hoy', dosMon(hoyV))
-      : col('Entró', dosMon(sum.e, mon), 'verde-pos') + col('Salió', dosMon(sum.s, mon), 'rojo') + col(hoyV.vivo ? 'Saldo hoy' : 'Saldo', hoyV.vivo ? dosMon(hoyV, mon) : '—')) + '</div>';
+      : col('Entró', dosMon(sum.e, mon), 'verde-pos') + col('Salió', dosMon(sum.s, mon), 'rojo') + (function () { var dp = disponibleDe(c, hoyV); return dp ? col('Disponible', din(dp.disponible, 'CRC') + '<small>total ' + txt(dp.total, 'CRC') + '</small>', dp.disponible < -0.005 ? 'rojo' : '') : col(hoyV.vivo ? 'Saldo hoy' : 'Saldo', hoyV.vivo ? dosMon(hoyV, mon) : '—'); })()) + '</div>';
     var chips = (tj ? (c.diaCorte ? [['corte', 'Desde el corte']] : []) : (c.fechaSaldo ? [['saldo', 'Desde el saldo']] : []))
       .concat([['mes', 'Este mes'], ['pasado', 'Mes pasado'], ['todo', 'Todo'], ['rango', CM.f === 'rango' && CM.desde ? '📅 ' + textoRango(CM.desde, CM.hasta) : '📅 Rango…']]);
     h += '<div class="chips desliza">' + chips.map(function (x) { return '<button class="chip' + (CM.f === x[0] ? ' on' : '') + '" onclick="App.cmFiltro(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>';
@@ -5133,7 +5142,7 @@ var App = (function () {
     guardar('mf-vistos', JSON.stringify(vivos));
   }
   function revisarData() {
-    var vacio = { accion: [], listos: [], nuevos: [] };
+    var vacio = { accion: [], listos: [], nuevos: [], confirmar: [] };
     if (!D) return vacio;
     var v = vistos(), lim = hoy.getTime() - DIAS_REV * 86400000;
     var sb = sinServidorSobres() ? null : SB(), pendFila = {}, accion = [], listos = [];
@@ -5141,13 +5150,19 @@ var App = (function () {
     var so = sinOrigen(), soFila = {};
     so.forEach(function (x) { soFila[x.mov.fila] = 1; accion.push({ tipo: 'origen', mov: x.mov, cuenta: x.cuenta }); });
     var nuevos = D.movimientos.filter(function (m) { return m.fila > 0 && m.fecha && new Date(m.fecha).getTime() >= lim && !v[claveMov(m)]; });
+    var ivaFila = {}; preguntasIVA().forEach(function (m) { ivaFila[m.fila] = 1; accion.push({ tipo: 'iva', mov: m }); });
+    var confirmar = D.movimientos.filter(function (m) { return m.fila > 0 && m.fecha && new Date(m.fecha).getTime() >= lim && porConfirmar(m); });
+    var confFila = {}; confirmar.forEach(function (m) { confFila[m.fila] = 1; });
     nuevos.forEach(function (m) {
-      if (pendFila[m.fila] || soFila[m.fila]) return;
-      if (m.tipo === 'Gasto' && !m.categoria && !m.para) accion.push({ tipo: 'categoria', mov: m }); else listos.push(m);
+      if (pendFila[m.fila] || soFila[m.fila] || ivaFila[m.fila]) return;
+      if (transferenciaDudosa(m)) accion.push({ tipo: 'direccion', mov: m });
+      else if (m.tipo === 'Gasto' && !m.categoria && !m.para) accion.push({ tipo: 'categoria', mov: m });
+      else if (!confFila[m.fila]) listos.push(m);
     });
     var porFecha = function (a, b) { return new Date((b.mov || b).fecha) - new Date((a.mov || a).fecha); };
     accion.sort(porFecha); listos.sort(porFecha);
-    return { accion: accion, listos: listos, nuevos: nuevos };
+    confirmar.sort(porFecha);
+    return { accion: accion, listos: listos, nuevos: nuevos, confirmar: confirmar };
   }
   /** Lo que la app hizo sola con un movimiento (una línea) */
   function queHizo(m, ef) {
@@ -5198,20 +5213,20 @@ var App = (function () {
     return out.slice(0, 3);
   }
   function tarjetaRevisar(res) {
-    var r = revisarData(), n = r.accion.length, l = r.listos.length;
-    if (!n && !l) return '';
+    var r = revisarData(), n = r.accion.length, l = r.listos.length, cf = r.confirmar.length;
+    if (!n && !l && !cf) return '';
     var nuevos = r.nuevos.length;
     return '<button class="caja rev-ini' + (n ? ' borde-acento' : '') + '" onclick="App.ir(\'revisar\')"><span class="av-rev">📥</span><span class="cuerpo"><b>' +
       (nuevos ? 'Llegaron ' + nuevos + ' movimiento' + (nuevos === 1 ? '' : 's') : 'Para revisar') + '</b><span class="chico">' +
       (l ? '<span class="verde-pos">' + l + ' listo' + (l === 1 ? '' : 's') + ' ✓</span>' : '') + (l && n ? ' · ' : '') +
-      (n ? '<span class="acento">' + n + ' necesita' + (n === 1 ? '' : 'n') + ' un toque</span>' : '') + '</span></span><span class="flecha acento">›</span></button>';
+      (n ? '<span class="acento">' + n + ' necesita' + (n === 1 ? '' : 'n') + ' un toque</span>' : '') + ((l || n) && cf ? ' · ' : '') + (cf ? '<span class="suave">' + cf + ' por confirmar</span>' : '') + '</span></span><span class="flecha acento">›</span></button>';
   }
   function chipRev(txt, accion, on) { return '<button class="chip' + (on ? ' on' : '') + '" onclick="' + accion + '">' + txt + '</button>'; }
   function q(s) { return esc(s).replace(/'/g, "\\'"); }
   function pRevisar() {
     var r = revisarData(), ef = C.efectosCuentas(D, ORIG());
     var h = cabSimple('Para revisar', 'Lo que llegó');
-    if (!r.accion.length && !r.listos.length) {
+    if (!r.accion.length && !r.listos.length && !r.confirmar.length) {
       h += '<div class="caja" style="text-align:center;gap:6px;padding:22px"><div style="font-size:36px">✅</div><b style="font-size:17px">Todo al día</b><span class="suave chico">No llegó nada nuevo y no hay nada pendiente.</span>' +
         (leerJSONSeguro('mf-ultimo-lote') ? '<button class="btn sec" style="margin-top:10px" onclick="App.ir(\'aldia\')">Ver cómo quedó lo último</button>' : '') + '</div>';
       $('p-revisar').innerHTML = h; return;
@@ -5249,11 +5264,23 @@ var App = (function () {
             chipRev('💰 Me pagaron', 'App.rvOrigen(' + f + ',\'ingreso\')') + chipRev('🔁 Otra cuenta mía', 'App.rvOrigen(' + f + ',\'fuera\')') + '</div>' +
             '<button class="enlace chico" onclick="App.formOrigenPlata(' + f + ')">¿Era plata de un sobre? Elegirlo ›</button>';
           return '<div class="caja rev-it borde-acento">' + cab(m, 'Entró a ' + a.cuenta) + cuerpo + '</div>';
+        } else if (a.tipo === 'iva') {
+          cuerpo = '<div class="rev-q">Llegó en dólares' + (/cobro original/i.test(m.nota || '') ? ' (lo pasé a colones)' : '') + '. ¿El banco le cobra el IVA aparte?</div><div class="chips">' +
+            chipRev('🧾 Sí, IVA 13% aparte', 'App.rvIVA(' + f + ',1)', false) + chipRev('No', 'App.rvIVA(' + f + ',0)', false) + '</div><div class="suave chico">Se recuerda para «' + esc(nombreBonito(m.comercio)) + '».</div>';
+        } else if (a.tipo === 'direccion') {
+          cuerpo = '<div class="rev-q">¿Esta plata entró o salió de ' + esc(m.cuenta || 'la cuenta') + '?</div><div class="chips">' +
+            chipRev('↓ Entró', 'App.rvDireccion(' + f + ',1)', false) + chipRev('↑ Salió', 'App.rvDireccion(' + f + ',0)', false) + chipRev('Era otra cosa…', 'App.formMovimiento(' + f + ')') + '</div>';
         } else {
           cuerpo = '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c, i) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\')', i === 0); }).join('') +
             chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
         }
         return '<div class="caja rev-it borde-acento">' + cab(m) + cuerpo + '</div>';
+      }).join('');
+    }
+    if (r.confirmar.length) {
+      h += '<div class="seccion-t">POR CONFIRMAR · ' + r.confirmar.length + '</div>' + r.confirmar.map(function (m) {
+        return '<div class="caja rev-it">' + cab(m) + '<div class="rev-q">≈ ' + (esIVA(m) ? 'IVA estimado' : 'Monto estimado') + ': confirmalo cuando el banco lo aplique.</div><div class="chips">' +
+          chipRev('✓ Confirmar monto', 'App.formConfirmar(' + m.fila + ')', true) + '</div></div>';
       }).join('');
     }
     if (r.listos.length) {
@@ -5326,7 +5353,8 @@ var App = (function () {
       e.forEach(function (x) { if (x.moneda !== mon) return; if (x.signo > 0) ent += x.monto; else sal += x.monto; });
       var sc = C.saldoCuenta(D, c, o);
       var d = e.length ? [ent ? '+' + txt(ent, mon) : '', sal ? '−' + txt(sal, mon) : ''].filter(String).join(' · ') : 'sin cambios';
-      return { cambio: e.length > 0, h: fila(esc(c.nombre), sc.vivo ? dosMon(sc, mon) : '—', '', d + (sc.vivo ? '' : ' · sin saldo anotado'), 'App.verCuentaMov(\'' + q(c.nombre) + '\')') };
+      var dp = disponibleDe(c, sc);
+      return { cambio: e.length > 0, h: fila(esc(c.nombre), dp ? din(dp.disponible, 'CRC') : sc.vivo ? dosMon(sc, mon) : '—', dp && dp.disponible < -0.005 ? 'rojo' : '', (dp ? 'disponible · ' : '') + d + (sc.vivo ? '' : ' · sin saldo anotado'), 'App.verCuentaMov(\'' + q(c.nombre) + '\')') };
     });
     ctH.sort(function (a, b) { return b.cambio - a.cambio; });
     if (ctH.length) h += '<div class="seccion-t">CUENTAS</div><div class="caja ad-caja">' + ctH.map(function (x) { return x.h; }).join('') + '</div>';
@@ -5349,7 +5377,110 @@ var App = (function () {
     $('p-aldia').innerHTML = h;
   }
 
+  // ==================================================================== v2.7.0 · IVA aparte, montos por confirmar, entró/salió, disponible
+  var IVA_TASA = 0.13;
+  function claveIVA(m) { return C.normNom(m.comercio || '').replace(/[^a-z0-9 ]/g, '').split(' ').slice(0, 2).join(' '); }
+  function esCobroDolares(m) { return m.tipo === 'Gasto' && (/cobro original \$/i.test(m.nota || '') || (m.moneda === 'USD' && C.esTarjeta(D, m.cuenta))); }
+  function ivaPrefs() { return PREFS().iva || {}; }
+  function esIVA(m) { return /^IVA · /.test(m.comercio || ''); }
+  function porConfirmar(m) { return /monto estimado|IVA estimado/i.test(m.nota || ''); }
+  /** Cobros en dólares que todavía no tienen respuesta de "¿trae IVA aparte?" */
+  function preguntasIVA() {
+    var p = ivaPrefs(), lim = hoy.getTime() - DIAS_REV * 86400000, vistas = {};
+    return D.movimientos.filter(function (m) {
+      if (m.fila <= 0 || !m.fecha || new Date(m.fecha).getTime() < lim || !esCobroDolares(m) || esIVA(m)) return false;
+      var k = claveIVA(m); if (!k || p[k] !== undefined || vistas[k]) return false;
+      vistas[k] = 1; return true;
+    });
+  }
+  /** Crea la línea "IVA · X" (estimada) para los cobros de comercios marcados con IVA aparte */
+  function autoIVA() {
+    if (!D) return;
+    var p = ivaPrefs(), lim = hoy.getTime() - DIAS_REV * 86400000, hechos = {}, n = 0, ya = leerJSONSeguro('mf-iva-hechos') || [];
+    ya.forEach(function (k) { hechos[k] = 1; });   // si borrás un IVA, no se vuelve a crear
+    D.movimientos.forEach(function (m) { if (/^IVA-/.test(m.autorizacion || '')) hechos[m.autorizacion] = 1; });
+    D.movimientos.forEach(function (m) {
+      if (m.fila <= 0 || !m.fecha || new Date(m.fecha).getTime() < lim || !esCobroDolares(m) || esIVA(m) || p[claveIVA(m)] !== true) return;
+      var aut = 'IVA-' + (m.autorizacion || m.fila);
+      if (hechos[aut]) return;
+      hechos[aut] = 1; n++; ya.push(aut);
+      var sb = sinServidorSobres() ? [] : (SB().porMov[m.fila] || []).filter(function (x) { return x.sobre; });
+      var monto = Math.round(m.monto * IVA_TASA * 100) / 100;
+      encolar('guardarMovimiento', [{ fila: null, control: null, fecha: new Date(new Date(m.fecha).getTime() + 60000).toISOString(), monto: monto, moneda: m.moneda, tipo: 'Gasto',
+        comercio: 'IVA · ' + (nombreBonito(m.comercio) || 'cobro'), lugar: '', cuenta: m.cuenta, categoria: m.categoria || '', sobre: (sb[0] && sb[0].sobre) || m.sobre || '',
+        nota: 'IVA estimado (13%) · se confirma cuando el banco lo aplique', origen: 'Manual', autorizacion: aut, recordarRegla: false }], 'IVA · ' + (m.comercio || 'cobro') + ' · ' + txt(monto, m.moneda));
+    });
+    if (n) guardar('mf-iva-hechos', JSON.stringify(ya.slice(-300)));
+    if (n) toast('🧾 Anoté ' + n + ' IVA estimado' + (n === 1 ? '' : 's') + '. Confirmalo cuando el banco lo aplique.', 4000);
+  }
+  function rvIVA(fila, si) {
+    var m = movPorFila(fila); if (!m) return;
+    var o = {}; o[claveIVA(m)] = !!si;
+    guardarPrefs({ iva: Object.assign({}, ivaPrefs(), o) }, (si ? 'Con IVA aparte: ' : 'Sin IVA aparte: ') + (m.comercio || ''));
+    if (si) autoIVA();
+    pintar(); toast(si ? '🧾 Listo: a ' + nombreBonito(m.comercio) + ' se le agrega el IVA solo' : 'Listo: ' + nombreBonito(m.comercio) + ' sin IVA aparte', 3000);
+  }
+  function formIVA() {
+    var p = ivaPrefs(), ks = Object.keys(p);
+    abrir('<h2>🧾 Cobros con IVA aparte</h2><div class="suave">Servicios del exterior (Netflix, Disney+…) a los que el banco les cobra el IVA en un movimiento aparte. La app anota el IVA estimado sola y vos lo confirmás.</div>' +
+      (ks.length ? '<div class="caja sinpad" style="margin-top:10px">' + ks.map(function (k) {
+        return '<div class="fila-rep" style="padding:10px 14px"><span>' + esc(k) + '</span><span class="chips" style="flex-wrap:nowrap">' + chipRev('Sí', 'App.ivaCambiar(\'' + q(k) + '\',1)', p[k]) + chipRev('No', 'App.ivaCambiar(\'' + q(k) + '\',0)', !p[k]) + '</span></div>';
+      }).join('') + '</div>' : '<div class="caja vacio" style="margin-top:10px">Todavía no hay. La app te pregunta la primera vez que llega un cobro en dólares.</div>') +
+      '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  function ivaCambiar(k, si) { var o = Object.assign({}, ivaPrefs()); o[k] = !!si; guardarPrefs({ iva: o }, 'IVA aparte: ' + k); formIVA(); }
+  // ---- confirmar el monto real (cobro convertido o IVA estimado)
+  function formConfirmar(fila) {
+    var m = movPorFila(fila); if (!m) return;
+    var orig = (m.nota || '').match(/cobro original \$([\d.,]+)/i);
+    abrir('<div class="suave chico">' + esc(etiquetaCuenta(m.cuenta)) + ' · ' + fechaCorta(m.fecha) + '</div><h2>Confirmar monto · ' + esc(nombreBonito(m.comercio)) + '</h2>' +
+      '<div class="suave">' + (esIVA(m) ? 'Poné el IVA que aparece aplicado en el banco.' : 'Poné el monto en colones que aparece aplicado en el banco' + (orig ? ' (el cobro fue de $' + esc(orig[1]) + ')' : '') + '.') + '</div>' +
+      '<label class="campo"><span>Monto real (' + (m.moneda === 'USD' ? '$' : '₡') + ')</span><input id="cf-monto" class="monto" data-dinero inputmode="decimal" value="' + String(m.monto).replace('.', ',') + '"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarConfirmar(' + fila + ')">Confirmar</button><button class="btn sec" onclick="App.cerrar()">Todavía no</button></div>');
+  }
+  function guardarConfirmar(fila) {
+    var m = movPorFila(fila); if (!m) return;
+    var nuevo = C.leerNumero(val('cf-monto')); if (!(nuevo > 0)) return toast('Escribí el monto.');
+    var nota = String(m.nota || '').replace(/monto estimado/i, 'monto confirmado').replace(/IVA estimado \(13%\) · se confirma cuando el banco lo aplique/i, 'IVA confirmado').replace(/IVA estimado/i, 'IVA confirmado');
+    var viejo = m.monto;
+    encolar('guardarMovimiento', [{ fila: fila, control: { monto: viejo }, fecha: m.fecha, monto: nuevo, moneda: m.moneda, tipo: m.tipo, comercio: m.comercio, lugar: m.lugar, cuenta: m.cuenta,
+      categoria: m.categoria, sobre: m.sobre, nota: nota, origen: m.origen, autorizacion: m.autorizacion, recordarRegla: false }], 'Confirmar ' + (m.comercio || '') + ' · ' + txt(nuevo, m.moneda));
+    // el sobre: si estaba asignado completo a un solo sobre, se reasigna con el monto real
+    if (!sinServidorSobres() && Math.abs(nuevo - viejo) > 0.004) {
+      var filas = (SB().porMov[fila] || []), grupos = {}, sobres = {};
+      filas.forEach(function (x) { if (x.grupo) grupos[x.grupo] = 1; sobres[x.sobre || ''] = 1; });
+      var gs = Object.keys(grupos), ss = Object.keys(sobres);
+      if (gs.length === 1 && ss.length === 1 && filas.length === 1) {
+        var x0 = filas[0];
+        encolar('eliminarGrupoSobres', [gs[0]], 'Ajustar sobre de ' + (m.comercio || ''));
+        encolar('guardarSobresMov', [[{ fecha: x0.fecha || fechaSobre(m), sobre: x0.sobre, monto: (x0.monto < 0 ? -1 : 1) * nuevo, tipo: x0.tipo || 'Gasto', movimiento: fila, grupo: grupoNuevo(), nota: m.comercio || '' }]], 'Sobre de ' + (m.comercio || '') + ' con el monto real');
+      }
+    }
+    hecho('✅ Monto confirmado: ' + txt(nuevo, m.moneda));
+  }
+  // ---- transferencia sin saber si entró o salió
+  function transferenciaDudosa(m) {
+    if (m.tipo !== 'Transferencia' || C.entraTransferencia(m)) return false;
+    if (/^\s*(sali[oó]|sinpe a|d[eé]bito|transferencia a|env[ií]o|pas[oó] a|a\s)/i.test(m.comercio || '')) return false;
+    return !!m.cuenta || true;
+  }
+  function rvDireccion(fila, entra) {
+    var m = movPorFila(fila); if (!m) return;
+    var base = String(m.comercio || 'Transferencia').replace(/^\s*(entr[oó]|sali[oó])\s*:?\s*/i, '');
+    encolar('guardarMovimiento', [{ fila: fila, control: { monto: m.monto }, fecha: m.fecha, monto: m.monto, moneda: m.moneda, tipo: m.tipo, comercio: (entra ? 'Entró: ' : 'Salió: ') + base, lugar: m.lugar, cuenta: m.cuenta,
+      categoria: m.categoria, sobre: m.sobre, nota: m.nota, origen: m.origen, autorizacion: m.autorizacion, recordarRegla: false }], (entra ? 'Entró: ' : 'Salió: ') + base);
+    marcarVistos([m]); pintar();
+  }
+  // ---- disponible de la cuenta principal (como en la app del banco: lo que no está en sobres)
+  function disponibleDe(c, sc) {
+    sc = sc || C.saldoCuenta(D, c, ORIG());
+    if (!sc.vivo || ORIG().principal !== c.nombre || sinServidorSobres() || c.moneda === 'USD') return null;
+    var sbH = C.saldosSobres(D, hoy, hoy), enS = sbH.total.CRC, res = sbH.reservadoTotal || 0;
+    return { disponible: sc.CRC - enS - res, enSobres: enS, reservado: res, total: sc.CRC };
+  }
+
   return {
+    rvIVA: rvIVA, formIVA: formIVA, ivaCambiar: ivaCambiar, formConfirmar: formConfirmar, guardarConfirmar: guardarConfirmar, rvDireccion: rvDireccion,
     rvSobre: rvSobre, rvRepartir: rvRepartir, rvOrigen: rvOrigen, rvCategoria: rvCategoria, rvTodoBien: rvTodoBien, rvRaro: rvRaro, rvCubrir: rvCubrir,
     formOrigenPlata: formOrigenPlata, guardarOrigenPlata: guardarOrigenPlata,
     verSobre: verSobre, sobreFiltro: sobreFiltro, irListaSobre: irListaSobre, editarSobre: editarSobre, verSobreMov: verSobreMov, deshacerSobreMov: deshacerSobreMov, formCargarSobre: formCargarSobre, cgMov: cgMov, cgBoton: cgBoton, guardarCargar: guardarCargar,

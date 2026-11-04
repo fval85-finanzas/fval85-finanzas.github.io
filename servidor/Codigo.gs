@@ -1720,6 +1720,17 @@ function completarCompra_(tx, cuentas, reglas) {
   if (!categoria && tx.categoria) categoria = tx.categoria;
   var nota = [];
   if (tx.nota) nota.push(tx.nota);
+  // v2.7.0: tarjeta que cobra todo en colones (tiene límite en ₡ y no en $): el cobro en dólares se pasa a colones (monto estimado)
+  if (cuenta && tx.moneda === 'USD') {
+    var cc = cuentas.filter(function (x) { return texto_(x['Nombre (único)']) === cuenta; })[0];
+    if (cc && /tarjeta/i.test(texto_(cc['Tipo'])) && num_(cc['Límite ₡']) > 0 && !(num_(cc['Límite $']) > 0)) {
+      var tc = 0; try { tc = num_(hoja_('Config').getRange('B15').getValue()) || 0; } catch (e) { tc = 0; }
+      if (tc > 0) {
+        nota.push('Cobro original $' + String(tx.monto).replace('.', ',') + ' · TC ' + tc + ' · monto estimado');
+        tx.monto = Math.round(tx.monto * tc * 100) / 100; tx.moneda = 'CRC';
+      }
+    }
+  }
   if (tx.ultimos4 && !cuenta) nota.push('Tarjeta ••' + tx.ultimos4 + ' no está en Cuentas');
   return {
     'Fecha': new Date(tx.fecha),
@@ -1977,7 +1988,7 @@ function desactivarAutomatico() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.6.0';
+var VERSION_APP = '2.7.0';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 

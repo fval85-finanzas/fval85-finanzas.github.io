@@ -77,9 +77,22 @@ var Lector = (function () {
       if (ah && r.tipo !== 'Pago de tarjeta') r.cuenta = r.cuenta || ah.nombre;
       if (ah) r.origenCuenta = ah.nombre;
     }
+    // v2.7.0: comprobantes con "Cuenta origen" y "Cuenta destino" (la etiqueta puede venir partida en 2 líneas): los IBAN en orden = origen, destino
+    var ibans = [], reIb = /CR\s?\d[\d\s]{17,}\d/gi, mi;
+    lineas.forEach(function (l) { var x; reIb.lastIndex = 0; while ((x = reIb.exec(l))) ibans.push({ ib: x[0].replace(/\s/g, ''), linea: l, fin: x.index + x[0].length }); });
+    if (ibans.length >= 2 && r.tipo !== 'Pago de tarjeta') {
+      var deQuien = function (u4) { return u4 ? (cuentas || []).filter(function (x) { return x.activa !== false && x.ultimos4 === u4 && !/tarjeta/i.test(x.tipo || ''); })[0] : null; };
+      var co = deQuien(ibans[0].ib.slice(-4)), cd = deQuien(ibans[1].ib.slice(-4));
+      var titular = function (o) { var s = o.linea.slice(o.fin).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ ]/g, ' ').replace(/\s+/g, ' ').trim(); if (!s) { var i = lineas.indexOf(o.linea); s = (lineas[i + 1] || '').replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ ]/g, ' ').trim(); if (/cuenta|monto|motivo/i.test(s)) s = ''; } return s.replace(/^(cuenta\s+)?(origen|destino|de origen|de destino)\s+/i, ''); };
+      var motivo = (lineaCon(lineas, /motivo|detalle|concepto/) || '').replace(/^.*?(motivo|detalle|concepto)\s*:?\s*/i, '').trim();
+      var bonito = function (s) { return s.toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); }); };
+      if (cd && !co) { r.tipo = 'Ingreso'; r.cuenta = cd.nombre; r.destino = cd.nombre; var n0 = titular(ibans[0]); r.comercio = (n0 ? 'De ' + bonito(n0) : 'Transferencia recibida') + (motivo ? ' · ' + motivo : ''); }
+      else if (cd && co && cd !== co) { r.tipo = 'Transferencia'; r.cuenta = cd.nombre; r.destino = cd.nombre; r.origenCuenta = co.nombre; r.comercio = 'Entró desde ' + co.nombre; }
+      else if (co && !cd) { r.tipo = 'Gasto'; r.cuenta = co.nombre; r.destino = 'otro'; var n1 = titular(ibans[1]); r.comercio = (n1 ? 'A ' + bonito(n1) : 'Transferencia enviada') + (motivo ? ' · ' + motivo : ''); }
+    }
     // v2.6.0: la cuenta de DESTINO es tuya → plata que te entró (o transferencia entre tus cuentas si el origen también es tuyo)
     var ld0 = lineaCon(lineas, /cuenta (destino|de destino|destinataria|acreditada|beneficiaria|a acreditar)|destino:/);
-    if (ld0 && r.tipo !== 'Pago de tarjeta') {
+    if (ld0 && r.tipo !== 'Pago de tarjeta' && !r.destino) {
       var ib = (ld0.match(/CR\s?\d[\d\s]{8,}/i) || [''])[0].replace(/\s/g, ''), u4 = ib ? ib.slice(-4) : ((ld0.match(/(\d{4})\D*$/) || [])[1] || '');
       var dest = u4 ? (cuentas || []).filter(function (x) { return x.activa !== false && x.ultimos4 === u4 && !/tarjeta/i.test(x.tipo || ''); })[0] : null;
       if (dest) {
