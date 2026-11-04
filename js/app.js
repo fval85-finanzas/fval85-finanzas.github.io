@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.8.0';
+  var VERSION_WEB = '2.9.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -1805,22 +1805,22 @@ var App = (function () {
     var deudaEq = deuC + deuU * tc, cubEq = cubC + cubU * tc, pctCub = deudaEq > 0 ? cubEq / deudaEq : 0;
     var h = '<div class="cab"><div><div class="sobretitulo">' + nombreMes(mes) + '</div><h1 class="titulo">Tarjetas</h1></div><div class="mesnav">' + botonOjo().replace('class="ojo"', 'class="btn-icono"') + botonMas() + '</div></div>';
     if (datos.length) {
-      h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Deuda total hoy</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span class="suave chico" style="white-space:nowrap;display:inline-block">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
+      h += '<div class="caja" style="gap:8px"><div class="fila" style="align-items:flex-start"><div><div class="suave chico">Deuda total hoy</div><div class="fuerte" style="font-size:21px">' + din(deuC, 'CRC') + (deuU ? ' <span style="white-space:nowrap;display:inline-block;font-size:17px">+ ' + din(deuU, 'USD') + '</span>' : '') + '</div></div>' +
         '</div></div>';
     }
     h += '<div class="caja sinpad">' + datos.map(function (x) {
       var c = x.c, ab = tarjetaAbierta === c.fila, g = res.porCuenta[c.nombre] || { CRC: 0, USD: 0, cuotasTC: { CRC: 0, USD: 0 } };
       var urg = x.dias <= 3, lleno = x.uso !== null && x.uso >= 0.75;
-      var dt = x.dt, cambio = '';
-      if (dt.vivo) {
-        var difC = dt.sube.CRC - dt.baja.CRC, difU = dt.sube.USD - dt.baja.USD, desde = ' desde ' + fechaCorta(dt.fecha).replace(/ \d{4}$/, '');
-        cambio = Math.abs(difC) < 0.005 && Math.abs(difU) < 0.005 ? '<span class="suave chico">sin cambios' + desde + '</span>'
-          : '<span class="chico ' + (difC + difU > 0 ? 'naranja' : 'verde-pos') + '">' + [Math.abs(difC) >= 0.005 ? (difC > 0 ? '+' : '−') + din(Math.abs(difC), 'CRC') : '', Math.abs(difU) >= 0.005 ? (difU > 0 ? '+' : '−') + din(Math.abs(difU), 'USD') : ''].filter(String).join(' ') + desde + '</span>';
-      }
-      var saldo2 = (dt.USD ? '<span class="suave chico">+ ' + din(dt.USD, 'USD') + '</span>' : '') + (cambio || (!dt.vivo ? '<span class="suave chico">saldo sin fecha</span>' : ''));
-      var fila = '<button class="tj" onclick="App.alternarTarjeta(' + c.fila + ')" aria-expanded="' + ab + '"><span class="mini-plastico" style="background:linear-gradient(135deg,' + colorBanco(c.banco) + ',color-mix(in srgb,' + colorBanco(c.banco) + ' 70%, white))">' + esc(c.ultimos4 || '') + '</span>' +
-        '<span class="tj-nom">' + esc(c.nombre) + '</span><span class="tj-sub">' + (x.dias < 999 ? '<span class="pill' + (urg ? ' alerta' : '') + '">pagar ' + enDias(x.dias) + '</span>' : '') + '</span>' +
-        '<span class="monto"><b>' + din(dt.CRC, 'CRC') + '</b>' + saldo2 + '</span></button>' +
+      var dt = x.dt;
+      // v2.9.0: solo lo que debés (o "a favor") + la barra; la fecha de pago llega como aviso y está adentro de la tarjeta
+      var montoTj = function (v, mon, extra) {
+        if (v < -0.004) return '<b class="verde-pos' + (extra ? ' tj-usd' : '') + '">' + (extra ? '+ ' : '') + din(-v, mon) + '</b><span class="chico verde-pos">a favor</span>';
+        return '<b' + (extra ? ' class="tj-usd"' : '') + '>' + (extra ? '+ ' : '') + din(v, mon) + '</b>';
+      };
+      var saldo2 = (Math.abs(dt.USD) > 0.004 ? montoTj(dt.USD, 'USD', true) : '') + (!dt.vivo ? '<span class="suave chico">saldo sin fecha</span>' : '');
+      var fila = '<button class="tj limpia" onclick="App.alternarTarjeta(' + c.fila + ')" aria-expanded="' + ab + '"><span class="mini-plastico" style="background:linear-gradient(135deg,' + colorBanco(c.banco) + ',color-mix(in srgb,' + colorBanco(c.banco) + ' 70%, white))">' + esc(c.ultimos4 || '') + '</span>' +
+        '<span class="tj-nom">' + esc(c.nombre) + '</span>' +
+        '<span class="monto">' + montoTj(dt.CRC, 'CRC') + saldo2 + '</span></button>' +
         (x.uso !== null ? '<div class="tj-barra"><div class="barra' + (lleno ? ' alerta' : '') + '" style="height:5px"><i style="width:' + Math.max(1.5, Math.min(100, x.uso * 100)).toFixed(1) + '%' + (lleno ? ';background:var(--rojo)' : '') + '"></i></div></div>' : '');
       if (ab) {
         var faltaC = Math.max(0, dt.CRC - x.rC), faltaU = Math.max(0, dt.USD - x.rU);
@@ -1840,6 +1840,7 @@ var App = (function () {
 
           (x.uso !== null ? linea('Límite', din(c.limiteCRC, 'CRC') + ' · usado ' + Math.round(x.uso * 100) + '%') : '') +
           linea('Corte y pago', (c.diaCorte ? 'día ' + c.diaCorte : '—') + ' · ' + (c.diaPago ? 'día ' + c.diaPago : '—')) +
+          (x.dias < 999 ? linea('Próximo pago', enDias(x.dias).replace(/^en /, 'en ').replace(/^./, function (l) { return l.toUpperCase(); }), urg ? 'naranja' : '') : '') +
           (tcs.length ? '<div class="suave chico fuerte" style="margin-top:6px">CUOTAS TASA CERO</div>' + tcs.map(function (y) {
             return linea(esc(y.t.descripcion) + ' · ' + (y.t.meses - y.e.restantes) + ' de ' + y.t.meses, din(y.e.cuota, y.t.moneda) + '/mes');
           }).join('') : '') +
@@ -2917,8 +2918,8 @@ var App = (function () {
     srv('pasarATasaCero', [fila, { monto: orig.monto }, n, f], function () { listo('✅ Ahora se cuenta en cuotas de ' + n + ' meses'); }, $('t-ok'));
   }
 
-  function formCuenta(fila) {
-    var c = fila ? D.cuentas.filter(function (x) { return x.fila === fila; })[0] : { tipo: 'Tarjeta de crédito', moneda: 'CRC', activa: true };
+  function formCuenta(fila, pre, movFila) {
+    var c = fila ? D.cuentas.filter(function (x) { return x.fila === fila; })[0] : Object.assign({ tipo: 'Tarjeta de crédito', moneda: 'CRC', activa: true }, pre || {});
     var num = function (v) { return v === null || v === undefined ? '' : String(v).replace('.', ','); };
     abrir('<h2>' + (fila ? 'Editar cuenta' : 'Nueva tarjeta o cuenta') + '</h2>' +
       '<label class="campo"><span>Nombre (único)</span><input id="c-nombre" value="' + esc(c.nombre) + '" placeholder="Ej. Visa BCR Oro"></label>' +
@@ -2932,9 +2933,9 @@ var App = (function () {
       '<label class="campo"><span>Notas</span><input id="c-notas" value="' + esc(c.notas) + '"></label>' +
       (fila ? '<label class="check"><input type="checkbox" id="c-activa"' + (c.activa ? ' checked' : '') + '> Cuenta activa</label>' : '') +
       '<div class="suave chico" style="margin-top:10px">Con los últimos 4 dígitos, las compras que lleguen por correo se asignan solas a esta tarjeta. Si es un banco nuevo, agregá su correo en la pestaña Config de la hoja.</div>' +
-      '<div class="acciones"><button class="btn" id="c-ok" onclick="App.guardarCta(' + (fila || 0) + ')">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+      '<div class="acciones"><button class="btn" id="c-ok" onclick="App.guardarCta(' + (fila || 0) + (movFila ? ',' + movFila : '') + ')">' + (movFila ? 'Agregar y anotar la compra' : 'Guardar') + '</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
-  function guardarCta(fila) {
+  function guardarCta(fila, movFila) {
     var u4 = val('c-u4').trim();
     if (u4 && !/^\d{4}$/.test(u4)) return toast('Los últimos 4 dígitos deben ser 4 números.');
     var c = {
@@ -2946,8 +2947,57 @@ var App = (function () {
       activa: $('c-activa') ? $('c-activa').checked : true
     };
     if (!c.nombre) return toast('Falta el nombre.');
-    srv('guardarCuenta', [c], function () { listo('✅ Cuenta guardada'); }, $('c-ok'));
+    srv('guardarCuenta', [c], function () {
+      var m = movFila ? movPorFila(movFila) : null;
+      if (m) {   // v2.9.0: la compra de la tarjeta nueva queda en ella
+        encolar('guardarMovimiento', [{ fila: m.fila, control: { monto: m.monto }, fecha: m.fecha, monto: m.monto, moneda: m.moneda, tipo: m.tipo, comercio: m.comercio, lugar: m.lugar, cuenta: c.nombre,
+          categoria: m.categoria, sobre: m.sobre, nota: String(m.nota || '').replace(/\s*·?\s*Tarjeta\s*(?:••|\*+)?\s*\d{4} no est[aá] en Cuentas\s*·?\s*/i, ' ').trim(), origen: m.origen, autorizacion: m.autorizacion, recordarRegla: false }], 'Compra en ' + c.nombre);
+      }
+      listo(m ? '✅ Tarjeta agregada y compra anotada en ' + c.nombre : '✅ Cuenta guardada');
+    }, $('c-ok'));
   }
+  // ---- v2.9.0 · tarjetas que no son mías
+  function ajenas() { return PREFS().ajenas || {}; }
+  function rvAjena(fila, que) {
+    var m = movPorFila(fila); if (!m) return;
+    var u4 = C.tarjetaDesconocida(D, m);
+    if (que === 'si') {
+      var tipos = D.tiposCuenta || [], deb = tipos.filter(function (t) { return /d[eé]bito/i.test(t); })[0] || tipos.filter(function (t) { return /ahorro/i.test(t); })[0] || tipos[0] || 'Cuenta';
+      return formCuenta(0, { nombre: 'Tarjeta ••' + u4, tipo: deb, ultimos4: u4, moneda: m.moneda === 'USD' ? 'USD' : 'CRC' }, fila);
+    }
+    borrarMovSilencioso(m, que === 'no' ? '🚫 Listo: la tarjeta ••' + u4 + ' queda ignorada y se borró la compra' : 'Compra borrada', function () {
+      if (que !== 'no' || !u4) return;
+      var o = Object.assign({}, ajenas()); o[u4] = { nombre: (o[u4] && o[u4].nombre) || '', desde: new Date().toISOString().slice(0, 10) };
+      guardarPrefs({ ajenas: o }, 'Tarjeta ••' + u4 + ' no es mía');
+    });
+  }
+  /** Borra un movimiento sin el formulario (espera a que la cola termine); `despues` corre cuando Google lo borró */
+  function borrarMovSilencioso(m, msg, despues) {
+    if (m.fila < 0 || cola.length) { if (cola.length) enviarCola(); return toast('Se está guardando en Google; probá en unos segundos.'); }
+    D.movimientos = D.movimientos.filter(function (x) { return x !== m; });
+    pintar();
+    srv('eliminarMovimiento', [m.fila, { monto: m.monto }], function () { if (despues) despues(); listo(msg); });
+  }
+  function formAjenas() {
+    var o = ajenas(), ks = Object.keys(o), cont = (AJ && AJ.ajenasSaltadas) || {};
+    abrir('<h2>🚫 Tarjetas que no son mías</h2><div class="suave">Los correos de estas tarjetas te llegan a vos (por ejemplo, la tarjeta de un hijo), pero la app no los anota.</div>' +
+      (ks.length ? '<div class="caja sinpad" style="margin-top:10px">' + ks.map(function (k) {
+        var x = o[k] || {}, n = cont[k] || 0;
+        return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--linea)"><span class="mini-plastico" style="background:var(--linea);color:var(--texto);flex-shrink:0">' + esc(k) + '</span><span style="flex:1;min-width:0;display:block"><input class="aj-nom" data-u4="' + esc(k) + '" value="' + esc(x.nombre || '') + '" placeholder="Nombre (opcional)" onchange="App.ajenaNombre(this)" style="width:100%;background:none;border:0;border-bottom:1px solid var(--linea);color:var(--texto);font:inherit;font-weight:700;padding:2px 0">' +
+          '<span class="suave chico" style="display:block">' + (x.desde ? 'Ignorada desde ' + fechaCorta(x.desde + 'T12:00:00').replace(/ \d{4}$/, '') : 'Ignorada') + ' · ' + n + ' correo' + (n === 1 ? '' : 's') + ' saltado' + (n === 1 ? '' : 's') + '</span></span>' +
+          '<button onclick="App.ajenaQuitar(\'' + q(k) + '\')" style="background:none;border:0;color:var(--rojo);font:inherit;font-weight:700;padding:6px;flex-shrink:0">Quitar</button></div>';
+      }).join('') + '</div>' : '<div class="caja vacio" style="margin-top:10px">Ninguna todavía. Cuando llegue una compra de una tarjeta que no conocés, Para revisar te pregunta.</div>') +
+      '<div class="dos" style="margin-top:10px;align-items:end"><label class="campo compacto"><span>Últimos 4</span><input id="aj-u4" inputmode="numeric" maxlength="4" placeholder="1234"></label><label class="campo compacto"><span>Nombre (opcional)</span><input id="aj-nom" placeholder="Tarjeta de…"></label></div>' +
+      '<div class="acciones"><button class="btn" onclick="App.ajenaAgregar()">＋ Agregar tarjeta</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  function ajenaAgregar() {
+    var u4 = val('aj-u4').trim(); if (!/^\d{4}$/.test(u4)) return toast('Poné los últimos 4 números de la tarjeta.');
+    if (D.cuentas.some(function (c) { return String(c.ultimos4 || '') === u4; })) return toast('••' + u4 + ' ya está en tus Cuentas.');
+    var o = Object.assign({}, ajenas()); o[u4] = { nombre: val('aj-nom').trim(), desde: new Date().toISOString().slice(0, 10) };
+    guardarPrefs({ ajenas: o }, 'Tarjeta ••' + u4 + ' no es mía'); formAjenas(); pintar();
+  }
+  function ajenaNombre(el) { var o = Object.assign({}, ajenas()), k = el.getAttribute('data-u4'); o[k] = Object.assign({}, o[k] || {}, { nombre: el.value.trim() }); guardarPrefs({ ajenas: o }, 'Nombre de la tarjeta ••' + k); }
+  function ajenaQuitar(k) { var o = Object.assign({}, ajenas()); delete o[k]; guardarPrefs({ ajenas: o }, 'Tarjeta ••' + k + ' vuelve a anotarse'); formAjenas(); pintar(); }
 
   function formPago() {
     var e = D.prestamo.estimado;
@@ -3355,7 +3405,8 @@ var App = (function () {
       var og = ORIG();
       h += grupo('cu', '🏦', '#5B8DEF', 'Cuentas', 'Principal: ' + esc(og.principal),
         opcion('tarjeta', 'Cuentas de dónde salen los pagos', 'Tarjetas: ' + esc(og.tarjetas) + ' · Préstamo: ' + esc(og.prestamo) + ' · Fondos: ' + esc(og.fondos), '<span class="flecha">›</span>', 'App.formOrigenes()') +
-        opcion('hoja', 'Cobros con IVA aparte', Object.keys(ivaPrefs()).filter(function (k) { return ivaPrefs()[k]; }).join(', ') || 'Ninguno todavía', '<span class="flecha">›</span>', 'App.formIVA()'));
+        opcion('hoja', 'Cobros con IVA aparte', Object.keys(ivaPrefs()).filter(function (k) { return ivaPrefs()[k]; }).join(', ') || 'Ninguno todavía', '<span class="flecha">›</span>', 'App.formIVA()') +
+        opcion('tarjeta', 'Tarjetas que no son mías', Object.keys(ajenas()).map(function (k) { return (ajenas()[k].nombre ? ajenas()[k].nombre + ' ' : '') + '••' + k; }).join(', ') || 'Ninguna · la app no anota sus correos', '<span class="flecha">›</span>', 'App.formAjenas()'));
     }
     var ult = AJ.ultimaRevision ? new Date(Number(AJ.ultimaRevision) + 10 * 60000) : null;
     h += grupo('co', '📧', '#5B8DEF', 'Correos de los bancos', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE',
@@ -3937,7 +3988,7 @@ var App = (function () {
 
   // ---------------------------------------------------------------- AVISOS (A + C)
   var TIPOS_AVISO = [['asignar', '✉', 'Por asignar a sobres', ''], ['revisar', '⚠', 'Por revisar', 'sin categoría'], ['salario', '💰', 'Día de salario', 'según tus fechas de pago'],
-    ['tarjeta', '💳', 'Pago de tarjeta', '2 días antes'], ['negativo', '🔴', 'Sobre en negativo', ''], ['super', '🛒', 'Super y Otros', '“¿este sirve?” y cambios en tus listas'], ['version', '⬆', 'Versión nueva de la app', '']];
+    ['tarjeta', '💳', 'Pago de tarjeta', ''], ['negativo', '🔴', 'Sobre en negativo', ''], ['super', '🛒', 'Super y Otros', '“¿este sirve?” y cambios en tus listas'], ['version', '⬆', 'Versión nueva de la app', '']];
   function avCfg() { var a = PREFS().avisos || {}; a.tipos = a.tipos || {}; a.silencio = a.silencio || { d: 22, h: 7 }; a.correo = a.correo || { activo: false, hora: 20, siempre: false }; return a; }
   function avisosTel() { return guardado('mf-avisos-tel', 'no') === 'si' && typeof Notification !== 'undefined' && Notification.permission === 'granted'; }
   function grupoAvisos() {
@@ -3946,8 +3997,11 @@ var App = (function () {
     return grupo('av', '🔔', '#FF8A3D', 'Avisos', (tel ? 'En el teléfono' : 'Teléfono apagado') + ' · ' + (a.correo.activo ? 'correo ' + (a.correo.hora > 12 ? a.correo.hora - 12 + ' p.m.' : a.correo.hora + ' a.m.') : 'sin correo'),
       opcion('campana', 'Avisos en el teléfono', 'Chrome revisa sola 1 o 2 veces al día y te avisa en la barra', interruptor('av-tel', tel, 'App.avisosTelefono(this.checked)', 'Avisos en el teléfono')) +
       TIPOS_AVISO.map(function (t) {
-        return '<div class="opcion"><span class="ico" style="width:36px;height:36px;border-radius:10px;background:var(--fondo);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:17px">' + t[1] + '</span><span class="cuerpo"><span class="nombre" style="display:block">' + t[2] + '</span>' + (t[3] ? '<span class="det" style="display:block">' + t[3] + '</span>' : '') + '</span>' +
-          interruptor('av-' + t[0], a.tipos[t[0]] !== false, 'App.avisoTipo(\'' + t[0] + '\',this.checked)', t[2]) + '</div>';
+        if (t[0] === 'tarjeta') t = t.slice(0, 3).concat([textoDiasPago(a.diasPago) + ', con el monto · el correo trae la semana']);
+        var extra = t[0] === 'tarjeta' && a.tipos.tarjeta !== false ? '<div style="padding:0 16px 10px 64px"><label class="campo compacto"><span>Avisar</span><select id="av-dp" onchange="App.avisoDiasPago()">' +
+          DIAS_PAGO_OP.map(function (o) { return '<option value="' + o.join(',') + '"' + (o.join(',') === (a.diasPago || [3, 1, 0]).join(',') ? ' selected' : '') + '>' + textoDiasPago(o) + '</option>'; }).join('') + '</select></label></div>' : '';
+        return (function (fila) { return fila + extra; })('<div class="opcion"><span class="ico" style="width:36px;height:36px;border-radius:10px;background:var(--fondo);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:17px">' + t[1] + '</span><span class="cuerpo"><span class="nombre" style="display:block">' + t[2] + '</span>' + (t[3] ? '<span class="det" style="display:block">' + t[3] + '</span>' : '') + '</span>' +
+          interruptor('av-' + t[0], a.tipos[t[0]] !== false, 'App.avisoTipo(\'' + t[0] + '\',this.checked)', t[2]) + '</div>');
       }).join('') +
       '<div class="dos" style="padding:4px 16px 12px"><label class="campo compacto"><span>Silencio desde</span>' + horas('av-sd', a.silencio.d, 'App.avisoSilencio()') + '</label><label class="campo compacto"><span>hasta</span>' + horas('av-sh', a.silencio.h, 'App.avisoSilencio()') + '</label></div>' +
       opcion('correo', 'Resumen por correo', 'A ' + esc(AJ.correo) + ', a la hora que elijás', interruptor('av-correo', a.correo.activo, 'App.avisoCorreo(this.checked)', 'Resumen por correo')) +
@@ -3955,7 +4009,16 @@ var App = (function () {
         '<label class="campo compacto"><span>Cuándo</span><select id="av-siempre" onchange="App.avisoCorreoHora()"><option value="algo"' + (!a.correo.siempre ? ' selected' : '') + '>Solo si hay algo</option><option value="siempre"' + (a.correo.siempre ? ' selected' : '') + '>Todos los días</option></select></label></div>' : '') +
       opcion('campana', 'Probar un aviso ahora', 'En la barra del teléfono' + (a.correo.activo ? ' y por correo' : ''), '', 'App.probarAviso(this)'));
   }
-  function avisoTipo(k, on) { var a = avCfg(); a.tipos[k] = !!on; guardarPrefs({ avisos: a }, 'Avisos: ' + k + (on ? ' encendido' : ' apagado')); }
+  function avisoTipo(k, on) { var a = avCfg(); a.tipos[k] = !!on; guardarPrefs({ avisos: a }, 'Avisos: ' + k + (on ? ' encendido' : ' apagado')); if (k === 'tarjeta') pintar(); }
+  // v2.9.0: cuántos días antes avisar el pago de tarjeta
+  var DIAS_PAGO_OP = [[3, 1, 0], [5, 3, 1, 0], [2, 0], [1, 0], [0]];
+  function textoDiasPago(o) {
+    o = o && o.length ? o : [3, 1, 0];
+    var l = o.map(function (n) { return n === 0 ? 'el mismo día' : n === 1 ? '1 día antes' : n + ' días antes'; });
+    var t = l.length > 1 ? l.slice(0, -1).join(', ') + ' y ' + l[l.length - 1] : l[0];
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function avisoDiasPago() { var a = avCfg(); a.diasPago = val('av-dp').split(',').map(Number); guardarPrefs({ avisos: a }, 'Aviso de pago: ' + textoDiasPago(a.diasPago)); pintar(); }
   function avisoSilencio() { var a = avCfg(); a.silencio = { d: Number(val('av-sd')), h: Number(val('av-sh')) }; guardarPrefs({ avisos: a }, 'Avisos: horas de silencio'); }
   function avisoCorreo(on) { var a = avCfg(); a.correo.activo = !!on; a.urlApp = location.href.split(/[?#]/)[0]; guardarPrefs({ avisos: a }, 'Resumen por correo ' + (on ? 'encendido' : 'apagado')); pintar(); }
   function avisoCorreoHora() { var a = avCfg(); a.correo.hora = Number(val('av-hora')); a.correo.siempre = val('av-siempre') === 'siempre'; guardarPrefs({ avisos: a }, 'Resumen por correo a las ' + a.correo.hora + ' h'); }
@@ -3990,7 +4053,11 @@ var App = (function () {
     var a = avCfg();
     if (a.correo.activo) srv('probarResumenCorreo', [], function (m) { toast(m); }, b);
     if (avisosTel()) navigator.serviceWorker.ready.then(function (reg) {
-      reg.showNotification('✉ Así se ven los avisos', { body: 'Por ejemplo: 3 movimientos por asignar a sobres', icon: 'icons/icono-192.png', badge: 'icons/icono-192.png', tag: 'prueba', data: { url: './?ir=porasignar' }, actions: [{ action: 'abrir', title: 'Abrir' }] });
+      // v2.9.0: la prueba muestra el próximo pago de tarjeta real (o un ejemplo)
+      var px = C.pagosProximos(D, hoy, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31], 31).filter(function (p) { return p.debe; })[0];
+      var tit = px ? '💳 ' + px.nombre + ' · ' + (px.dias === 0 ? 'vence HOY' : px.dias === 1 ? 'vence mañana' : 'pagar en ' + px.dias + ' días') : '✉ Así se ven los avisos';
+      var cuerpo = px ? [px.CRC > 0.004 ? txt(px.CRC, 'CRC') : '', px.USD > 0.004 ? txt(px.USD, 'USD') : ''].filter(String).join(' + ') + ' · vence el ' + fechaCorta(px.fecha).replace(/ \d{4}$/, '') + ' (prueba)' : 'Por ejemplo: 3 movimientos por asignar a sobres';
+      reg.showNotification(tit, { body: cuerpo, icon: 'icons/icono-192.png', badge: 'icons/icono-192.png', tag: 'prueba', data: { url: px ? './?ir=tarjetas' : './?ir=porasignar' }, actions: [{ action: 'abrir', title: 'Abrir' }] });
     });
     else if (!a.correo.activo) toast('Encendé “Avisos en el teléfono” o el resumen por correo.');
   }
@@ -4815,7 +4882,7 @@ var App = (function () {
   function verCuentaMov(n, f) {
     var c = cuentaPorNombre(n); if (!c) return;
     var tj = c.tipo === 'Tarjeta de crédito';
-    CM = { cuenta: n, f: f || (tj ? (c.diaCorte ? 'corte' : 'mes') : (c.fechaSaldo ? 'saldo' : 'mes')), desde: null, hasta: null };
+    CM = { cuenta: n, f: f || (tj && c.diaCorte ? 'corte' : 'mes'), desde: null, hasta: null };   // v2.9.0: las cuentas abren en "Este mes"
     ir('ctamov');
   }
   function cmFiltro(f) { if (f === 'rango') return formRango('cta'); CM.f = f; pintar(); }
@@ -4854,8 +4921,10 @@ var App = (function () {
     var col = function (t, v, cls) { return '<div><span>' + t + '</span><b class="' + (cls || '') + '">' + v + '</b></div>'; };
     h += '<div class="resumen-mov">' + (tj ? col('Compras', dosMon(sum.s)) + col('Pagos', dosMon(sum.e), 'verde-pos') + col('Deuda hoy', dosMon(hoyV))
       : col('Entró', dosMon(sum.e, mon), 'verde-pos') + col('Salió', dosMon(sum.s, mon), 'rojo') + (function () { var dp = disponibleDe(c, hoyV); return dp ? col('Disponible', din(dp.disponible, 'CRC') + '<small>total ' + txt(dp.total, 'CRC') + '</small>', dp.disponible < -0.005 ? 'rojo' : '') : col(hoyV.vivo ? 'Saldo hoy' : 'Saldo', hoyV.vivo ? dosMon(hoyV, mon) : '—'); })()) + '</div>';
-    var chips = (tj ? (c.diaCorte ? [['corte', 'Desde el corte']] : []) : (c.fechaSaldo ? [['saldo', 'Desde el saldo']] : []))
+    // v2.9.0: sin "Desde el saldo" en el menú (solo lo usa "Cuadrar → Buscar qué falta", y ahí se muestra como aviso)
+    var chips = (tj && c.diaCorte ? [['corte', 'Desde el corte']] : [])
       .concat([['mes', 'Este mes'], ['pasado', 'Mes pasado'], ['todo', 'Todo'], ['rango', CM.f === 'rango' && CM.desde ? '📅 ' + textoRango(CM.desde, CM.hasta) : '📅 Rango…']]);
+    if (CM.f === 'saldo' && r[0]) h += '<div class="suave chico" style="margin:0 2px 8px">Mostrando desde la fecha del saldo (' + textoRango(r[0]) + ') · <button class="enlace" onclick="App.cmFiltro(\'mes\')">ver este mes</button></div>';
     h += '<div class="chips desliza">' + chips.map(function (x) { return '<button class="chip' + (CM.f === x[0] ? ' on' : '') + '" onclick="App.cmFiltro(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>';
     if (!lista.length) h += '<div class="caja vacio">No hay movimientos en ese período.</div>';
     else {
@@ -5165,14 +5234,16 @@ var App = (function () {
     var v = vistos(), lim = hoy.getTime() - DIAS_REV * 86400000;
     var sb = sinServidorSobres() ? null : SB(), pendFila = {}, accion = [], listos = [];
     if (sb) sb.pendientes.forEach(function (p) { if (p.mov.fila > 0) { pendFila[p.mov.fila] = p; accion.push({ tipo: p.sentido === 'entra' ? 'entra' : 'sobre', mov: p.mov, p: p }); } });
-    var so = sinOrigen(), soFila = {};
+    var ajFila = {};   // v2.9.0: compras de tarjetas que no están en Cuentas → "¿Es tuya?"
+    D.movimientos.forEach(function (m) { if (m.fila > 0 && m.fecha && new Date(m.fecha).getTime() >= lim - 30 * 86400000 && C.tarjetaDesconocida(D, m)) { ajFila[m.fila] = 1; accion.push({ tipo: 'ajena', mov: m, u4: C.tarjetaDesconocida(D, m) }); } });
+    var so = sinOrigen().filter(function (x) { return !ajFila[x.mov.fila]; }), soFila = {};
     so.forEach(function (x) { soFila[x.mov.fila] = 1; accion.push({ tipo: 'origen', mov: x.mov, cuenta: x.cuenta }); });
     var nuevos = D.movimientos.filter(function (m) { return m.fila > 0 && m.fecha && new Date(m.fecha).getTime() >= lim && !v[claveMov(m)]; });
-    var ivaFila = {}; preguntasIVA().forEach(function (m) { ivaFila[m.fila] = 1; accion.push({ tipo: 'iva', mov: m }); });
+    var ivaFila = {}; preguntasIVA().forEach(function (m) { if (ajFila[m.fila]) return; ivaFila[m.fila] = 1; accion.push({ tipo: 'iva', mov: m }); });
     var confirmar = D.movimientos.filter(function (m) { return m.fila > 0 && m.fecha && new Date(m.fecha).getTime() >= lim && porConfirmar(m); });
     var confFila = {}; confirmar.forEach(function (m) { confFila[m.fila] = 1; });
     nuevos.forEach(function (m) {
-      if (pendFila[m.fila] || soFila[m.fila] || ivaFila[m.fila]) return;
+      if (pendFila[m.fila] || soFila[m.fila] || ivaFila[m.fila] || ajFila[m.fila]) return;
       if (transferenciaDudosa(m)) accion.push({ tipo: 'direccion', mov: m });
       else if (m.tipo === 'Gasto' && !m.categoria && !m.para) accion.push({ tipo: 'categoria', mov: m });
       else if (!confFila[m.fila]) listos.push(m);
@@ -5269,7 +5340,11 @@ var App = (function () {
       h += '<div class="seccion-t">NECESITAN UN TOQUE · ' + r.accion.length + '</div>';
       h += r.accion.map(function (a) {
         var m = a.mov, f = m.fila, cuerpo = '';
-        if (a.tipo === 'sobre') {
+        if (a.tipo === 'ajena') {
+          cuerpo = '<div class="rev-q">Llegó una compra con la tarjeta <b>••' + esc(a.u4) + '</b>, que no está en tus cuentas. <b>¿Es tuya?</b></div><div class="ajena-op">' +
+            chipRev('➕ Sí, agregarla a mis cuentas', 'App.rvAjena(' + f + ',\'si\')') + chipRev('🚫 No es mía · ignorar esta tarjeta', 'App.rvAjena(' + f + ',\'no\')', true) +
+            chipRev('1️⃣ Solo esta vez (borrar esta compra)', 'App.rvAjena(' + f + ',\'una\')') + '</div><div class="suave chico" style="margin-top:8px">No se anota en ninguna cuenta ni sobre hasta que respondás.</div>';
+        } else if (a.tipo === 'sobre') {
           var sug = sugerirSobres(m, 'sale');
           if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
           cuerpo += '<div class="rev-q">Salió de ' + esc(cuentaPrincipal() || 'la cuenta') + '. ¿La sacaste de un sobre?' + (a.p.asignado > 0.005 ? ' (faltan ' + txt(a.p.falta, m.moneda) + ')' : '') + '</div><div class="chips">' +
@@ -5652,7 +5727,7 @@ var App = (function () {
     recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     salarioLlego: salarioLlego, formSalarioOtro: formSalarioOtro, salarioManana: salarioManana, formSalario: formSalario, salPrev: salPrev, guardarSalario: guardarSalario, repCero: repCero,
-    avisoTipo: avisoTipo, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
+    rvAjena: rvAjena, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
     formActualizar: formActualizar, copiarCodigo: copiarCodigo, volverAnterior: volverAnterior, actualizarApp: actualizarApp,
     formNuevaLista: formNuevaLista, nlIcono: nlIcono, crearListaNueva: crearListaNueva, crearConBase: crearConBase, abrirLista: abrirLista, modoLista: modoLista, marcarItem: marcarItem,
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,

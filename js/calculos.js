@@ -600,8 +600,16 @@ var Calc = (function () {
     var mm = s.match(/^cuenta:\s*(.+?)\s*(?:\|\s*sobre:\s*(.+))?$/i);
     return mm ? { tipo: 'cuenta', cuenta: mm[1].trim(), sobre: (mm[2] || '').trim() } : null;
   }
+  /** v2.9.0: compra de una tarjeta que no está en Cuentas (el lector deja "Tarjeta ••1234 no está en Cuentas") → '1234'; si no, '' */
+  function tarjetaDesconocida(d, m) {
+    if (!m || m.cuenta) return '';
+    var x = String(m.nota || '').match(/Tarjeta\s*(?:••|\*+)?\s*(\d{4}) no est[aá] en Cuentas/i);
+    if (!x) return '';
+    return (d.cuentas || []).some(function (c) { return String(c.ultimos4 || '') === x[1]; }) ? '' : x[1];
+  }
   /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
   function efectoCuenta(d, m, o) {
+    if (tarjetaDesconocida(d, m)) return null;   // v2.9.0: hasta saber de quién es la tarjeta, no toca ninguna cuenta
     var cta = m.cuenta ? (d.cuentas || []).filter(function (c) { return normNom(c.nombre) === normNom(m.cuenta); })[0] : null;
     if (cta && !esCuentaReal(cta)) cta = null;
     if (m.tipo === 'Pago de tarjeta') return o.tarjetas ? { cuenta: o.tarjetas, signo: -1, grupo: 'pagos' } : null;
@@ -783,6 +791,35 @@ var Calc = (function () {
     return f;
   }
 
+  /**
+   * v2.9.0 · Pagos de tarjeta de los próximos `ventana` días (para avisos y el correo).
+   * CRC/USD = lo que toca pagar: la deuda de hoy sin las compras hechas después del último corte (esas van al siguiente estado de cuenta).
+   * avisar = hoy es uno de los días elegidos (p. ej. [3,1,0]) y todavía queda algo por pagar (si ya pagaste, no avisa).
+   */
+  function pagosProximos(d, hoy, diasAviso, ventana) {
+    diasAviso = diasAviso && diasAviso.length ? diasAviso : [3, 1, 0]; ventana = ventana === undefined ? 7 : ventana;
+    var out = [], r2 = function (n) { return Math.round(n * 100) / 100; };
+    (d.cuentas || []).forEach(function (c) {
+      if (!c.activa || c.tipo !== 'Tarjeta de crédito' || !c.diaPago) return;
+      var f = proximaFecha(c.diaPago, hoy), dias = diasEntre(hoy, f);
+      if (dias < 0 || dias > ventana) return;
+      var dt = deudaTarjeta(d, c), corte = ultimoCorte(c, hoy), finCorte = corte ? new Date(corte.getFullYear(), corte.getMonth(), corte.getDate() + 1) : null;
+      var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null, finSaldo = fs && !isNaN(fs) ? new Date(fs.getFullYear(), fs.getMonth(), fs.getDate() + 1) : null;
+      var nuevas = { CRC: 0, USD: 0 }, pagado = false;
+      (d.movimientos || []).forEach(function (m) {
+        if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha) return;
+        var fm = new Date(m.fecha);
+        if (m.tipo === 'Pago de tarjeta' && finCorte && fm >= finCorte) pagado = true;
+        if ((m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
+      });
+      var crc = dt.CRC > 0.004 ? Math.max(0, dt.CRC - nuevas.CRC) : dt.CRC, usd = dt.USD > 0.004 ? Math.max(0, dt.USD - nuevas.USD) : dt.USD;
+      var debe = crc > 0.004 || usd > 0.004;
+      out.push({ nombre: c.nombre, ultimos4: c.ultimos4 || '', dias: dias, fecha: f.toISOString(), CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) },
+        pagado: pagado && !debe, debe: debe, avisar: debe && diasAviso.indexOf(dias) >= 0 });
+    });
+    return out.sort(function (a, b) { return a.dias - b.dias; });
+  }
+
   function pct(n, dec) { return n === null || n === undefined ? '—' : (n * 100).toFixed(dec === undefined ? 2 : dec).replace('.', ',') + '%'; }
 
   return {
@@ -791,7 +828,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

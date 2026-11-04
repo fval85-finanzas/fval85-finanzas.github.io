@@ -916,3 +916,15 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .ad-v b { white-space: nowrap; } .ad-v .suave { font-size: 11.5px; }
 @media (max-width: 370px) { .rev-barra { grid-template-columns: 1fr; } }
 .rev-it button.enlace { background: none; border: 0; padding: 4px 0; text-align: left; color: var(--acento); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+
+/* ==================================================================== v2.9.0 · tarjetas limpias */
+.tj.limpia { grid-template-areas: "ic nom mon"; row-gap: 0; }
+.tj.limpia > .tj-nom { align-self: center; }
+.tj.limpia > .monto { align-self: center; gap: 1px; }
+.tj.limpia .monto b { color: var(--texto); }
+.tj.limpia .monto b.verde-pos { color: var(--positivo); }
+.tj.limpia .monto b.tj-usd { font-size: inherit; }
+.tj.limpia .monto .chico { font-size: 12px; line-height: 1.2; }
+.ajena-op { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.ajena-op .chip { justify-content: flex-start; padding: 10px 12px; text-align: left; white-space: normal; }
+.tj.limpia > .mini-plastico { align-self: center; margin-top: 0; }

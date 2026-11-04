@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que abra rápido y avisa cuando hay una versión nueva.
 // Al publicar cambios, subí el número de VERSION (y el de VERSION_WEB en js/app.js).
-const VERSION = '2.8.0';
+const VERSION = '2.9.0';
 const CACHE = 'misfinanzas-' + VERSION;
 const ARCHIVOS = [
   './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/pdf.js', './js/app.js', './js/lector.js', './js/ocr-worker.js', './js/vendor/pdf-lib.min.js',
@@ -83,6 +83,18 @@ function enSilencio(s) {
   return d === a ? false : d < a ? (h >= d && h < a) : (h >= d || h < a);
 }
 function cmpV(a, b) { const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; }
+const DIAS_SW = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+function dinSW(n, mon) {
+  const v = Math.abs(Number(n) || 0); let ent = Math.floor(v), dec = Math.round((v - ent) * 100);
+  if (dec === 100) { ent++; dec = 0; }
+  return (mon === 'USD' ? '$' : '₡') + String(ent).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dec || mon === 'USD' ? ',' + ('0' + dec).slice(-2) : '');
+}
+function cuerpoPago(p) {
+  if (p.CRC === undefined) return 'Revisá la deuda en la app.';
+  const monto = [p.CRC > 0.004 ? dinSW(p.CRC, 'CRC') : '', p.USD > 0.004 ? dinSW(p.USD, 'USD') : ''].filter(String).join(' + ');
+  const f = p.fecha ? new Date(p.fecha) : null;
+  return monto + (p.dias === 0 ? '. Si ya pagaste, ignorá este aviso.' : f ? ' · vence el ' + DIAS_SW[f.getDay()] + ' ' + f.getDate() + '.' : '.');
+}
 async function revisarAvisos() {
   const cfg = await leerCfg();
   if (!cfg || !cfg.tel || enSilencio(cfg.silencio)) return;
@@ -98,7 +110,12 @@ async function revisarAvisos() {
         if (si('asignar') && x.porAsignar && !repetido('a', x.porAsignar)) await mostrar('asignar', '✉ ' + x.porAsignar + ' movimiento' + (x.porAsignar === 1 ? '' : 's') + ' por asignar', 'Repartilos en tus sobres', './?ir=porasignar', 'Asignar');
         if (si('revisar') && x.porRevisar && !repetido('r', x.porRevisar)) await mostrar('revisar', '⚠ ' + x.porRevisar + ' por revisar', 'Movimientos sin categoría', './?ir=revisar', 'Revisar');
         if (si('salario') && x.salarioHoy && !repetido('s', 1)) await mostrar('salario', '💰 Hoy es día de salario', 'Confirmalo y repartilo en tus sobres', './?ir=inicio', 'Abrir');
-        if (si('tarjeta')) for (const p of (x.pagos || [])) { if (!repetido('p' + p.nombre, p.dias)) await mostrar('pago-' + p.nombre, '💳 ' + p.nombre + (p.dias === 0 ? ' vence hoy' : ' vence en ' + p.dias + ' día' + (p.dias === 1 ? '' : 's')), 'Revisá la deuda y lo reservado', './?ir=tarjetas', 'Ver tarjeta'); nuevo['p' + p.nombre] = p.dias; }
+        // v2.9.0: aviso de pago con el monto (3 días, 1 día y el día, según Ajustes); si ya se pagó, el servidor no lo manda
+        if (si('tarjeta')) for (const p of (x.pagos || [])) {
+          if (p.avisar === false) continue;
+          if (!repetido('p' + p.nombre, p.dias)) await mostrar('pago-' + p.nombre, '💳 ' + p.nombre + ' · ' + (p.dias === 0 ? 'vence HOY' : p.dias === 1 ? 'vence mañana' : 'pagar en ' + p.dias + ' días'), cuerpoPago(p), './?ir=tarjetas', 'Ver tarjeta');
+          nuevo['p' + p.nombre] = p.dias;
+        }
         if (si('negativo') && (x.negativos || []).length && !repetido('n', x.negativos.join(','))) await mostrar('negativo', '🔴 Sobre en negativo', x.negativos.join(', '), './?ir=sobres', 'Ver sobres');
         if (si('super') && x.consultas && !repetido('c', x.consultas)) await mostrar('super', '🛒 ' + x.consultas + ' “¿este sirve?” sin responder', 'Abrí Super y Otros', './?ir=super', 'Ver');
         Object.assign(nuevo, { a: x.porAsignar, r: x.porRevisar, s: x.salarioHoy ? 1 : 0, n: (x.negativos || []).join(','), c: x.consultas });

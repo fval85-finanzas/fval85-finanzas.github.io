@@ -1799,8 +1799,18 @@ function leerCorreos_(guardar) {
   var procesado = guardar ? etiqueta_(ETIQUETA_PROCESADO) : null;
   var revisar = guardar ? etiqueta_(ETIQUETA_REVISAR) : null;
 
+  var ajenas = (prefs_().ajenas) || {}, saltadas = guardar ? ajenasSaltadas_() : {};
+  var esMia4 = function (u4) { return cuentas.some(function (x) { return texto_(x['Últimos 4']) === u4; }); };
   function anotar(tx, etiquetaBanco) {
     tx.autorizacion = tx.autorizacion || claveAuto_(tx, etiquetaBanco);
+    // v2.9.0: tarjetas que no son mías (Ajustes → Cuentas): el correo se marca como leído y no se anota
+    if (tx.ultimos4 && !tx.cuentaNombre && ajenas[tx.ultimos4] && !esMia4(tx.ultimos4)) {
+      resumen.ajenas = (resumen.ajenas || 0) + 1;
+      resumen.detalle.push('🚫 [' + etiquetaBanco + '] tarjeta ••' + tx.ultimos4 + ' (no es mía) · ' + (tx.comercio || '') + ' · no se anota');
+      if (guardar && !autorizaciones[tx.autorizacion]) { saltadas[tx.ultimos4] = (saltadas[tx.ultimos4] || 0) + 1; props_().setProperty('AJENAS_SALTADAS', JSON.stringify(saltadas)); }
+      autorizaciones[tx.autorizacion] = true;
+      return;
+    }
     if (autorizaciones[tx.autorizacion]) { resumen.duplicados++; return; }
     autorizaciones[tx.autorizacion] = true;
     var fila = completarCompra_(tx, cuentas, reglas);
@@ -1995,6 +2005,9 @@ function desactivarAutomatico() {
   });
 }
 
+/** v2.9.0: cuántos correos se saltaron por tarjeta "que no es mía" ({ '1234': 3 }) */
+function ajenasSaltadas_() { try { return JSON.parse(props_().getProperty('AJENAS_SALTADAS') || '{}'); } catch (e) { return {}; } }
+
 
 // =====================================================================
 // Ajustes
@@ -2006,7 +2019,7 @@ function desactivarAutomatico() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.8.0';
+var VERSION_APP = '2.9.0';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -2232,6 +2245,7 @@ function obtenerAjustes_() {
     bancos: bancosActivos_().map(function (b) { return b.nombre; }),
     version: VERSION_APP,
     prefs: prefs_(),
+    ajenasSaltadas: ajenasSaltadas_(),
     actualizacion: estadoActualizacion_()
   };
 }
@@ -2357,12 +2371,20 @@ function resumenAvisos_() {
       r.negativos = sb.lista.filter(function (s) { return s.saldo < -0.005; }).map(function (s) { return s.nombre; });
     } catch (e2) { /* sin sobres */ }
   }
-  (d.cuentas || []).forEach(function (c) {
-    if (!c.activa || c.tipo !== 'Tarjeta de crédito' || !c.diaPago) return;
-    var dias = diasHasta_(proximoDia_(c.diaPago));
-    if (dias >= 0 && dias <= 2) r.pagos.push({ nombre: c.nombre, dias: dias });
-  });
-  var sal = (prefs_().salario) || null;
+  // v2.9.0: pagos de los próximos 7 días con monto; "avisar" solo los días elegidos (3, 1 y el día) y si no se ha pagado
+  var pf = prefs_(), diasAv = (pf.avisos && pf.avisos.diasPago) || [3, 1, 0];
+  try {
+    var hoy0p = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    r.semana = Calc.pagosProximos(d, hoy0p, diasAv, 7);
+    r.pagos = r.semana.filter(function (p) { return p.avisar; });
+  } catch (e4) {
+    (d.cuentas || []).forEach(function (c) {
+      if (!c.activa || c.tipo !== 'Tarjeta de crédito' || !c.diaPago) return;
+      var dias = diasHasta_(proximoDia_(c.diaPago));
+      if (diasAv.indexOf(dias) >= 0) r.pagos.push({ nombre: c.nombre, dias: dias, avisar: true });
+    });
+  }
+  var sal = pf.salario || null;
   if (sal && sal.activo) {
     var hoy0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
     r.salarioHoy = Calc.fechasSalario(sal, hoy0, hoy0).length > 0;
@@ -2399,6 +2421,12 @@ function avisoCorreoHora() {
   enviarResumenCorreo_(false);
 }
 
+var DIAS_C_ = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+function dinCorreo_(n, mon) {
+  var v = Math.abs(Number(n) || 0), ent = Math.floor(v), dec = Math.round((v - ent) * 100);
+  if (dec === 100) { ent++; dec = 0; }
+  return (mon === 'USD' ? '$' : '₡') + String(ent).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dec || mon === 'USD' ? ',' + ('0' + dec).slice(-2) : '');
+}
 function enviarResumenCorreo_(prueba) {
   var av = prefs_().avisos || {}, tipos = av.tipos || {}, c = av.correo || {};
   var r = resumenAvisos_(), lineas = [];
@@ -2406,13 +2434,30 @@ function enviarResumenCorreo_(prueba) {
   if (si('asignar') && r.porAsignar) lineas.push('✉ ' + r.porAsignar + ' movimiento' + (r.porAsignar === 1 ? '' : 's') + ' por asignar a sobres');
   if (si('revisar') && r.porRevisar) lineas.push('⚠ ' + r.porRevisar + ' por revisar (sin categoría)');
   if (si('salario') && r.salarioHoy) lineas.push('💰 Hoy es día de salario: confirmalo en la app y repartilo');
-  if (si('tarjeta')) r.pagos.forEach(function (p) { lineas.push('💳 ' + p.nombre + (p.dias === 0 ? ' vence HOY' : ' vence en ' + p.dias + ' día' + (p.dias === 1 ? '' : 's'))); });
+  var semana = si('tarjeta') ? (r.semana || r.pagos) : [];
   if (si('negativo') && r.negativos.length) lineas.push('🔴 Sobre en negativo: ' + r.negativos.join(', '));
   if (si('super') && r.consultas) lineas.push('🛒 ' + r.consultas + ' pregunta' + (r.consultas === 1 ? '' : 's') + ' “¿este sirve?” sin responder');
   try { var viejos = avisosRecordatorio_(); lineas = lineas.concat(viejos.filter(function (x) { return !/^💳/.test(x); })); } catch (e) { /* sin préstamo */ }
-  if (!lineas.length && !prueba && !c.siempre) return 'Nada que avisar.';
-  var cuerpo = (lineas.length ? lineas.join('\n') : 'Todo al día ✓') + '\n\nAbrí la app para verlo: ' + (av.urlApp || '') + '\n— Finanzas';
-  MailApp.sendEmail(Session.getEffectiveUser().getEmail(), (prueba ? '[Prueba] ' : '') + 'Finanzas · resumen del día', cuerpo);
+  var porPagar = semana.filter(function (p) { return p.debe !== false && !p.pagado; });
+  if (!lineas.length && !porPagar.length && !prueba && !c.siempre) return 'Nada que avisar.';
+  // v2.9.0: tabla de pagos de los próximos 7 días con su monto
+  var tPagos = semana.map(function (p) {
+    var f = p.fecha ? new Date(p.fecha) : null, cuando = p.dias === 0 ? 'HOY' : p.dias === 1 ? 'mañana' : f ? DIAS_C_[f.getDay()] + ' ' + f.getDate() : 'en ' + p.dias + ' días';
+    var monto = p.CRC === undefined ? '' : !p.debe ? (p.CRC < -0.004 ? 'a favor ' + dinCorreo_(p.CRC, 'CRC') : p.USD < -0.004 ? 'a favor ' + dinCorreo_(p.USD, 'USD') : p.pagado ? 'ya pagado ✓' : 'nada por pagar')
+      : [p.CRC > 0.004 ? dinCorreo_(p.CRC, 'CRC') : '', p.USD > 0.004 ? dinCorreo_(p.USD, 'USD') : ''].filter(String).join(' + ');
+    return { nombre: p.nombre, cuando: cuando, monto: monto, urg: p.dias <= 1 && p.debe !== false && !p.pagado };
+  });
+  var titulo = porPagar.length ? 'Pagos de esta semana · ' + porPagar.length + ' tarjeta' + (porPagar.length === 1 ? '' : 's') : 'Finanzas · resumen del día';
+  var texto = (tPagos.length ? 'Pagos de los próximos 7 días:\n' + tPagos.map(function (x) { return '• ' + x.nombre + ' · ' + x.cuando + ' · ' + x.monto; }).join('\n') + '\n\n' : '') +
+    (lineas.length ? lineas.join('\n') : (tPagos.length ? '' : 'Todo al día ✓')) + '\n\nAbrí la app para verlo: ' + (av.urlApp || '') + '\n— Finanzas';
+  var e = function (x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  var html = '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:520px">' +
+    (tPagos.length ? '<div style="font-weight:bold;font-size:16px;margin:0 0 8px">' + e(porPagar.length ? titulo : 'Pagos de los próximos 7 días') + '</div><table style="width:100%;border-collapse:collapse;font-size:14px">' + tPagos.map(function (x) {
+      return '<tr><td style="padding:6px 0;border-bottom:1px solid #eee">' + e(x.nombre) + '</td><td style="padding:6px 8px;border-bottom:1px solid #eee;color:' + (x.urg ? '#c0392b;font-weight:bold' : '#777') + '">' + e(x.cuando) + '</td><td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right;font-weight:bold">' + e(x.monto) + '</td></tr>';
+    }).join('') + '</table>' : '') +
+    (lineas.length ? '<div style="margin-top:12px;color:#555;font-size:13px">' + (tPagos.length ? 'También:<br>' : '') + lineas.map(e).join('<br>') + '</div>' : (tPagos.length ? '' : '<div>Todo al día ✓</div>')) +
+    (av.urlApp ? '<div style="margin-top:14px"><a href="' + e(av.urlApp) + '" style="display:inline-block;background:#F5B82E;color:#111;text-decoration:none;font-weight:bold;padding:10px 18px;border-radius:10px">Abrir la app</a></div>' : '') + '</div>';
+  MailApp.sendEmail({ to: Session.getEffectiveUser().getEmail(), subject: (prueba ? '[Prueba] ' : '') + titulo, body: texto, htmlBody: html });
   return prueba ? 'Te envié un resumen de prueba.' : 'Resumen enviado.';
 }
 
@@ -3319,8 +3364,16 @@ var Calc = (function () {
     var mm = s.match(/^cuenta:\s*(.+?)\s*(?:\|\s*sobre:\s*(.+))?$/i);
     return mm ? { tipo: 'cuenta', cuenta: mm[1].trim(), sobre: (mm[2] || '').trim() } : null;
   }
+  /** v2.9.0: compra de una tarjeta que no está en Cuentas (el lector deja "Tarjeta ••1234 no está en Cuentas") → '1234'; si no, '' */
+  function tarjetaDesconocida(d, m) {
+    if (!m || m.cuenta) return '';
+    var x = String(m.nota || '').match(/Tarjeta\s*(?:••|\*+)?\s*(\d{4}) no est[aá] en Cuentas/i);
+    if (!x) return '';
+    return (d.cuentas || []).some(function (c) { return String(c.ultimos4 || '') === x[1]; }) ? '' : x[1];
+  }
   /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
   function efectoCuenta(d, m, o) {
+    if (tarjetaDesconocida(d, m)) return null;   // v2.9.0: hasta saber de quién es la tarjeta, no toca ninguna cuenta
     var cta = m.cuenta ? (d.cuentas || []).filter(function (c) { return normNom(c.nombre) === normNom(m.cuenta); })[0] : null;
     if (cta && !esCuentaReal(cta)) cta = null;
     if (m.tipo === 'Pago de tarjeta') return o.tarjetas ? { cuenta: o.tarjetas, signo: -1, grupo: 'pagos' } : null;
@@ -3502,6 +3555,35 @@ var Calc = (function () {
     return f;
   }
 
+  /**
+   * v2.9.0 · Pagos de tarjeta de los próximos `ventana` días (para avisos y el correo).
+   * CRC/USD = lo que toca pagar: la deuda de hoy sin las compras hechas después del último corte (esas van al siguiente estado de cuenta).
+   * avisar = hoy es uno de los días elegidos (p. ej. [3,1,0]) y todavía queda algo por pagar (si ya pagaste, no avisa).
+   */
+  function pagosProximos(d, hoy, diasAviso, ventana) {
+    diasAviso = diasAviso && diasAviso.length ? diasAviso : [3, 1, 0]; ventana = ventana === undefined ? 7 : ventana;
+    var out = [], r2 = function (n) { return Math.round(n * 100) / 100; };
+    (d.cuentas || []).forEach(function (c) {
+      if (!c.activa || c.tipo !== 'Tarjeta de crédito' || !c.diaPago) return;
+      var f = proximaFecha(c.diaPago, hoy), dias = diasEntre(hoy, f);
+      if (dias < 0 || dias > ventana) return;
+      var dt = deudaTarjeta(d, c), corte = ultimoCorte(c, hoy), finCorte = corte ? new Date(corte.getFullYear(), corte.getMonth(), corte.getDate() + 1) : null;
+      var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null, finSaldo = fs && !isNaN(fs) ? new Date(fs.getFullYear(), fs.getMonth(), fs.getDate() + 1) : null;
+      var nuevas = { CRC: 0, USD: 0 }, pagado = false;
+      (d.movimientos || []).forEach(function (m) {
+        if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha) return;
+        var fm = new Date(m.fecha);
+        if (m.tipo === 'Pago de tarjeta' && finCorte && fm >= finCorte) pagado = true;
+        if ((m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
+      });
+      var crc = dt.CRC > 0.004 ? Math.max(0, dt.CRC - nuevas.CRC) : dt.CRC, usd = dt.USD > 0.004 ? Math.max(0, dt.USD - nuevas.USD) : dt.USD;
+      var debe = crc > 0.004 || usd > 0.004;
+      out.push({ nombre: c.nombre, ultimos4: c.ultimos4 || '', dias: dias, fecha: f.toISOString(), CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) },
+        pagado: pagado && !debe, debe: debe, avisar: debe && diasAviso.indexOf(dias) >= 0 });
+    });
+    return out.sort(function (a, b) { return a.dias - b.dias; });
+  }
+
   function pct(n, dec) { return n === null || n === undefined ? '—' : (n * 100).toFixed(dec === undefined ? 2 : dec).replace('.', ',') + '%'; }
 
   return {
@@ -3510,7 +3592,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
