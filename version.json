@@ -1,7 +1,7 @@
 {
  "web": "2.9.0",
  "servidor": "2.9.0",
- "sha256": "9389c0965cf6d7f1914b8ab58d83c7f7c03871f860db745d79cb28dda20d7bf9",
+ "sha256": "9659b983dd54ba697f29fea430892cdd4bec252068556e717899183da3ef30a7",
  "novedades": "Tarjetas más limpias: solo lo que debés (o \"a favor\" en verde) y la barra de uso; la deuda en dólares se ve grande. La fecha de pago queda adentro de cada tarjeta.\nAvisos de pago: en el teléfono 3 días antes, 1 día antes y el día (con el monto, y no avisa si ya pagaste); el correo de la mañana trae los pagos de los próximos 7 días. Se elige en Ajustes → Avisos.\nMovimientos de la cuenta: Este mes · Mes pasado · Todo · Rango (se quitó \"Desde el saldo\").\nTarjetas que no son mías: si llega una compra de una tarjeta que la app no conoce, Para revisar pregunta \"¿Es tuya?\" (agregarla, ignorarla o borrar solo esa). Lista en Ajustes → Cuentas.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",

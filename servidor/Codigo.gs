@@ -79,7 +79,7 @@ function convertirNumero(texto) {
 /** Identifica la moneda a partir de un símbolo o palabra. */
 function identificarMoneda(texto) {
   var t = String(texto).toUpperCase();
-  if (/USD|US\$|\$|D[OÓ]LAR/.test(t)) return 'USD';
+  if (/USD|US\$|\$|D[OÓ]LL?AR|US\s+DOLL?AR/.test(t)) return 'USD';   // v2.9.0: el BCR escribe "US DOLLAR"
   if (/CRC|₡|¢|COL[OÓ]N|COLONES/.test(t)) return 'CRC';
   return null;
 }
@@ -305,7 +305,7 @@ function parsearBCRTabla(texto, html) {
   });
   if (!crudas.length) {   // sin HTML: se lee del texto plano
     var t = String(texto).replace(/[ \t ]+/g, ' ');
-    var re = /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}(?::\d{2})?)\s+(\S+)\s+(\S+)\s+([\d.,]+)\s+(COLON(?:ES)? COSTA RICA|COLONES|COLON|D[OÓ]LAR(?:ES)? (?:ESTADOUNIDENSES?|AMERICANOS?|USA|EEUU)|D[OÓ]LAR(?:ES)?|USD|CRC)\s+([\s\S]+?)\s+(Aprobad[ao]|Rechazad[ao]|Declinad[ao]|Reversad[ao]|Anulad[ao])\b/gi, m;
+    var re = /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}(?::\d{2})?)\s+(\S+)\s+(\S+)\s+([\d.,]+)\s+(COLON(?:ES)? COSTA RICA|COLONES|COLON|D[OÓ]LAR(?:ES)? (?:ESTADOUNIDENSES?|AMERICANOS?|USA|EEUU)|D[OÓ]LAR(?:ES)?|US DOLLARS?|DOLLARS?|USD|CRC)\s+([\s\S]+?)\s+(Aprobad[ao]|Rechazad[ao]|Declinad[ao]|Reversad[ao]|Anulad[ao])\b/gi, m;
     while ((m = re.exec(t)) !== null) crudas.push({ fecha: m[1] + ' ' + m[2], aut: m[3], ref: m[4], monto: m[5], moneda: m[6], comercio: m[7].replace(/\s*\n\s*/g, ' '), estado: m[8] });
   }
   if (!crudas.length) return null;
