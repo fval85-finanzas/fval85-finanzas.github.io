@@ -1,8 +1,8 @@
 {
- "web": "2.10.2",
+ "web": "2.10.3",
  "servidor": "2.10.2",
  "sha256": "49e97ec24541d2ae9671805d78bd64749343e08ea3c8af3f024f9c06dc4068b9",
- "novedades": "Estados de cuenta (tarjetas, préstamo, fondos): la app no los toca, se quedan en la bandeja de entrada como recordatorio. Los que 2.10.1 había movido vuelven a la bandeja. Compras, pagos y movimientos siguen yendo a Finanzas › Procesado.",
+ "novedades": "Arreglo: ya no sale por error el aviso de que el servidor tiene una versión vieja.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
