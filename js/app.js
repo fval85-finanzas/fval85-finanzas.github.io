@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.10.3';
+  var VERSION_WEB = '2.10.6';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -79,7 +79,7 @@ var App = (function () {
   }
   function desdeInput(v, conHora) { if (!v) return null; var d = conHora ? new Date(v) : new Date(v + 'T12:00'); return isNaN(d) ? null : d.toISOString(); }
   function cuentaPorNombre(n) { return D.cuentas.filter(function (c) { return c.nombre === n; })[0]; }
-  function etiquetaCuenta(n) { var c = cuentaPorNombre(n); return c && c.ultimos4 ? n + ' ••' + c.ultimos4 : n; }
+  function etiquetaCuenta(n) { if (C.esFamilia({ cuenta: n })) { var fx = infoFamilia(n); return fx.persona + ' · ' + fx.nombre + ' ••' + fx.u4; } var c = cuentaPorNombre(n); return c && c.ultimos4 ? n + ' ••' + c.ultimos4 : n; }
   function opciones(lista, sel, vacio) {
     return (vacio !== undefined ? '<option value="">' + esc(vacio) + '</option>' : '') + lista.map(function (v) {
       return '<option' + (v === sel ? ' selected' : '') + ' value="' + esc(v) + '">' + esc(v) + '</option>';
@@ -2661,9 +2661,10 @@ var App = (function () {
   function verViaje(f) { viajeSel = f; ir('viaje'); }
   var VJ = { filtro: '' };
   function etiquetaFuente(k) { return k === 'Efectivo' ? '💵 Efectivo' : '💳 ' + etiquetaCuenta(k); }
-  function cortoFuente(k) { if (k === 'Efectivo') return 'Efectivo'; var c = cuentaPorNombre(k); return c && c.banco ? c.banco : nombreCorto ? nombreCorto(k) : k; }
+  function cortoFuente(k) { if (k === 'Efectivo') return 'Efectivo'; if (C.esFamilia({ cuenta: k })) return infoFamilia(k).persona; var c = cuentaPorNombre(k); return c && c.banco ? c.banco : nombreCorto ? nombreCorto(k) : k; }
   function plasticoMini(k) {
     if (k === 'Efectivo') return '<span class="vj-pl" style="background:#2f6b45">💵</span>';
+    if (C.esFamilia({ cuenta: k })) { var fx = infoFamilia(k); return '<span class="vj-pl" style="background:' + colorBanco(fx.banco) + '">' + esc(fx.u4) + '</span>'; }
     var c = cuentaPorNombre(k);
     return '<span class="vj-pl" style="background:' + colorBanco(c ? c.banco : '') + '">' + esc(c && c.ultimos4 ? c.ultimos4 : '') + '</span>';
   }
@@ -2690,8 +2691,9 @@ var App = (function () {
     if (r.pct >= 0.8) h += '<div class="aviso" style="padding:12px 14px;border-radius:14px;font-size:14px">' + (r.pct >= 1 ? '⚠️ Llegaste al límite del presupuesto.' : '🔔 Ya usaste más del 80 % del presupuesto.') + '</div>';
     // por tarjeta
     var fuentes = Object.keys(r.porTarjeta);
-    (v.tarjetas || []).forEach(function (t) { if (fuentes.indexOf(t) < 0) fuentes.push(t); });
-    if (fuentes.length > 1) h += '<div class="caja borde-acento" style="gap:4px"><div class="suave chico fuerte">POR TARJETA</div>' + fuentes.map(function (k) {
+    (v.tarjetas || []).forEach(function (t) { if (fuentes.indexOf(t) < 0 && t !== C.SIN_FAMILIA) fuentes.push(t); });
+    if (r.hayFamilia) h += porPersonaViaje(r, fuentes, mon);
+    else if (fuentes.length > 1) h += '<div class="caja borde-acento" style="gap:4px"><div class="suave chico fuerte">POR TARJETA</div>' + fuentes.map(function (k) {
       var x = r.porTarjeta[k] || { monto: 0, n: 0 }, pc = r.gastado ? x.monto / r.gastado : 0;
       return '<div class="fila"><span style="display:flex;align-items:center;gap:6px;min-width:0">' + plasticoMini(k) + '<b style="overflow:hidden;text-overflow:ellipsis">' + esc(k === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(k)) + '</b></span><b>' + din(x.monto, mon) + '</b></div>' +
         (x.n ? barra(pc) + '<div class="suave" style="font-size:11.5px;margin-bottom:4px">' + Math.round(pc * 100) + '% · ' + x.n + ' compra' + (x.n === 1 ? '' : 's') + '</div>' : '');
@@ -2717,10 +2719,11 @@ var App = (function () {
     }
     // compras con filtro por tarjeta
     var conCompras = fuentes.filter(function (k) { return r.porTarjeta[k]; });
-    var lista = r.compras.filter(function (c) { return !VJ.filtro || c.cuenta === VJ.filtro; });
+    var lista = r.compras.filter(function (c) { return !VJ.filtro || c.cuenta === VJ.filtro || VJ.filtro === 'p:' + c.persona; });
     h += '<div class="caja sinpad"><div class="fila" style="padding:14px 16px 4px"><h3>Compras (' + r.compras.length + ')</h3></div>';
     if (conCompras.length > 1) {
-      h += '<div class="chips desliza" style="padding:0 16px">' + chipRev('Todas · ' + r.compras.length, 'App.vjFiltro(\'\')', !VJ.filtro) + conCompras.map(function (k) { return chipRev(esc(cortoFuente(k)) + ' · ' + r.porTarjeta[k].n, 'App.vjFiltro(\'' + q(k) + '\')', VJ.filtro === k); }).join('') + '</div>';
+      var chPer = r.hayFamilia ? ordenPersonas(r).map(function (p) { var k = 'p:' + p.persona; return chipRev(esc(nombrePersona(p.persona)) + ' · ' + p.n, 'App.vjFiltro(\'' + q(k) + '\')', VJ.filtro === k); }).join('') : '';
+      h += '<div class="chips desliza" style="padding:0 16px">' + chipRev('Todas · ' + r.compras.length, 'App.vjFiltro(\'\')', !VJ.filtro) + chPer + conCompras.map(function (k) { return chipRev(esc(cortoFuente(k)) + ' · ' + r.porTarjeta[k].n, 'App.vjFiltro(\'' + q(k) + '\')', VJ.filtro === k); }).join('') + '</div>';
       if (VJ.filtro && r.porTarjeta[VJ.filtro]) {
         var porC = {}; r.compras.forEach(function (c) { if (c.cuenta === VJ.filtro) porC[c.categoria] = (porC[c.categoria] || 0) + c.monto; });
         h += '<div class="vj-filtro"><div class="fila"><span style="display:flex;align-items:center;gap:6px">' + plasticoMini(VJ.filtro) + '<b>' + esc(VJ.filtro === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(VJ.filtro)) + '</b></span><b style="font-size:19px">' + din(r.porTarjeta[VJ.filtro].monto, mon) + '</b></div>' +
@@ -2730,15 +2733,31 @@ var App = (function () {
     h += (lista.length ? lista.map(function (c) {
       var m = c.mov;
       return '<button class="item" onclick="App.formCompraViaje(' + m.fila + ')"><span class="ico" style="background:transparent;font-size:18px">' + ICON_CAT[c.categoria] + '</span>' +
-        '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || 'Compra') + '</span><span class="det" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' + esc(fechaCorta(m.fecha).replace(/ \d{4}$/, '') + ' · ' + c.categoria + (c.antes ? ' · antes del viaje' : '') + (m.moneda !== mon ? ' · ' + txt(m.monto, m.moneda) : '')) + ' · ' + plasticoMini(c.cuenta) + esc(cortoFuente(c.cuenta)) + '</span></span>' +
+        '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || 'Compra') + '</span><span class="det" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' + esc(fechaCorta(m.fecha).replace(/ \d{4}$/, '') + ' · ' + c.categoria + (c.antes ? ' · antes del viaje' : '') + (m.moneda !== mon ? ' · ' + txt(m.monto, m.moneda) : '')) + ' · ' + plasticoMini(c.cuenta) + esc(c.familia ? infoFamilia(c.cuenta).persona : r.hayFamilia ? miNombre() : cortoFuente(c.cuenta)) + '</span></span>' +
         '<span class="monto"><b style="display:block">' + din(c.monto, mon) + '</b></span></button>';
     }).join('') : '<div class="suave" style="padding:4px 16px 14px">Todavía no hay compras' + (VJ.filtro ? ' con esta tarjeta' : ' en estas fechas') + '.</div>') + '</div>';
     h += '<div class="dos"><button class="btn" onclick="App.formCompraManual(' + v.fila + ')">＋ Anotar compra a mano</button><button class="btn sec" onclick="App.formAgregarViaje(' + v.fila + ')">＋ Sumar una de la app</button></div>';
     h += '<button class="btn ' + (r.estado === 'Terminado' ? '' : 'sec') + '" style="width:100%;margin-top:8px" onclick="App.resumenViaje(' + v.fila + ')">📄 Resumen del viaje</button>';
-    h += '<div class="suave chico" style="text-align:center">Las compras de las tarjetas elegidas en estas fechas entran solas. Lo pagado antes (vuelos, hotel) se suma con “Es del viaje”. Te avisamos al 80 % y al 100 %.</div>';
+    h += '<div class="suave chico" style="text-align:center">Las compras de las tarjetas elegidas en estas fechas entran solas' + (Object.keys(familia()).length ? ' (y las de la familia, si el viaje las incluye)' : '') + '. Lo pagado antes (vuelos, hotel) se suma con “Es del viaje”. Te avisamos al 80 % y al 100 %.</div>';
     $('p-viaje').innerHTML = h;
   }
   function vjFiltro(k) { VJ.filtro = k; pintar(); }
+  // ---- v2.10.6 · tarjetas de la familia en el viaje: por persona y tarjeta
+  function nombrePersona(p) { return p ? p : miNombre(); }
+  function iconoPersona(p) { return p ? '👩' : '🙋'; }
+  /** Personas del viaje: vos primero, después la familia (de más a menos gastado) */
+  function ordenPersonas(r) { return Object.keys(r.porPersona).map(function (k) { return r.porPersona[k]; }).sort(function (a, b) { return (a.persona ? 1 : 0) - (b.persona ? 1 : 0) || b.monto - a.monto; }); }
+  function porPersonaViaje(r, fuentes, mon) {
+    var per = ordenPersonas(r), mias = per.filter(function (p) { return !p.persona; })[0];
+    if (!mias) per.unshift(mias = { persona: '', monto: 0, n: 0, tarjetas: {} });
+    fuentes.forEach(function (k) { if (!C.esFamilia({ cuenta: k }) && !mias.tarjetas[k]) mias.tarjetas[k] = { monto: 0, n: 0 }; });
+    return '<div class="caja borde-acento" style="gap:4px"><div class="suave chico fuerte">POR PERSONA Y TARJETA</div>' + per.map(function (p, i) {
+      var ks = Object.keys(p.tarjetas).sort(function (a, b) { return p.tarjetas[b].monto - p.tarjetas[a].monto; });
+      return '<div class="fila vj-per"' + (i ? ' style="margin-top:10px"' : '') + '><b>' + iconoPersona(p.persona) + ' ' + esc(nombrePersona(p.persona)) + '</b><b>' + din(p.monto, mon) + '</b></div>' +
+        (r.gastado ? barra(p.monto / r.gastado) : '') +
+        ks.map(function (k) { var x = p.tarjetas[k]; return '<div class="fila chico vj-tj"><span style="display:flex;align-items:center;gap:6px;min-width:0">' + plasticoMini(k) + '<span style="overflow:hidden;text-overflow:ellipsis">' + esc(k === 'Efectivo' ? 'Efectivo' : C.esFamilia({ cuenta: k }) ? infoFamilia(k).nombre : etiquetaCuenta(k)) + '</span></span><span>' + din(x.monto, mon) + '</span></div>'; }).join('');
+    }).join('') + '</div>';
+  }
   /** Compras de antes del viaje que parecen del viaje (aerolínea, hotel, Booking…) */
   function candidatosAntes(v) {
     var ini = new Date(v.desde), lim = new Date(ini.getTime() - 120 * 86400000);
@@ -2841,7 +2860,13 @@ var App = (function () {
     var rp = prev ? C.viaje(D, prev, hoy) : null;
     var cats = C.CATS_VIAJE.filter(function (c) { return r.porCategoria[c] > 0; }).sort(function (a, b) { return r.porCategoria[b] - r.porCategoria[a]; }).map(function (c) { return [c, r.porCategoria[c]]; });
     var tarj = Object.keys(r.porTarjeta).sort(function (a, b) { return r.porTarjeta[b].monto - r.porTarjeta[a].monto; }).map(function (k) { return [k === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(k), r.porTarjeta[k].monto]; });
-    return { v: v, r: r, mon: mon, cats: cats, tarj: tarj, prev: prev, rp: rp };
+    var personas = r.hayFamilia ? ordenPersonas(r).map(function (p) {
+      return { persona: p.persona, nombre: nombrePersona(p.persona), monto: p.monto, n: p.n, tarjetas: Object.keys(p.tarjetas).sort(function (a, b) { return p.tarjetas[b].monto - p.tarjetas[a].monto; }).map(function (k) {
+        return { cuenta: k, nombre: k === 'Efectivo' ? 'Efectivo' : C.esFamilia({ cuenta: k }) ? infoFamilia(k).nombre + ' ••' + infoFamilia(k).u4 : etiquetaCuenta(k), monto: p.tarjetas[k].monto,
+          compras: r.compras.filter(function (c) { return c.cuenta === k; }).slice().reverse().map(function (c) { return [fechaCorta(c.mov.fecha), nombreBonito(c.mov.comercio) || 'Compra', c.categoria, c.monto]; }) };
+      }) };
+    }) : null;
+    return { v: v, r: r, mon: mon, cats: cats, tarj: tarj, prev: prev, rp: rp, personas: personas };
   }
   function resumenViaje(fila) {
     var v = viajePorFila(fila), x = datosResumenViaje(v), r = x.r, mon = x.mon;
@@ -2850,9 +2875,11 @@ var App = (function () {
       '<div class="caja" style="gap:4px"><div class="fila"><div><div class="suave chico">Costo total · ' + r.diasTotal + ' día' + (r.diasTotal === 1 ? '' : 's') + '</div><b style="font-size:24px">' + din(r.gastado, mon) + '</b></div><div style="text-align:right"><div class="suave chico">límite ' + din(r.limite, mon) + '</div><b class="' + (r.disponible < 0 ? 'rojo' : 'verde-pos') + '">' + (r.disponible < 0 ? din(-r.disponible, mon) + ' arriba' : din(r.disponible, mon) + ' debajo ✓') + '</b></div></div>' +
       lin('Por día', din(r.porDiaTotal, mon)) + (r.antes > 0.004 ? lin('Antes / durante', din(r.antes, mon) + ' / ' + din(r.durante, mon)) : '') + '</div>' +
       (x.cats.length ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">POR CATEGORÍA</div>' + x.cats.map(function (c) { return lin(ICON_CAT[c[0]] + ' ' + c[0], din(c[1], mon)); }).join('') + '</div>' : '') +
-      (x.tarj.length ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">POR TARJETA</div>' + x.tarj.map(function (t) { return lin((t[0] === 'Efectivo' ? '💵 ' : '💳 ') + esc(t[0]), din(t[1], mon)); }).join('') + '</div>' : '') +
+      (x.personas ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">POR PERSONA Y TARJETA</div>' + x.personas.map(function (p) { return lin('<b>' + iconoPersona(p.persona) + ' ' + esc(p.nombre) + '</b>', din(p.monto, mon)) + p.tarjetas.map(function (t) { return '<div class="fila chico suave" style="padding-left:22px"><span>' + esc(t.nombre) + '</span><span>' + din(t.monto, mon) + '</span></div>'; }).join(''); }).join('') + '</div>' :
+      x.tarj.length ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">POR TARJETA</div>' + x.tarj.map(function (t) { return lin((t[0] === 'Efectivo' ? '💵 ' : '💳 ') + esc(t[0]), din(t[1], mon)); }).join('') + '</div>' : '') +
       (x.prev ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">COMPARADO CON</div>' + lin(esc(x.prev.nombre) + ' · ' + fechaCorta(x.prev.desde) + ' (' + x.rp.diasTotal + ' días)', din(x.rp.porDiaTotal, x.rp.moneda) + ' por día') + '</div>' : '') +
-      '<div class="dos"><button class="btn" id="vr-pdf" onclick="App.pdfViaje(' + fila + ',this)">📄 PDF</button><button class="btn sec" onclick="App.compartirViaje(' + fila + ')">↗ Compartir</button></div>' +
+      '<div class="dos"><button class="btn" id="vr-pdf" onclick="App.pdfViaje(' + fila + ',this)">📄 PDF' + (x.personas ? ' completo' : '') + '</button><button class="btn sec" onclick="App.compartirViaje(' + fila + ')">↗ Compartir</button></div>' +
+      (x.personas ? '<div class="chips" style="margin-top:8px;flex-wrap:wrap">' + x.personas.map(function (p, i) { return chipRev('📄 Solo ' + esc(p.nombre), 'App.pdfViaje(' + fila + ',this,' + i + ')'); }).join('') + '</div><div class="suave chico" style="margin-top:4px">El PDF trae el resumen y después una página por tarjeta, para comparar con cada estado de cuenta.</div>' : '') +
       '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
   }
   function textoViaje(fila) {
@@ -2860,26 +2887,32 @@ var App = (function () {
     return '✈ ' + v.nombre + ' (' + fechaCorta(v.desde) + ' al ' + fechaCorta(v.hasta) + ')\nCosto total: ' + txt(r.gastado, mon) + ' de ' + txt(r.limite, mon) + ' · ' + txt(r.porDiaTotal, mon) + ' por día' +
       (r.antes > 0.004 ? '\nAntes del viaje ' + txt(r.antes, mon) + ' · durante ' + txt(r.durante, mon) : '') +
       (x.cats.length ? '\n\nPor categoría:\n' + x.cats.map(function (c) { return '• ' + c[0] + ': ' + txt(c[1], mon); }).join('\n') : '') +
-      (x.tarj.length ? '\n\nPor tarjeta:\n' + x.tarj.map(function (t) { return '• ' + t[0] + ': ' + txt(t[1], mon); }).join('\n') : '');
+      (x.personas ? '\n\nPor persona y tarjeta:\n' + x.personas.map(function (p) { return '• ' + p.nombre + ': ' + txt(p.monto, mon) + '\n' + p.tarjetas.map(function (t) { return '   – ' + t.nombre + ': ' + txt(t.monto, mon); }).join('\n'); }).join('\n') :
+      x.tarj.length ? '\n\nPor tarjeta:\n' + x.tarj.map(function (t) { return '• ' + t[0] + ': ' + txt(t[1], mon); }).join('\n') : '');
   }
   function compartirViaje(fila) {
     var t = textoViaje(fila);
     if (navigator.share) navigator.share({ title: 'Resumen del viaje', text: t }).catch(function () { /* cancelado */ });
     else navigator.clipboard.writeText(t).then(function () { toast('📋 Resumen copiado'); }, function () { toast('No se pudo copiar'); });
   }
-  function pdfViaje(fila, boton) {
-    var v = viajePorFila(fila), x = datosResumenViaje(v);
+  function pdfViaje(fila, boton, soloI) {
+    var v = viajePorFila(fila), x = datosResumenViaje(v), solo = (soloI !== undefined && x.personas) ? x.personas[soloI] : null;
+    if (solo) {   // v2.10.6: PDF de una sola persona (sus tarjetas y sus compras)
+      var rs = Object.assign({}, x.r, { gastado: solo.monto, porDiaTotal: solo.monto / x.r.diasTotal, compras: x.r.compras.filter(function (c) { return c.persona === solo.persona; }), presupuesto: null });
+      var pc = {}; rs.compras.forEach(function (c) { pc[c.categoria] = (pc[c.categoria] || 0) + c.monto; });
+      x = Object.assign({}, x, { r: rs, prev: null, personas: [solo], cats: Object.keys(pc).sort(function (a, b) { return pc[b] - pc[a]; }).map(function (c) { return [c, pc[c]]; }), totalViaje: x.r.gastado });
+    }
     if (boton) boton.disabled = true;
     toast('Preparando el PDF…', 6000);
     cargarScript('js/vendor/pdf-lib.min.js').then(function () {
       return PDFViaje.construir(window.PDFLib, {
-        nombre: v.nombre, desde: v.desde, hasta: v.hasta, moneda: x.mon, r: x.r, cats: x.cats, tarj: x.tarj,
+        nombre: v.nombre, desde: v.desde, hasta: v.hasta, moneda: x.mon, r: x.r, cats: x.cats, tarj: x.tarj, personas: x.personas, solo: solo ? solo.nombre : '', totalViaje: x.totalViaje,
         prev: x.prev ? { nombre: x.prev.nombre, desde: x.prev.desde, dias: x.rp.diasTotal, porDia: x.rp.porDiaTotal, moneda: x.rp.moneda } : null,
-        compras: x.r.compras.slice().reverse().map(function (c) { return [fechaCorta(c.mov.fecha), nombreBonito(c.mov.comercio) || 'Compra', c.categoria, c.cuenta === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(c.cuenta), c.monto]; })
+        compras: x.r.compras.slice().reverse().map(function (c) { return [fechaCorta(c.mov.fecha), nombreBonito(c.mov.comercio) || 'Compra', c.categoria, c.cuenta === 'Efectivo' ? 'Efectivo' : (x.personas ? (c.familia ? infoFamilia(c.cuenta).persona + ' ••' + c.familia : miNombre() + ' ' + (((cuentaPorNombre(c.cuenta) || {}).ultimos4) ? '••' + cuentaPorNombre(c.cuenta).ultimos4 : c.cuenta)) : plasticoTexto(c.cuenta)), c.monto]; })
       });
     }).then(function (bytes) {
       if (boton) boton.disabled = false;
-      return compartirArchivo(bytes, 'Viaje ' + v.nombre.replace(/[\\/:*?"<>|]/g, '') + '.pdf', 'application/pdf', 'Resumen del viaje ' + v.nombre);
+      return compartirArchivo(bytes, 'Viaje ' + v.nombre.replace(/[\\/:*?"<>|]/g, '') + (solo ? ' - ' + solo.nombre : '') + '.pdf', 'application/pdf', 'Resumen del viaje ' + v.nombre);
     }).catch(function (e) { if (boton) boton.disabled = false; toast('⚠️ No se pudo crear el PDF: ' + (e && e.message ? e.message : e), 6000); });
   }
   /** Dentro de un movimiento: ✈ Es del viaje */
@@ -2911,6 +2944,7 @@ var App = (function () {
         '<div class="suave chico" style="margin-top:4px">Si no ponés montos, se ve solo el total (como siempre).</div></details>' +
       '<div class="suave chico fuerte" style="margin-top:12px">TARJETAS O CUENTAS DEL VIAJE</div>' +
       tarjetas.map(function (t) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="vj-t" value="' + esc(t) + '"' + (sel.indexOf(t) >= 0 ? ' checked' : '') + '> ' + esc(t === 'Efectivo' ? 'Efectivo (gastos sin cuenta)' : etiquetaCuenta(t)) + '</label>'; }).join('') +
+      (Object.keys(familia()).length ? '<label class="check" style="margin-top:8px"><input type="checkbox" id="vj-fam"' + (sel.indexOf(C.SIN_FAMILIA) < 0 ? ' checked' : '') + '> 👪 Tarjetas de la familia (' + esc(personasFamilia().join(', ')) + ')</label>' : '') +
       (D.fondos && D.fondos.length ? '<label class="campo compacto"><span>Ligado a un fondo (opcional)</span><select id="vj-sub"><option value="">— Ninguno —</option>' + opcionesSubcuenta(v ? v.subcuenta : '') + '</select></label>' : '') +
       (v ? '<label class="check"><input type="checkbox" id="vj-activo"' + (v.activo ? ' checked' : '') + '> Activo (avisos y tarjeta en Inicio)</label>' : '') +
       '<div class="acciones"><button class="btn" id="vj-ok" onclick="App.guardarViaje(' + (fila || 0) + ')">Guardar</button>' +
@@ -2926,7 +2960,9 @@ var App = (function () {
     if (!v.nombre) return toast('Falta el nombre.');
     if (!v.limite || v.limite <= 0) return toast('Escribí el límite.');
     if (!v.desde || !v.hasta) return toast('Elegí las fechas.');
-    if (!v.tarjetas.length) return toast('Elegí al menos una tarjeta o cuenta.');
+    if (!v.tarjetas.length && !($('vj-fam') && $('vj-fam').checked)) return toast('Elegí al menos una tarjeta o cuenta.');
+    if ($('vj-fam') && !$('vj-fam').checked) v.tarjetas.push(C.SIN_FAMILIA);
+    else if (!$('vj-fam') && v0 && (v0.tarjetas || []).indexOf(C.SIN_FAMILIA) >= 0) v.tarjetas.push(C.SIN_FAMILIA);
     if (v0 && v.limite > v0.limite) v.reiniciarAvisos = true;
     srv('guardarViaje', [v], function (f) { if (!fila) viajeSel = f; listo('✅ Presupuesto guardado'); if (!fila) setTimeout(function () { ir('viaje'); }, 0); }, $('vj-ok'));
   }
@@ -3226,6 +3262,65 @@ var App = (function () {
     guardarPrefs({ ajenas: o }, 'Tarjeta ••' + u4 + ' no es mía'); formAjenas(); pintar();
   }
   function ajenaNombre(el) { var o = Object.assign({}, ajenas()), k = el.getAttribute('data-u4'); o[k] = Object.assign({}, o[k] || {}, { nombre: el.value.trim() }); guardarPrefs({ ajenas: o }, 'Nombre de la tarjeta ••' + k); }
+  // ---- v2.10.6 · tarjetas de la familia (solo cuentan en viajes)
+  function familia() { return PREFS().familia || {}; }
+  function personasFamilia() { var o = familia(), v = []; Object.keys(o).forEach(function (k) { var p = (o[k].persona || 'Familia').trim(); if (v.indexOf(p) < 0) v.push(p); }); return v; }
+  function bancoDeNombre(n) { var t = String(n || '').toLowerCase(); return /bac|credomatic/.test(t) ? 'BAC' : /davi/.test(t) ? 'Davibank' : /bcr/.test(t) ? 'BCR' : /promerica/.test(t) ? 'Promerica' : /\bbn\b|nacional/.test(t) ? 'BN' : n || ''; }
+  function infoFamilia(k) { var u4 = C.familia4({ cuenta: k }), x = familia()[u4] || {}; return { u4: u4, persona: (x.persona || 'Familia').trim(), nombre: x.nombre || 'Tarjeta', banco: bancoDeNombre(x.nombre) }; }
+  function plasticoTexto(k) { if (C.esFamilia({ cuenta: k })) { var fx = infoFamilia(k); return fx.nombre + ' ••' + fx.u4; } return etiquetaCuenta(k); }
+  function movsFamilia(u4) { return D.movimientos.filter(function (m) { return C.familia4(m) === u4; }).length; }
+  /** "¿De quién es la ••1234?" (desde Para revisar o desde Ajustes) */
+  function formFamiliaTarjeta(u4, fila) {
+    var m = fila ? movPorFila(fila) : null, x = familia()[u4] || {};
+    var banco = m && /^BAC-/.test(m.autorizacion || '') ? 'BAC Credomatic' : m && /davibank/i.test(m.nota || '') ? 'Davibank' : '';
+    var pers = personasFamilia();
+    abrir('<h2>👪 ¿De quién es la ••' + esc(u4) + '?</h2><div class="suave">Sus compras van a contar <b>solo en los viajes</b>, separadas por persona y tarjeta. No tocan tus cuentas, deudas, sobres ni reportes.</div>' +
+      '<label class="campo"><span>Nombre de la persona</span><input id="fm-per" list="fm-pers" value="' + esc(x.persona || pers[0] || '') + '" placeholder="Ej. Ana"><datalist id="fm-pers">' + pers.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist></label>' +
+      '<label class="campo"><span>Nombre de la tarjeta</span><input id="fm-nom" value="' + esc(x.nombre || banco) + '" placeholder="Ej. Visa BAC, Mastercard Davibank"></label>' +
+      '<div class="acciones"><button class="btn" id="fm-ok" onclick="App.guardarFamiliaTarjeta(\'' + q(u4) + '\',' + (fila || 0) + ')">Guardar</button><button class="btn sec" onclick="App.' + (fila ? 'cerrar' : 'formFamilia') + '()">Cancelar</button></div>');
+  }
+  function guardarFamiliaTarjeta(u4, fila) {
+    var per = val('fm-per').trim(), nom = val('fm-nom').trim();
+    if (!per) return toast('Escribí de quién es la tarjeta.');
+    if (!/^\d{4}$/.test(u4)) return toast('Poné los últimos 4 números.');
+    if (D.cuentas.some(function (c) { return String(c.ultimos4 || '') === u4; })) return toast('••' + u4 + ' ya está en tus Cuentas.');
+    var o = Object.assign({}, familia()), nuevo = !o[u4]; o[u4] = { persona: per, nombre: nom || 'Tarjeta', desde: (o[u4] && o[u4].desde) || new Date().toISOString().slice(0, 10) };
+    var parcial = { familia: o }; if (ajenas()[u4]) { var aj = Object.assign({}, ajenas()); delete aj[u4]; parcial.ajenas = aj; }
+    guardarPrefs(parcial, 'Tarjeta ••' + u4 + ' de ' + per);
+    // las compras que ya llegaron de esa tarjeta pasan a "Familia ••1234"
+    var pasadas = D.movimientos.filter(function (m) { return m.fila > 0 && C.tarjetaDesconocida(D, m) === u4; });
+    pasadas.forEach(function (m) {
+      var nota = String(m.nota || '').replace(/\.?\s*Tarjeta\s*(?:••|\*+)?\s*\d{4} no est[aá] en Cuentas/i, '').replace(/^\.\s*/, '');
+      nota = (nota ? nota + '. ' : '') + 'Tarjeta de la familia (solo viajes)';
+      encolar('guardarMovimiento', [{ fila: m.fila, control: { monto: m.monto }, fecha: m.fecha, monto: m.monto, moneda: m.moneda, tipo: m.tipo, comercio: m.comercio, lugar: m.lugar, cuenta: 'Familia ••' + u4,
+        categoria: m.categoria, sobre: '', nota: nota, origen: m.origen, autorizacion: m.autorizacion, recordarRegla: false }], 'Compra de ' + per + ': ' + (m.comercio || ''));
+    });
+    if (pasadas.length) marcarVistos(pasadas);
+    if (fila) hecho('👪 Listo: ••' + u4 + ' es de ' + per + (pasadas.length ? ' · ' + pasadas.length + ' compra' + (pasadas.length === 1 ? '' : 's') + ' pasada' + (pasadas.length === 1 ? '' : 's') : '') + '. Solo cuenta en viajes.');
+    else { formFamilia(); pintar(); toast(nuevo ? '👪 Tarjeta agregada' : 'Guardado'); }
+  }
+  function formFamilia() {
+    var o = familia(), pers = personasFamilia();
+    abrir('<h2>👪 Tarjetas de la familia</h2><div class="suave">Solo cuentan en los viajes. No suman a tus cuentas, deudas, sobres ni reportes.</div>' +
+      (pers.length ? pers.map(function (p) {
+        var ks = Object.keys(o).filter(function (k) { return (o[k].persona || 'Familia').trim() === p; });
+        return '<div class="caja sinpad" style="margin-top:10px"><div class="suave chico fuerte" style="padding:10px 14px 0">👩 ' + esc(p.toUpperCase()) + '</div>' + ks.map(function (k) {
+          var x = o[k], n = movsFamilia(k);
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--linea)"><span class="vj-pl" style="background:' + colorBanco(bancoDeNombre(x.nombre)) + ';flex-shrink:0">' + esc(k) + '</span>' +
+            '<button onclick="App.formFamiliaTarjeta(\'' + q(k) + '\')" style="flex:1;min-width:0;text-align:left;background:none;border:0;color:var(--texto);font:inherit;padding:0"><b style="display:block">' + esc(x.nombre || 'Tarjeta') + ' ••' + esc(k) + '</b><span class="suave chico">' + n + ' compra' + (n === 1 ? '' : 's') + ' leída' + (n === 1 ? '' : 's') + ' · tocá para editar</span></button>' +
+            '<button onclick="App.familiaQuitar(\'' + q(k) + '\')" style="background:none;border:0;color:var(--rojo);font:inherit;font-weight:700;padding:6px;flex-shrink:0">Quitar</button></div>';
+        }).join('') + '</div>';
+      }).join('') : '<div class="caja vacio" style="margin-top:10px">Ninguna todavía. Cuando llegue una compra de una tarjeta que no conocés, Para revisar te pregunta; o agregala acá.</div>') +
+      '<div class="dos" style="margin-top:10px;align-items:end"><label class="campo compacto"><span>Últimos 4</span><input id="fm-u4" inputmode="numeric" maxlength="4" placeholder="1234"></label><button class="btn" onclick="App.familiaAgregar()">＋ Agregar tarjeta</button></div>' +
+      '<div class="caja" style="margin-top:10px;background:var(--fondo);gap:4px"><b style="font-size:14px">📧 Cómo llegan sus compras</b><span class="suave chico">Ella reenvía a tu Gmail los avisos de compra de sus bancos (con un filtro de Gmail). La app los lee igual que los tuyos. Si un viaje no debe incluirlas, desmarcalo en Editar viaje.</span></div>' +
+      '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  function familiaAgregar() { var u4 = val('fm-u4').trim(); if (!/^\d{4}$/.test(u4)) return toast('Poné los últimos 4 números de la tarjeta.'); formFamiliaTarjeta(u4, 0); }
+  function familiaQuitar(k) {
+    var o = Object.assign({}, familia()); delete o[k];
+    guardarPrefs({ familia: o }, 'Tarjeta ••' + k + ' ya no es de la familia'); formFamilia(); pintar();
+    toast('Quitada. Las compras que ya estaban siguen contando solo en viajes.', 4000);
+  }
   function ajenaQuitar(k) { var o = Object.assign({}, ajenas()); delete o[k]; guardarPrefs({ ajenas: o }, 'Tarjeta ••' + k + ' vuelve a anotarse'); formAjenas(); pintar(); }
 
   function formPago() {
@@ -3636,6 +3731,7 @@ var App = (function () {
       h += grupo('cu', '🏦', '#5B8DEF', 'Cuentas', 'Principal: ' + esc(og.principal),
         opcion('tarjeta', 'Cuentas de dónde salen los pagos', 'Tarjetas: ' + esc(og.tarjetas) + ' · Préstamo: ' + esc(og.prestamo) + ' · Fondos: ' + esc(og.fondos), '<span class="flecha">›</span>', 'App.formOrigenes()') +
         opcion('hoja', 'Cobros con IVA aparte', Object.keys(ivaPrefs()).filter(function (k) { return ivaPrefs()[k]; }).join(', ') || 'Ninguno todavía', '<span class="flecha">›</span>', 'App.formIVA()') +
+        opcion('tarjeta', 'Tarjetas de la familia', Object.keys(familia()).length ? personasFamilia().map(function (p) { return p + ' (' + Object.keys(familia()).filter(function (k) { return (familia()[k].persona || 'Familia') === p; }).length + ')'; }).join(', ') + ' · solo cuentan en viajes' : 'Ninguna · esposa, hijos… (solo para viajes)', '<span class="flecha">›</span>', 'App.formFamilia()') +
         opcion('tarjeta', 'Tarjetas que no son mías', Object.keys(ajenas()).map(function (k) { return (ajenas()[k].nombre ? ajenas()[k].nombre + ' ' : '') + '••' + k; }).join(', ') || 'Ninguna · la app no anota sus correos', '<span class="flecha">›</span>', 'App.formAjenas()'));
     }
     var ult = AJ.ultimaRevision ? new Date(Number(AJ.ultimaRevision) + 10 * 60000) : null;
@@ -4436,29 +4532,43 @@ var App = (function () {
     $('p-super').innerHTML = h;
     if (!pSuper.refrescado) { pSuper.refrescado = true; cargarListas(); }
   }
-  function formNuevaLista() {
-    var primera = !LISTAS || !LISTAS.length;
-    abrir('<h2>Nueva lista</h2><label class="campo"><span>Nombre</span><input id="nl-nombre" placeholder="Ej. Super semanal" value="' + (primera ? 'Super semanal' : '') + '"></label>' +
-      '<div class="suave chico" style="margin-top:12px">Ícono</div><div class="chips" id="nl-ic" style="margin-top:6px">' + ['🛒', '🥑', '💊', '🏠', '🎁', '🐾', '🧴'].map(function (x, i) { return '<button class="chip' + (i ? '' : ' on') + '" onclick="App.nlIcono(this)">' + x + '</button>'; }).join('') + '</div>' +
-      '<label class="check"><input type="checkbox" id="nl-base"' + (primera ? ' checked' : '') + '> Empezar con una lista base de super (unas 50 cosas típicas; antes de crearla quitás las que no usás)</label>' +
+  var NL = { tipo: 'super' };
+  function formNuevaLista(tipo) {
+    var primera = !LISTAS || !LISTAS.length; NL.tipo = tipo || NL.tipo || 'super';
+    var tienda = NL.tipo === 'tiendas', ics = tienda ? ['🛍', '👟', '👕', '🎒', '🎁', '🧳', '💄'] : ['🛒', '🥑', '💊', '🏠', '🎁', '🐾', '🧴'];
+    var nom = $('nl-nombre') ? val('nl-nombre') : (primera ? 'Super semanal' : '');
+    if (tienda && /^super semanal$/i.test(nom)) nom = '';
+    var tarjeta = function (t, ic, n, d) { return '<button type="button" class="nl-tipo' + (NL.tipo === t ? ' on' : '') + '" onclick="App.formNuevaLista(\'' + t + '\')"><span style="font-size:26px">' + ic + '</span><b>' + n + '</b><span class="suave chico">' + d + '</span></button>'; };
+    abrir('<h2>Nueva lista</h2><label class="campo"><span>Nombre</span><input id="nl-nombre" placeholder="' + (tienda ? 'Ej. Compras del viaje' : 'Ej. Super semanal') + '" value="' + esc(nom) + '"></label>' +
+      '<div class="suave chico" style="margin-top:10px">Tipo de lista</div><div class="nl-tipos">' + tarjeta('super', '🛒', 'Super', 'por pasillos, cantidades') + tarjeta('tiendas', '🛍', 'Tiendas y mall', 'ropa, zapatos, tallas, para quién') + '</div>' +
+      '<div class="suave chico" style="margin-top:12px">Ícono</div><div class="chips" id="nl-ic" style="margin-top:6px">' + ics.map(function (x, i) { return '<button class="chip' + (i ? '' : ' on') + '" onclick="App.nlIcono(this)">' + x + '</button>'; }).join('') + '</div>' +
+      (tienda ? '<label class="campo"><span>¿Para quiénes? (separados por coma)</span><input id="nl-personas" placeholder="Ej. Fernando, Ana, Sofía" value="' + esc(miNombre()) + '"></label>' : '') +
+      '<label class="check"><input type="checkbox" id="nl-base"' + (primera || tienda ? ' checked' : '') + '> ' + (tienda ? 'Empezar con una lista base de tiendas (ropa, calzado, medias, ropa interior, abrigos, perfumería…; antes de crearla quitás lo que no ocupás)' : 'Empezar con una lista base de super (unas 50 cosas típicas; antes de crearla quitás las que no usás)') + '</label>' +
       '<div class="acciones"><button class="btn" onclick="App.crearListaNueva(this)">Crear</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function nlIcono(b) { Array.prototype.forEach.call(document.querySelectorAll('#nl-ic .chip'), function (c) { c.classList.toggle('on', c === b); }); }
   function crearListaNueva(b) {
-    var nombre = val('nl-nombre').trim() || 'Lista', ic = (document.querySelector('#nl-ic .chip.on') || {}).textContent || '🛒';
-    if ($('nl-base').checked) return elegirBase(nombre, ic);
-    srv('crearLista', [nombre, ic, []], function (l) { cerrar(); LISTA = l; listaModo = 'editar'; cargarListas(); ir('lista'); }, b);
+    var tienda = NL.tipo === 'tiendas', nombre = val('nl-nombre').trim() || (tienda ? 'Compras' : 'Lista'), ic = (document.querySelector('#nl-ic .chip.on') || {}).textContent || (tienda ? '🛍' : '🛒');
+    var opc = { tipo: NL.tipo, personas: tienda ? val('nl-personas').split(',').map(function (x) { return x.trim(); }).filter(String) : [] };
+    if ($('nl-base').checked) return elegirBase(nombre, ic, opc);
+    srv('crearLista', [nombre, ic, [], opc], function (l) { cerrar(); LISTA = l; listaModo = 'editar'; cargarListas(); ir('lista'); }, b);
   }
   var baseTmp = null;
-  function elegirBase(nombre, ic) {
-    baseTmp = { nombre: nombre, ic: ic };
-    abrir('<h2>Lista base</h2><div class="suave">Desmarcá lo que no comprás. Después la editás como querás.</div>' + LISTA_BASE.map(function (g) {
-      return '<div class="seccion-t" style="margin-top:14px">' + IC_PASILLO[g[0]] + ' ' + g[0] + '</div>' + g[1].map(function (n) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="lb-it" data-p="' + esc(g[0]) + '" value="' + esc(n) + '" checked> ' + esc(n) + '</label>'; }).join('');
+  function elegirBase(nombre, ic, opc) {
+    baseTmp = { nombre: nombre, ic: ic, opc: opc || { tipo: 'super' } };
+    var tienda = baseTmp.opc.tipo === 'tiendas', base = tienda ? TIENDAS.BASE : LISTA_BASE, icg = tienda ? TIENDAS.IC : IC_PASILLO;
+    abrir('<h2>Lista base</h2><div class="suave">' + (tienda ? 'Marcá lo que quieren comprar (empieza todo desmarcado). Después le ponés talla, color y para quién.' : 'Desmarcá lo que no comprás. Después la editás como querás.') + '</div>' + base.map(function (g) {
+      return '<div class="seccion-t fila" style="margin-top:14px"><span>' + icg[g[0]] + ' ' + g[0] + '</span><button type="button" class="enlace-mini" onclick="App.baseSeccion(this)">todas</button></div>' + g[1].map(function (n) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="lb-it" data-p="' + esc(g[0]) + '" value="' + esc(n) + '"' + (tienda ? '' : ' checked') + '> ' + esc(n) + '</label>'; }).join('');
     }).join('') + '<div class="acciones"><button class="btn" onclick="App.crearConBase(this)">Crear lista</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function baseSeccion(b) {
+    var cajas = [], e = b.parentNode.nextElementSibling;
+    while (e && !e.classList.contains('seccion-t')) { var c = e.querySelector && e.querySelector('input.lb-it'); if (c) cajas.push(c); e = e.nextElementSibling; }
+    var todas = cajas.every(function (c) { return c.checked; }); cajas.forEach(function (c) { c.checked = !todas; }); b.textContent = todas ? 'todas' : 'ninguna';
   }
   function crearConBase(b) {
     var items = Array.prototype.filter.call(document.querySelectorAll('.lb-it'), function (x) { return x.checked; }).map(function (x) { return { n: x.value, q: '', u: '', p: x.dataset.p }; });
-    srv('crearLista', [baseTmp.nombre, baseTmp.ic, items], function (l) { cerrar(); LISTA = l; listaModo = 'editar'; cargarListas(); ir('lista'); toast('✅ Lista creada con ' + items.length + ' cosas'); }, b);
+    srv('crearLista', [baseTmp.nombre, baseTmp.ic, items, baseTmp.opc], function (l) { cerrar(); LISTA = l; listaModo = 'editar'; cargarListas(); ir('lista'); toast('✅ Lista creada con ' + items.length + ' cosas'); }, b);
   }
   function abrirLista(id) {
     var cache = leerJSONSeguro('mf-lista-' + id);
@@ -4487,7 +4597,14 @@ var App = (function () {
   }
   function aplicarOpLocal(l, op) {
     var it = op.item ? (l.items || []).filter(function (x) { return x.id === op.item; })[0] : null, yo = miNombre();
-    if (op.t === 'marcar' && it) { it.on = !!op.on; it.por = op.on ? yo : ''; if (op.on) it.estado = ''; }
+    if (op.t === 'marcar' && it) { it.on = !!op.on; it.por = op.on ? yo : ''; if (op.on) it.estado = ''; if (!op.on) it.pagado = ''; }
+    else if (op.t === 'pagado' && it) { it.pagado = Number(op.monto) > 0 ? Number(op.monto) : ''; if (op.medio !== undefined) it.medio = op.medio; if (it.pagado) { it.on = true; it.por = yo; } }
+    else if (op.t === 'encargante' && op.datos) {
+      l.encargantes = l.encargantes || []; var e0 = l.encargantes.filter(function (e) { return e.n === (op.antes || op.datos.n); })[0];
+      if (e0) { if (op.antes && op.antes !== op.datos.n) l.items.forEach(function (x) { if (x.enc === op.antes) x.enc = op.datos.n; }); Object.assign(e0, op.datos); } else l.encargantes.push(Object.assign({ adelanto: 0, moneda: 'USD', estado: '' }, op.datos));
+    }
+    else if (op.t === 'quitarEncargante') { l.encargantes = (l.encargantes || []).filter(function (e) { return e.n !== op.n; }); l.items = l.items.filter(function (x) { return x.enc !== op.n; }); }
+    else if (op.t === 'personas') l.personas = op.personas || [];
     else if (op.t === 'nohay' && it) { it.estado = 'nohay'; it.on = false; it.por = yo; }
     else if (op.t === 'agregar' && op.datos) { if (!l.items.some(function (x) { return x.id === op.datos.id; })) l.items.push(Object.assign({ on: false, estado: '', foto: '', nota: '' }, op.datos)); }
     else if (op.t === 'editar' && it) Object.assign(it, op.datos);
@@ -4497,8 +4614,8 @@ var App = (function () {
     else if (op.t === 'editable') l.editable = !!op.on;
     else if (op.t === 'renombrar' && op.nombre) l.nombre = op.nombre;
     else if (op.t === 'terminar') {
-      if (op.pendientes === 'borrar' || op.pendientes === 'mover') l.items = l.items.filter(function (x) { return x.on; });
-      l.items.forEach(function (x) { x.on = false; x.por = ''; x.estado = ''; x.consulta = null; });
+      if (op.pendientes === 'borrar' || op.pendientes === 'mover') l.items = l.items.filter(function (x) { return x.on || x.enc; });
+      l.items.forEach(function (x) { if (x.enc) return; x.on = false; x.por = ''; x.estado = ''; x.consulta = null; x.pagado = ''; });
     }
   }
   function listaOp(op, desc) {
@@ -4541,6 +4658,7 @@ var App = (function () {
   }
   function pLista() {
     if (!LISTA) return ir('super');
+    if (LISTA.tipo === 'tiendas') return pListaTienda();
     var L = LISTA, it = L.items || [], marc = it.filter(function (x) { return x.on; }).length;
     var h = cabSimple(esc(L.icono) + ' ' + esc(L.nombre), it.length + ' cosa' + (it.length === 1 ? '' : 's') + (L.token ? ' · 👥 compartida' : ''), 'App.ir(\'super\')');
     h += '<div class="chips desliza" style="margin:-6px 0 12px"><button class="chip' + (listaModo === 'super' ? ' on' : '') + '" onclick="App.modoLista(\'super\')">🛒 En el super</button><button class="chip' + (listaModo === 'editar' ? ' on' : '') + '" onclick="App.modoLista(\'editar\')">✏ Editar</button><button class="chip" onclick="App.compartirLista()">👥 Compartir</button><button class="chip" onclick="App.menuLista()">⋯</button></div>';
@@ -4595,8 +4713,8 @@ var App = (function () {
   function itemPor(id) { return (LISTA.items || []).filter(function (x) { return x.id === id; })[0]; }
   function marcarItem(id, on) { if (navigator.vibrate && on) { try { navigator.vibrate(15); } catch (e) { /* nada */ } } listaOp({ t: 'marcar', item: id, on: !!on }); }
   function agregarItem() {
-    var d = leerTextoItem(val('li-nuevo')); if (!d) return;
-    var ya = (LISTA.items || []).filter(function (x) { return sinTildes(x.n) === sinTildes(d.n); })[0];
+    var d = LISTA.tipo === 'tiendas' ? TIENDAS.leer(val('li-nuevo'), LISTA.personas) : leerTextoItem(val('li-nuevo')); if (!d) return;
+    var ya = (LISTA.items || []).filter(function (x) { return sinTildes(x.n) === sinTildes(d.n) && (x.para || '') === (d.para || ''); })[0];
     if (ya) { toast(d.n + ' ya está en la lista'); return; }
     listaOp({ t: 'agregar', datos: d }, 'Agregar ' + d.n);
     setTimeout(function () { var i = $('li-nuevo'); if (i) { i.value = ''; i.focus(); } }, 50);
@@ -4608,6 +4726,7 @@ var App = (function () {
     listaOp({ t: 'editar', item: id, datos: { q: q || '', u: x.u || (q ? 'u' : '') } });
   }
   function formItem(id) {
+    if (LISTA.tipo === 'tiendas') return formItemTienda(id);
     var x = id ? itemPor(id) : { n: '', q: '', u: 'u', p: 'Otros', nota: '', foto: '' };
     if (!x) return;
     abrir('<h2>' + (id ? esc(x.n) : 'Nueva cosa') + '</h2>' +
@@ -4622,7 +4741,7 @@ var App = (function () {
   }
   function guardarItem(id) {
     var n = val('fi-n').trim(); if (!n) return toast('Escribí el nombre.');
-    var d = { n: n, q: C.leerNumero(val('fi-q')) || '', u: val('fi-u'), p: val('fi-p'), nota: val('fi-nota').trim() };
+    var d = LISTA.tipo === 'tiendas' ? datosItemTienda() : { n: n, q: C.leerNumero(val('fi-q')) || '', u: val('fi-u'), p: val('fi-p'), nota: val('fi-nota').trim() };
     if (id) listaOp({ t: 'editar', item: id, datos: d }, 'Cambiar ' + n); else listaOp({ t: 'agregar', datos: d }, 'Agregar ' + n);
     cerrar();
   }
@@ -4660,7 +4779,7 @@ var App = (function () {
       return llamar('subirFotoLista', [LISTA.id, d]).then(function (fid) {
         fotosMem[fid] = d;
         if (id) listaOp({ t: 'editar', item: id, datos: { foto: fid } }, 'Foto de ' + (itemPor(id) || {}).n);
-        else { var n = val('fi-n').trim() || 'Producto'; listaOp({ t: 'agregar', datos: { n: n, q: C.leerNumero(val('fi-q')) || '', u: val('fi-u'), p: val('fi-p'), nota: val('fi-nota').trim(), foto: fid } }, 'Agregar ' + n); cerrar(); }
+        else { var dn = LISTA.tipo === 'tiendas' ? datosItemTienda() : { n: val('fi-n').trim() || 'Producto', q: C.leerNumero(val('fi-q')) || '', u: val('fi-u'), p: val('fi-p'), nota: val('fi-nota').trim() }; dn.n = dn.n || 'Producto'; dn.foto = fid; listaOp({ t: 'agregar', datos: dn }, 'Agregar ' + dn.n); cerrar(); }
         toast('✅ Foto guardada');
       });
     }).catch(function (e) { if (e && e.message !== 'sin foto') toast('⚠️ ' + e.message); });
@@ -4668,9 +4787,10 @@ var App = (function () {
   function quitarFotoItem(id) { listaOp({ t: 'editar', item: id, datos: { foto: '' } }, 'Quitar foto'); cerrar(); }
   function verItem(id) {
     var x = itemPor(id); if (!x) return;
-    abrir('<div class="fila"><h2 style="margin:0">' + esc(x.n) + '</h2><b>' + esc(qtyTxt(x)) + '</b></div>' + (x.nota ? '<div class="suave">“' + esc(x.nota) + '”</div>' : '') +
+    var tienda = LISTA.tipo === 'tiendas';
+    abrir('<div class="fila"><h2 style="margin:0">' + esc(x.n) + '</h2><b>' + (tienda ? (x.max ? '≤ ' + numTexto(Number(x.max)) : '') : esc(qtyTxt(x))) + '</b></div>' + (tienda && TIENDAS.etiquetas(x).length ? '<div class="tgs" style="margin:6px 0">' + TIENDAS.etiquetas(x).map(function (t) { return '<span class="tg">' + esc(t) + '</span>'; }).join('') + '</div>' : '') + (x.nota ? '<div class="suave">“' + esc(x.nota) + '”</div>' : '') +
       (x.foto ? '<img class="foto-grande" data-foto="' + esc(x.foto) + '" alt="">' : '<div class="foto-grande vacia" onclick="App.cerrar();App.formItem(\'' + id + '\')">📷<span class="suave chico">Sin foto · tocá para agregar una</span></div>') +
-      '<div class="acciones"><button class="btn" style="background:var(--positivo);border-color:var(--positivo);color:#111" onclick="App.cerrar();App.marcarItem(\'' + id + '\',true)">✓ Este es, va al carrito</button>' +
+      '<div class="acciones"><button class="btn" style="background:var(--positivo);border-color:var(--positivo);color:#111" onclick="App.cerrar();App.' + (x.enc ? 'marcarEnc' : 'marcarItem') + '(\'' + id + '\',true)">' + (tienda ? '✓ Lo compré' : '✓ Este es, va al carrito') + '</button>' +
       '<button class="btn sec" onclick="App.preguntarItem(\'' + id + '\')">📷 No está igual · ¿este sirve?</button><button class="btn sec" onclick="App.cerrar();App.noHayItem(\'' + id + '\')">✗ No hay</button></div>');
     pintarFotos();
   }
@@ -4690,9 +4810,10 @@ var App = (function () {
   function responderConsulta(id, si) { listaOp({ t: 'responder', item: id, si: !!si }, si ? 'Sí, llevalo' : 'No, dejalo'); }
   function agregarBasicos() {
     var ya = {}; (LISTA.items || []).forEach(function (x) { ya[sinTildes(x.n)] = 1; });
-    abrir('<h2>⭐ Agregar básicos</h2><div class="suave">Marcá lo que querés sumar a esta lista.</div>' + LISTA_BASE.map(function (g) {
+    var tienda = LISTA.tipo === 'tiendas', base = tienda ? TIENDAS.BASE : LISTA_BASE, icg = tienda ? TIENDAS.IC : IC_PASILLO;
+    abrir('<h2>⭐ ' + (tienda ? 'Lo más común en tiendas' : 'Agregar básicos') + '</h2><div class="suave">Marcá lo que querés sumar a esta lista.</div>' + base.map(function (g) {
       var f = g[1].filter(function (n) { return !ya[sinTildes(n)]; });
-      return f.length ? '<div class="seccion-t" style="margin-top:12px">' + IC_PASILLO[g[0]] + ' ' + g[0] + '</div>' + f.map(function (n) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="ab-it" data-p="' + esc(g[0]) + '" value="' + esc(n) + '"> ' + esc(n) + '</label>'; }).join('') : '';
+      return f.length ? '<div class="seccion-t" style="margin-top:12px">' + icg[g[0]] + ' ' + g[0] + '</div>' + f.map(function (n) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="ab-it" data-p="' + esc(g[0]) + '" value="' + esc(n) + '"> ' + esc(n) + '</label>'; }).join('') : '';
     }).join('') + '<div class="acciones"><button class="btn" onclick="App.guardarBasicos()">Agregar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function guardarBasicos() {
@@ -4727,24 +4848,319 @@ var App = (function () {
   function menuLista() {
     abrir('<h2>' + esc(LISTA.icono) + ' ' + esc(LISTA.nombre) + '</h2><label class="campo"><span>Nombre</span><input id="ml-n" value="' + esc(LISTA.nombre) + '"></label>' +
       '<label class="campo"><span>Tu nombre en las listas</span><input id="ml-yo" value="' + esc(miNombre()) + '"></label>' +
+      (LISTA.tipo === 'tiendas' ? '<label class="campo"><span>Personas de la lista (separadas por coma)</span><input id="ml-personas" value="' + esc((LISTA.personas || []).join(', ')) + '"></label>' : '') +
       '<div class="acciones"><button class="btn" onclick="App.guardarMenuLista()">Guardar</button><button class="btn sec peligro" id="ml-borrar" onclick="App.borrarLista(this)">Borrar esta lista</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function guardarMenuLista() {
     var n = val('ml-n').trim(), yo = val('ml-yo').trim();
     if (yo) guardar('mf-mi-nombre', yo.slice(0, 30));
     if (n && n !== LISTA.nombre) { LISTA.nombre = n; listaOp({ t: 'renombrar', nombre: n }, 'Renombrar lista'); }
+    if ($('ml-personas')) { var ps = val('ml-personas').split(',').map(function (x) { return x.trim(); }).filter(String); if (ps.join('|') !== (LISTA.personas || []).join('|')) listaOp({ t: 'personas', personas: ps }, 'Personas de la lista'); }
     cerrar(); pintar();
   }
   function borrarLista(b) { if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Se borra para todos'; return; } srv('eliminarLista', [LISTA.id], function () { cerrar(); LISTA = null; LISTAS = null; ir('super'); toast('Lista borrada'); }, b); }
+  // ---- v2.10.4 · listas de Tiendas y mall
+  var vistaTienda = guardado('mf-lista-vista', 'persona');
+  function gruposTienda(items, por) {
+    var g = {}, orden = [];
+    items.forEach(function (x) { var k = por === 'persona' ? (x.para || 'Sin asignar') : por === 'tienda' ? (x.tienda || 'Sin tienda') : (x.p || TIENDAS.seccionDe(x.n)); if (!g[k]) { g[k] = []; orden.push(k); } g[k].push(x); });
+    if (por === 'seccion') orden = TIENDAS.SECCIONES.filter(function (k) { return g[k]; }).concat(orden.filter(function (k) { return TIENDAS.SECCIONES.indexOf(k) < 0; }));
+    else if (por === 'persona') { var ps = (LISTA.personas || []).concat(['Todos']); orden.sort(function (a, b) { var ia = ps.indexOf(a), ib = ps.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); }); }
+    else orden.sort(function (a, b) { return (a === 'Sin tienda') - (b === 'Sin tienda') || a.localeCompare(b, 'es'); });
+    return orden.map(function (k) { return [k, g[k]]; });
+  }
+  function icGrupo(k, por) { return por === 'persona' ? (k === 'Todos' ? '👪' : k === 'Sin asignar' ? '•' : '👤') : por === 'tienda' ? '🏬' : (TIENDAS.IC[k] || '🛍'); }
+  function pListaTienda() {
+    var L = LISTA, todos = L.items || [], editar = listaModo === 'editar';
+    var nEnc = todos.filter(function (x) { return x.enc; }).length, it = todos.filter(function (x) { return !x.enc; }), marc = it.filter(function (x) { return x.on; }).length;
+    autoEncargos();
+    var h = cabSimple(esc(L.icono) + ' ' + esc(L.nombre), '🛍 Tiendas y mall · ' + todos.length + ' cosa' + (todos.length === 1 ? '' : 's') + (L.token ? ' · 👥 compartida' : ''), 'App.ir(\'super\')');
+    h += '<div class="tabs-lista"><button class="' + (tabTienda !== 'enc' ? 'on' : '') + '" onclick="App.tabLista(\'nuestras\')">🛍 Nuestras · ' + it.length + '</button><button class="' + (tabTienda === 'enc' ? 'on' : '') + '" onclick="App.tabLista(\'enc\')">📦 Encargos · ' + nEnc + '</button></div>';
+    if (tabTienda === 'enc') { $('p-lista').innerHTML = h + htmlEncargos(editar); pintarFotos(); cicloLista(); return; }
+    h += '<div class="chips desliza" style="margin:-6px 0 8px"><button class="chip' + (!editar ? ' on' : '') + '" onclick="App.modoLista(\'super\')">🛍 Comprando</button><button class="chip' + (editar ? ' on' : '') + '" onclick="App.modoLista(\'editar\')">✏ Editar</button><button class="chip" onclick="App.compartirLista()">👥 Compartir</button><button class="chip" onclick="App.menuLista()">⋯</button></div>';
+    h += '<div class="chips" style="margin:0 0 10px">' + [['persona', 'Por persona'], ['seccion', 'Por sección'], ['tienda', 'Por tienda']].map(function (v) { return '<button class="chip' + (vistaTienda === v[0] ? ' on' : '') + '" onclick="App.vistaLista(\'' + v[0] + '\')">' + v[1] + '</button>'; }).join('') + '</div>';
+    if (L.cargando && !it.length) h += '<div class="caja vacio"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div>';
+    if (L.cambio && L.cambio.txt) h += '<div class="suave chico" style="margin:-4px 0 10px">● ' + esc(L.cambio.txt) + ' · ' + hace(L.cambio.cuando) + '</div>';
+    it.filter(function (x) { return x.consulta && !x.consulta.resp; }).forEach(function (x) {
+      var mia = x.consulta.por === miNombre();
+      h += '<div class="consulta-card"><div class="fila"><b>📷 ' + (mia ? 'Preguntaste' : esc(x.consulta.por) + ' pregunta') + ': ¿este sirve?</b><span class="suave chico">' + hace(x.consulta.cuando) + '</span></div><div class="suave chico">' + esc(x.n) + (TIENDAS.etiquetas(x).length ? ' · ' + esc(TIENDAS.etiquetas(x).join(' · ')) : '') + '</div>' +
+        '<div class="dos" style="margin-top:8px"><div><div class="suave chico">EL QUE SE PIDIÓ</div>' + (x.foto ? '<img class="foto-c" data-foto="' + esc(x.foto) + '" alt="">' : '<div class="foto-c vacia">sin foto</div>') + '</div><div><div class="suave chico">EL QUE HAY</div>' + (x.consulta.foto ? '<img class="foto-c" data-foto="' + esc(x.consulta.foto) + '" alt="">' : '<div class="foto-c vacia">sin foto</div>') + '</div></div>' +
+        (x.consulta.msg ? '<div class="msg-c">' + esc(x.consulta.por) + ': “' + esc(x.consulta.msg) + '”</div>' : '') +
+        (mia ? '<div class="suave chico" style="margin-top:8px">⏳ Esperando respuesta…</div>' : '<div class="dos" style="margin-top:10px"><button class="btn" onclick="App.responderConsulta(\'' + x.id + '\',true)">✓ Sí, llevalo</button><button class="btn sec" onclick="App.responderConsulta(\'' + x.id + '\',false)">✗ No, dejalo</button></div>') + '</div>';
+    });
+    if (editar) {
+      h += '<div class="agregar-it"><input id="li-nuevo" placeholder="＋ Agregar… (ej. “tenis talla 9 negros para ' + esc((L.personas || [])[0] || 'Ana') + '”)" autocomplete="off" onkeydown="if(event.key===\'Enter\')App.agregarItem()"><button class="btn chico" onclick="App.agregarItem()">Agregar</button></div>';
+      if (!it.length && !L.cargando) h += '<div class="caja vacio">Escribí arriba lo que quieren comprar.<br><button class="btn sec chico" style="margin-top:10px" onclick="App.agregarBasicos()">⭐ Lo más común en tiendas</button></div>';
+    } else {
+      var gastado = it.reduce(function (a, x) { return a + (x.on && x.pagado ? Number(x.pagado) : 0); }, 0);
+      h += '<div class="caja" style="padding:12px 14px"><div class="fila" style="font-size:14px"><b>✓ ' + marc + ' de ' + it.length + ' comprado' + (marc === 1 ? '' : 's') + '</b><span class="suave">' + (it.length - marc ? 'faltan ' + (it.length - marc) : 'listo ✓') + '</span></div>' + barra(it.length ? marc / it.length : 0, false) +
+        (gastado ? '<div class="fila" style="font-size:14px;margin-top:6px"><span>Gastado hasta ahora</span><b>' + numTexto(gastado) + '</b></div>' : '') + '</div>';
+    }
+    var pend = editar ? it : it.filter(function (x) { return !x.on; }), en = editar ? [] : it.filter(function (x) { return x.on; });
+    gruposTienda(pend, vistaTienda).forEach(function (g) {
+      h += '<div class="seccion-t">' + icGrupo(g[0], vistaTienda) + ' ' + esc(g[0]).toUpperCase() + ' · ' + g[1].length + '</div><div class="caja sinpad">' + g[1].map(function (x) { return filaTienda(x, editar); }).join('') + '</div>';
+    });
+    if (en.length) h += plegable('carrito', '✓ Comprado (' + en.length + ')', '', '<div class="caja sinpad">' + en.map(function (x) { return filaTienda(x, false); }).join('') + '</div>');
+    if (editar && it.length) h += '<div class="chips" style="margin-top:12px;flex-wrap:wrap"><button class="chip" onclick="App.agregarBasicos()">⭐ Lo más común en tiendas</button><button class="chip" onclick="App.formItem()">＋ Con detalles</button></div>';
+    if (!editar && it.length) h += '<button class="btn" style="margin-top:14px;width:100%;justify-content:center" onclick="App.formTerminar()">Terminar compras</button>';
+    $('p-lista').innerHTML = h;
+    pintarFotos(); cicloLista();
+    if (!editar) pantallaEncendida(true);
+  }
+  function filaTienda(x, editar) {
+    var tags = TIENDAS.etiquetas(x, vistaTienda === 'persona').map(function (t) { return '<span class="tg">' + esc(t) + '</span>'; });
+    if (vistaTienda !== 'seccion') tags.unshift('<span class="tg">' + (TIENDAS.IC[x.p] || '🛍') + ' ' + esc(x.p || TIENDAS.seccionDe(x.n)) + '</span>');
+    var der = x.on && x.pagado ? '<b class="it-q verde-pos">' + numTexto(Number(x.pagado)) + '</b>' : x.on && !editar ? '<button class="mini-btn" onclick="App.formPagado(\'' + x.id + '\')">＋ $</button>' : x.max ? '<b class="it-q">≤ ' + numTexto(Number(x.max)) + '</b>' : '';
+    var det = [x.nota ? esc(x.nota) : '', x.estado === 'nohay' ? '<span class="rojo">✗ ' + esc(x.por || '') + ': no hay</span>' : '', x.on && x.por && x.por !== miNombre() ? esc(x.por) + ' lo compró' : ''].filter(String).join(' · ');
+    return '<div class="it-su' + (x.on ? ' on' : '') + '">' + (editar ? '' : '<label class="it-check"><input type="checkbox"' + (x.on ? ' checked' : '') + ' onchange="App.marcarItem(\'' + x.id + '\',this.checked)" aria-label="' + esc(x.n) + '"></label>') +
+      miniFoto(x, editar ? 'App.formItem(\'' + x.id + '\')' : 'App.verItem(\'' + x.id + '\')') + '<button class="it-nom" onclick="App.' + (editar ? 'formItem' : 'verItem') + '(\'' + x.id + '\')"><b>' + esc(x.n) + '</b><span class="tgs">' + tags.join('') + '</span>' + (det ? '<span class="suave chico">' + det + '</span>' : '') + '</button>' + der + '</div>';
+  }
+  function vistaLista(v) { vistaTienda = v; guardar('mf-lista-vista', v); pintar(); }
+  // ---- v2.10.5 · 📦 Encargos
+  var tabTienda = guardado('mf-lista-tab', 'nuestras'), vistaEnc = guardado('mf-enc-vista', 'persona');
+  function tabLista(t) { tabTienda = t; guardar('mf-lista-tab', t); pintar(); }
+  function vistaEncargos(v) { vistaEnc = v; guardar('mf-enc-vista', v); pintar(); }
+  function encargante(n) { return (LISTA.encargantes || []).filter(function (e) { return e.n === n; })[0] || { n: n, adelanto: 0, moneda: 'USD', estado: '' }; }
+  function cuentaEnc(n) {
+    var e = encargante(n), its = (LISTA.items || []).filter(function (x) { return x.enc === n; });
+    var gastado = its.reduce(function (a, x) { return a + (x.on && x.pagado ? Number(x.pagado) : 0); }, 0), saldo = (e.adelanto || 0) - gastado;
+    return { e: e, its: its, gastado: Math.round(gastado * 100) / 100, saldo: Math.round(saldo * 100) / 100, mon: e.moneda || 'USD' };
+  }
+  function plataL(n, mon) { return txt(n, mon || 'USD'); }
+  var EST_ENC = { '': '', entregado: 'Entregado', cobrado: 'Cobrado ✓', medeben: 'En Me deben' };
+  function chipEstado(t) { var c = { Pendiente: 'pend', Comprado: 'comp', 'No había': 'nohay', Entregado: 'entr', 'Cobrado ✓': 'cobr', 'En Me deben': 'entr' }[t] || 'pend'; return '<span class="est-enc ' + c + '">' + t + '</span>'; }
+  function estadoItem(x) { return x.on ? 'Comprado' : x.estado === 'nohay' ? 'No había' : 'Pendiente'; }
+  function htmlEncargos(editar) {
+    var L = LISTA, its = (L.items || []).filter(function (x) { return x.enc; }), h = '';
+    h += '<div class="chips desliza" style="margin:0 0 8px"><button class="chip' + (!editar ? ' on' : '') + '" onclick="App.modoLista(\'super\')">🛍 Comprando</button><button class="chip' + (editar ? ' on' : '') + '" onclick="App.modoLista(\'editar\')">✏ Editar</button><button class="chip" onclick="App.cuentasEncargos()">🧾 Cuentas</button><button class="chip" onclick="App.compartirLista()">👥 Compartir</button></div>';
+    h += '<div class="chips" style="margin:0 0 10px">' + [['persona', 'Por persona'], ['tienda', 'Por tienda'], ['estado', 'Por estado']].map(function (v) { return '<button class="chip' + (vistaEnc === v[0] ? ' on' : '') + '" onclick="App.vistaEncargos(\'' + v[0] + '\')">' + v[1] + '</button>'; }).join('') + '</div>';
+    if (!its.length && !(L.encargantes || []).length) h += '<div class="vacio-lindo"><div style="font-size:42px">📦</div><b>Encargos de otras personas</b><span>Anotá lo que te piden traer, con su adelanto. Al volver, la app te arma la cuenta de cada quien.</span></div>';
+    if (vistaEnc === 'persona') {
+      var nombres = (L.encargantes || []).map(function (e) { return e.n; }); its.forEach(function (x) { if (nombres.indexOf(x.enc) < 0) nombres.push(x.enc); });
+      nombres.forEach(function (n) {
+        var c = cuentaEnc(n), e = c.e;
+        var der = e.adelanto ? (c.saldo >= 0 ? '<div style="text-align:right"><div class="suave" style="font-size:11px">quedan del adelanto</div><b class="verde-pos">' + plataL(c.saldo, c.mon) + '</b></div>' : '<div style="text-align:right"><div class="suave" style="font-size:11px">te debe</div><b class="acento">' + plataL(-c.saldo, c.mon) + '</b></div>')
+          : c.gastado ? '<div style="text-align:right"><div class="suave" style="font-size:11px">te debe</div><b class="acento">' + plataL(c.gastado, c.mon) + '</b></div>' : '';
+        h += '<div class="caja enc-card"><div class="fila" style="align-items:center"><button class="enc-nom" onclick="App.formEncargante(\'' + q(n) + '\')"><b>📦 ' + esc(n) + '</b><span class="suave chico">' + c.its.length + ' cosa' + (c.its.length === 1 ? '' : 's') + ' · ' + (e.adelanto ? 'adelantó ' + plataL(e.adelanto, c.mon) : 'sin adelanto') + (EST_ENC[e.estado] ? ' · ' + EST_ENC[e.estado] : '') + '</span></button>' + der + '</div>' +
+          c.its.map(function (x) { return filaEnc(x, editar, true); }).join('') +
+          '<button class="enlace-mini" style="margin-top:6px" onclick="App.formEncargo(\'\',\'' + q(n) + '\')">＋ Otro encargo de ' + esc(n) + '</button></div>';
+      });
+    } else {
+      var g = {}, orden = [];
+      its.forEach(function (x) { var k = vistaEnc === 'tienda' ? (x.tienda || 'Sin tienda') : estadoItem(x); if (!g[k]) { g[k] = []; orden.push(k); } g[k].push(x); });
+      if (vistaEnc === 'estado') orden = ['Pendiente', 'Comprado', 'No había'].filter(function (k) { return g[k]; });
+      orden.forEach(function (k) { h += '<div class="seccion-t">' + (vistaEnc === 'tienda' ? '🏬 ' : '') + esc(k).toUpperCase() + ' · ' + g[k].length + '</div><div class="caja sinpad">' + g[k].map(function (x) { return filaEnc(x, editar, false); }).join('') + '</div>'; });
+    }
+    h += '<button class="btn-dash" onclick="App.formEncargo()">＋ Nuevo encargo</button>';
+    return h;
+  }
+  function filaEnc(x, editar, enCard) {
+    var tags = [(TIENDAS.IC[x.p] || '🛍') + ' ' + (x.p || TIENDAS.seccionDe(x.n))].concat(enCard ? [] : ['📦 ' + x.enc]).concat(TIENDAS.etiquetas(x, true)).map(function (t) { return '<span class="tg">' + esc(t) + '</span>'; });
+    tags.push(chipEstado(estadoItem(x)));
+    if (x.mov) tags.push('<span class="tg">👛 ligado</span>');
+    var mon = encargante(x.enc).moneda;
+    var der = x.on && x.pagado ? '<b class="it-q verde-pos">' + plataL(Number(x.pagado), mon) + '</b>' : x.on ? '<button class="mini-btn" onclick="App.formPagadoEnc(\'' + x.id + '\')">＋ $</button>' : x.max ? '<b class="it-q">≤ ' + plataL(Number(x.max), mon) + '</b>' : '';
+    return '<div class="it-su' + (x.on ? ' on' : '') + (enCard ? ' en-card' : '') + '">' + (editar ? '' : '<label class="it-check"><input type="checkbox"' + (x.on ? ' checked' : '') + ' onchange="App.marcarEnc(\'' + x.id + '\',this.checked)" aria-label="' + esc(x.n) + '"></label>') +
+      miniFoto(x, editar ? 'App.formEncargo(\'' + x.id + '\')' : 'App.verItem(\'' + x.id + '\')') + '<button class="it-nom" onclick="App.' + (editar ? 'formEncargo' : 'verItem') + '(\'' + x.id + '\')"><b>' + esc(x.n) + '</b><span class="tgs">' + tags.join('') + '</span>' + (x.nota ? '<span class="suave chico">' + esc(x.nota) + '</span>' : '') + '</button>' + der + '</div>';
+  }
+  /** Marcar un encargo: pide el costo y con qué se pagó */
+  function marcarEnc(id, on) { if (!on) return listaOp({ t: 'marcar', item: id, on: false }); formPagadoEnc(id); }
+  function mediosPago() { return D ? D.cuentas.filter(function (c) { return c.activa && (c.tipo === 'Tarjeta de crédito' || C.esAhorro(c)); }).map(function (c) { return c.nombre; }) : []; }
+  function formPagadoEnc(id) {
+    var x = itemPor(id); if (!x) return;
+    var e = encargante(x.enc), medios = mediosPago(), sel = x.medio || guardado('mf-enc-medio', '') || 'Efectivo';
+    abrir('<div class="suave chico">📦 ' + esc(x.enc) + '</div><h2>✓ ' + esc(x.n) + '</h2><div class="suave">¿Cuánto costó?</div>' +
+      '<label class="campo"><span>Pagado (' + (e.moneda === 'CRC' ? '₡' : '$') + ')</span><input id="pe-m" class="monto" data-dinero inputmode="decimal" value="' + (x.pagado ? String(x.pagado).replace('.', ',') : '') + '"></label>' +
+      '<div class="suave chico">¿Con qué pagaste?</div><div class="chips" id="pe-medios" style="margin-top:6px">' + medios.concat(['Efectivo']).map(function (m) { return '<button type="button" class="chip' + (m === sel ? ' on' : '') + '" data-v="' + esc(m) + '" onclick="App.peMedio(this)">' + (m === 'Efectivo' ? '💵 Efectivo' : '💳 ' + esc(etiquetaCuenta(m))) + '</button>'; }).join('') + '</div>' +
+      '<div class="suave chico" style="margin-top:6px">Si es con tarjeta, cuando llegue el correo del banco la compra se marca sola “para ' + esc(x.enc) + '” en Me deben.</div>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarPagadoEnc(\'' + id + '\')">Guardar</button><button class="btn sec" onclick="App.cerrar();App.noHayItem(\'' + id + '\')">✗ No lo encontré</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    PE.medio = sel;
+    setTimeout(function () { var i = $('pe-m'); if (i) i.focus(); }, 120);
+  }
+  var PE = { medio: '' };
+  function peMedio(b) { PE.medio = b.dataset.v; Array.prototype.forEach.call(b.parentNode.children, function (c) { c.classList.toggle('on', c === b); }); }
+  function guardarPagadoEnc(id) {
+    var m = C.leerNumero(val('pe-m')) || 0;
+    guardar('mf-enc-medio', PE.medio);
+    listaOp({ t: 'pagado', item: id, monto: m, medio: PE.medio }, 'Encargo pagado');
+    if (!m) listaOp({ t: 'marcar', item: id, on: true });
+    cerrar();
+  }
+  var FE = null;
+  function formEncargo(id, de) {
+    var x = id ? itemPor(id) : { n: '', p: '', enc: de || (LISTA.encargantes || []).slice(-1).map(function (e) { return e.n; })[0] || '', talla: '', color: '', q: '', max: '', tienda: '', nota: '', foto: '' };
+    if (!x) return;
+    FE = { p: x.p || 'Otros', enc: x.enc, nueva: !(LISTA.encargantes || []).length, manual: !!id };
+    var ens = (LISTA.encargantes || []).map(function (e) { return e.n; });
+    abrir('<h2>' + (id ? esc(x.n) : 'Nuevo encargo') + '</h2>' +
+      '<div class="suave chico">¿De parte de quién?</div><div class="chips" id="fe-de" style="margin:6px 0">' + ens.map(function (n) { return '<button type="button" class="chip' + (n === FE.enc && !FE.nueva ? ' on' : '') + '" data-v="' + esc(n) + '" onclick="App.feDe(this)">📦 ' + esc(n) + '</button>'; }).join('') + '<button type="button" class="chip' + (FE.nueva ? ' on' : '') + '" data-v="" onclick="App.feDe(this)">＋ Otra persona</button></div>' +
+      '<div id="fe-nueva" style="' + (FE.nueva ? '' : 'display:none') + '"><div class="caja" style="gap:6px"><b>Persona nueva</b><label class="campo compacto"><span>Nombre</span><input id="fe-nom" placeholder="Ej. Tía Marta"></label>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Adelanto que te dio (opcional)</span><input id="fe-ad" class="monto" data-dinero inputmode="decimal"></label><label class="campo compacto"><span>Moneda</span><select id="fe-mon"><option value="USD">$</option><option value="CRC">₡</option></select></label></div></div></div>' +
+      '<div class="caja" style="flex-direction:row;gap:14px;align-items:center"><div class="foto-g' + (x.foto ? '' : ' vacia') + '" id="fi-prev">' + (x.foto ? '<img data-foto="' + esc(x.foto) + '" alt="">' : '📷') + '</div>' +
+      '<div style="flex:1"><b>Foto o captura</b><div class="suave chico">La que te mandó la persona</div><div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.fotoEncargo(\'' + (id || '') + '\',true)">📷 Cámara</button><button class="chip" onclick="App.fotoEncargo(\'' + (id || '') + '\',false)">🖼 Galería</button></div></div></div>' +
+      '<label class="campo"><span>Qué</span><input id="fi-n" value="' + esc(x.n) + '" placeholder="Ej. Audífonos inalámbricos" oninput="App.feAuto(this.value)"></label>' +
+      '<div class="suave chico">Sección</div><div class="chips" id="fe-secs" style="margin:6px 0 4px">' + TIENDAS.SECCIONES.map(function (sx) { return '<button type="button" class="chip' + (FE.p === sx ? ' on' : '') + '" data-v="' + esc(sx) + '" onclick="App.feSec(this)">' + TIENDAS.IC[sx] + ' ' + sx + '</button>'; }).join('') + '</div>' +
+      '<div class="dos"><label class="campo compacto"><span>Talla / modelo</span><input id="fi-talla" value="' + esc(x.talla || '') + '"></label><label class="campo compacto"><span>Color</span><input id="fi-color" value="' + esc(x.color || '') + '"></label></div>' +
+      '<div class="dos"><label class="campo compacto"><span>Cantidad</span><input id="fi-q" inputmode="numeric" value="' + esc(x.q === '' || x.q === undefined ? '' : String(x.q)) + '" placeholder="1"></label><label class="campo compacto"><span>Precio máximo</span><input id="fi-max" class="monto" data-dinero inputmode="decimal" value="' + (x.max ? String(x.max).replace('.', ',') : '') + '"></label></div>' +
+      '<label class="campo compacto"><span>Tienda (opcional)</span><input id="fi-tienda" value="' + esc(x.tienda || '') + '"></label>' +
+      '<label class="campo compacto"><span>Nota</span><input id="fi-nota" value="' + esc(x.nota || '') + '" placeholder="Ej. Si no hay negro, blanco está bien"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarEncargo(\'' + (id || '') + '\')">' + (id ? 'Guardar' : 'Agregar encargo') + '</button>' + (id ? '<button class="btn sec peligro" id="fi-borrar" onclick="App.quitarItem(\'' + id + '\')">Quitar encargo</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    pintarFotos();
+  }
+  function feDe(b) { FE.enc = b.dataset.v; FE.nueva = !b.dataset.v; Array.prototype.forEach.call(b.parentNode.children, function (c) { c.classList.toggle('on', c === b); }); $('fe-nueva').style.display = FE.nueva ? '' : 'none'; }
+  function feSec(b) { FE.p = b.dataset.v; FE.manual = true; Array.prototype.forEach.call(b.parentNode.children, function (c) { c.classList.toggle('on', c === b); }); }
+  function feAuto(v) { if (FE.manual) return; FE.p = TIENDAS.seccionDe(v); var c = $('fe-secs'); if (c) Array.prototype.forEach.call(c.children, function (x) { x.classList.toggle('on', x.dataset.v === FE.p); }); }
+  function datosEncargo() {
+    return { n: val('fi-n').trim(), q: Number(val('fi-q')) || '', u: Number(val('fi-q')) ? 'u' : '', p: FE.p || 'Otros', enc: FE.enc, talla: val('fi-talla').trim(), color: val('fi-color').trim(), max: C.leerNumero(val('fi-max')) || '', tienda: val('fi-tienda').trim(), nota: val('fi-nota').trim() };
+  }
+  /** Si es persona nueva, la crea; devuelve false si falta el nombre */
+  function asegurarEncargante() {
+    if (!FE.nueva) return !!FE.enc || (toast('Elegí de parte de quién.'), false);
+    var n = val('fe-nom').trim(); if (!n) { toast('Escribí el nombre de la persona.'); return false; }
+    if (!(LISTA.encargantes || []).some(function (e) { return e.n === n; })) listaOp({ t: 'encargante', datos: { n: n, adelanto: C.leerNumero(val('fe-ad')) || 0, moneda: val('fe-mon') } }, 'Encargos de ' + n);
+    FE.enc = n; FE.nueva = false; return true;
+  }
+  function guardarEncargo(id) {
+    if (!val('fi-n').trim()) return toast('Escribí qué hay que traer.');
+    if (!asegurarEncargante()) return;
+    var d = datosEncargo();
+    if (id) listaOp({ t: 'editar', item: id, datos: d }, 'Cambiar ' + d.n); else listaOp({ t: 'agregar', datos: d }, 'Encargo de ' + d.enc + ': ' + d.n);
+    cerrar(); if (tabTienda !== 'enc') tabLista('enc');
+  }
+  function fotoEncargo(id, camara) {
+    if (!id && !val('fi-n').trim()) return toast('Primero escribí qué hay que traer.');
+    if (!id && !asegurarEncargante()) return;
+    elegirFoto(camara).then(function (d) {
+      var p = $('fi-prev'); if (p) { p.className = 'foto-g'; p.innerHTML = '<img src="' + d + '" alt="">'; }
+      toast('Subiendo la foto…');
+      return llamar('subirFotoLista', [LISTA.id, d]).then(function (fid) {
+        fotosMem[fid] = d;
+        if (id) listaOp({ t: 'editar', item: id, datos: { foto: fid } }, 'Foto del encargo');
+        else { var dn = datosEncargo(); dn.foto = fid; listaOp({ t: 'agregar', datos: dn }, 'Encargo de ' + dn.enc + ': ' + dn.n); cerrar(); }
+        toast('✅ Foto guardada');
+      });
+    }).catch(function (e) { if (e && e.message !== 'sin foto') toast('⚠️ ' + e.message); });
+  }
+  function formEncargante(n) {
+    var e = encargante(n);
+    abrir('<h2>📦 ' + esc(n) + '</h2><label class="campo"><span>Nombre</span><input id="fen-n" value="' + esc(n) + '"></label>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Adelanto que te dio</span><input id="fen-ad" class="monto" data-dinero inputmode="decimal" value="' + (e.adelanto ? String(e.adelanto).replace('.', ',') : '') + '"></label><label class="campo compacto"><span>Moneda</span><select id="fen-mon"><option value="USD"' + (e.moneda !== 'CRC' ? ' selected' : '') + '>$</option><option value="CRC"' + (e.moneda === 'CRC' ? ' selected' : '') + '>₡</option></select></label></div>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarEncargante(\'' + q(n) + '\')">Guardar</button><button class="btn sec peligro" id="fen-borrar" onclick="App.quitarEncargante(\'' + q(n) + '\')">Quitar a ' + esc(n) + ' y sus encargos</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function guardarEncargante(antes) {
+    var e = encargante(antes), n = val('fen-n').trim() || antes;
+    listaOp({ t: 'encargante', antes: antes, datos: { n: n, adelanto: C.leerNumero(val('fen-ad')) || 0, moneda: val('fen-mon'), estado: e.estado || '' } }, 'Encargos de ' + n); cerrar();
+  }
+  function quitarEncargante(n) { var b = $('fen-borrar'); if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Se borran sus encargos'; return; } listaOp({ t: 'quitarEncargante', n: n }, 'Quitar encargos de ' + n); cerrar(); }
+  /** 🧾 Cuentas por persona */
+  function cuentasEncargos() {
+    var nombres = (LISTA.encargantes || []).map(function (e) { return e.n; });
+    (LISTA.items || []).forEach(function (x) { if (x.enc && nombres.indexOf(x.enc) < 0) nombres.push(x.enc); });
+    if (!nombres.length) return toast('Todavía no hay encargos.');
+    var tc = D && D.tipoCambio;
+    abrir('<h2>🧾 Cuentas por persona</h2>' + nombres.map(function (n) {
+      var c = cuentaEnc(n), e = c.e, total = c.gastado;
+      var lin = function (a, b, cls) { return '<div class="fila chico"><span>' + a + '</span><span class="' + (cls || '') + '">' + b + '</span></div>'; };
+      var debe = e.adelanto ? -c.saldo : total, enColones = c.mon === 'USD' && tc ? ' · ' + txt(Math.abs(debe) * tc, 'CRC') : '';
+      return '<div class="caja" style="gap:3px;margin-top:10px"><div class="fila"><b>📦 ' + esc(n) + '</b>' + (EST_ENC[e.estado] ? chipEstado(EST_ENC[e.estado]) : '') + '</div>' +
+        c.its.map(function (x) { return x.on ? lin(esc(x.n) + (x.q > 1 ? ' (' + x.q + ')' : ''), x.pagado ? plataL(Number(x.pagado), c.mon) : '<span class="acento">falta el precio</span>') : lin('<span class="suave">' + esc(x.n) + ' · ' + (x.estado === 'nohay' ? 'no lo encontré' : 'pendiente') + '</span>', '<span class="suave">—</span>'); }).join('') +
+        '<div style="border-top:1px solid var(--linea);margin-top:4px;padding-top:4px">' + lin('Total', '<b>' + plataL(total, c.mon) + '</b>') + lin('Adelanto', e.adelanto ? '−' + plataL(e.adelanto, c.mon) : plataL(0, c.mon)) +
+        (debe > 0.004 ? lin('<b>Te debe</b>', '<b class="acento">' + plataL(debe, c.mon) + enColones + '</b>') : debe < -0.004 ? lin('<b>Le sobran</b>', '<b class="verde-pos">' + plataL(-debe, c.mon) + enColones + '</b>') : lin('<b>Quedan a mano</b>', '<b class="verde-pos">✓</b>')) + '</div>' +
+        '<div class="chips" style="margin-top:6px">' + chipRev('↗ Mandar cuenta', 'App.mandarCuentaEnc(\'' + q(n) + '\')') + chipRev(e.estado === 'entregado' ? '✓ Entregado' : '📦 Entregado', 'App.estadoEnc(\'' + q(n) + '\',\'entregado\')', e.estado === 'entregado') +
+        (debe > 0.004 ? chipRev('👛 Pasar a Me deben', 'App.pasarMeDeben(\'' + q(n) + '\')', e.estado === 'medeben') : '') + chipRev('✓ Cerrar cuenta', 'App.estadoEnc(\'' + q(n) + '\',\'cobrado\')', e.estado === 'cobrado') + '</div></div>';
+    }).join('') + '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  function textoCuentaEnc(n) {
+    var c = cuentaEnc(n), e = c.e, tc = D && D.tipoCambio, debe = e.adelanto ? -c.saldo : c.gastado;
+    var comprados = c.its.filter(function (x) { return x.on; }), faltaron = c.its.filter(function (x) { return !x.on; });
+    return 'Hola ' + n.split(' ')[0] + ' 👋 Te traje: ' + comprados.map(function (x) { return x.n + (x.pagado ? ' ' + plataL(Number(x.pagado), c.mon) : ''); }).join(' · ') + '.' +
+      (faltaron.length ? ' No encontré: ' + faltaron.map(function (x) { return x.n; }).join(', ') + '.' : '') +
+      ' Total ' + plataL(c.gastado, c.mon) + (e.adelanto ? ', me diste ' + plataL(e.adelanto, c.mon) : '') + '. ' +
+      (debe > 0.004 ? 'Quedan ' + plataL(debe, c.mon) + (c.mon === 'USD' && tc ? ' (' + txt(debe * tc, 'CRC') + ' al tipo de cambio de hoy)' : '') + '.' : debe < -0.004 ? 'Te sobran ' + plataL(-debe, c.mon) + '.' : 'Quedamos a mano 👍');
+  }
+  function mandarCuentaEnc(n) {
+    var t = textoCuentaEnc(n);
+    if (navigator.share) navigator.share({ title: 'Encargos de ' + n, text: t }).catch(function () { /* cancelado */ });
+    else navigator.clipboard.writeText(t).then(function () { toast('📋 Cuenta copiada'); }, function () { toast('No se pudo copiar'); });
+  }
+  function estadoEnc(n, est) { var e = encargante(n); listaOp({ t: 'encargante', antes: n, datos: { n: n, adelanto: e.adelanto || 0, moneda: e.moneda || 'USD', estado: e.estado === est ? '' : est } }, 'Encargos de ' + n); cuentasEncargos(); }
+  /** Busca en tus movimientos la compra con tarjeta de un encargo (mismo monto, últimos 45 días) */
+  function movDeEncargo(x, usados) {
+    if (!D || !x.on || !x.pagado || !x.medio || x.medio === 'Efectivo') return null;
+    var mon = encargante(x.enc).moneda, lim = new Date(hoy.getTime() - 45 * 86400000), p = Number(x.pagado);
+    var cand = D.movimientos.filter(function (m) {
+      if (m.fila <= 0 || m.tipo !== 'Gasto' || m.para || usados[m.fila] || C.normNom(m.cuenta) !== C.normNom(x.medio) || !m.fecha || new Date(m.fecha) < lim) return false;
+      var orig = (m.nota || '').match(/cobro original \$([\d.,]+)/i), mo = orig ? C.leerNumero(orig[1]) : null;
+      if (mon === 'USD' && mo !== null) return Math.abs(mo - p) <= Math.max(0.5, p * 0.02);
+      return m.moneda === mon && Math.abs(m.monto - p) <= Math.max(0.5, p * 0.02);
+    }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+    return cand[0] || null;
+  }
+  /** Llegó el correo de una compra de encargo → queda "para otra persona" (Me deben) y ligada */
+  function autoEncargos() {
+    if (!LISTA || LISTA.tipo !== 'tiendas' || !D) return 0;
+    var usados = {}, n = 0;
+    (LISTA.items || []).forEach(function (x) { if (x.mov) usados[x.mov] = 1; });
+    (LISTA.items || []).forEach(function (x) {
+      if (!x.enc || x.mov) return;
+      var m = movDeEncargo(x, usados); if (!m) return;
+      usados[m.fila] = 1; n++;
+      encolar('marcarMovimiento', [m.fila, 'Para otra persona', x.enc, { monto: m.monto }], 'Para ' + x.enc + ': ' + (m.comercio || 'compra'));
+      setTimeout(function () { listaOp({ t: 'editar', item: x.id, datos: { mov: m.fila } }, 'Encargo ligado'); }, 0);
+    });
+    if (n) toast('👛 ' + n + ' compra' + (n === 1 ? '' : 's') + ' de encargos marcada' + (n === 1 ? '' : 's') + ' en Me deben', 3500);
+    return n;
+  }
+  function pasarMeDeben(n) {
+    var hechos = autoEncargos(), c = cuentaEnc(n), sin = c.its.filter(function (x) { return x.on && !x.mov && !(x.mov === '' && false); }).filter(function (x) { return !x.mov; });
+    var e = encargante(n);
+    listaOp({ t: 'encargante', antes: n, datos: { n: n, adelanto: e.adelanto || 0, moneda: e.moneda || 'USD', estado: 'medeben' } }, 'Me deben: ' + n);
+    var conTarjeta = c.its.filter(function (x) { return x.on && x.mov; }).length;
+    cerrar();
+    toast(conTarjeta ? '👛 ' + n + ': ' + conTarjeta + ' compra' + (conTarjeta === 1 ? '' : 's') + ' en Me deben' + (sin.length ? '. ' + sin.length + ' sin correo del banco (efectivo o todavía no llegó)' : '') : 'Todavía no llegó el correo de esas compras (o fueron en efectivo). Cuando llegue, quedan solas en Me deben.', 6000);
+  }
+
+  function formPagado(id) {
+    var x = itemPor(id); if (!x) return;
+    abrir('<h2>¿Cuánto pagaste?</h2><div class="suave">' + esc(x.n) + ' · opcional, para ver lo gastado en estas compras</div><label class="campo"><span>Monto</span><input id="pg-m" class="monto" data-dinero inputmode="decimal" value="' + (x.pagado ? String(x.pagado).replace('.', ',') : '') + '"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarPagado(\'' + id + '\')">Guardar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    setTimeout(function () { var e = $('pg-m'); if (e) e.focus(); }, 120);
+  }
+  function guardarPagado(id) { var m = C.leerNumero(val('pg-m')) || 0; listaOp({ t: 'pagado', item: id, monto: m }, 'Pagado'); cerrar(); }
+  var FI = null;
+  function formItemTienda(id) {
+    var x = id ? itemPor(id) : { n: '', q: '', p: '', para: vistaTienda === 'persona' && (LISTA.personas || []).length === 1 ? LISTA.personas[0] : '', talla: '', color: '', tienda: '', max: '', nota: '', foto: '' };
+    if (!x) return;
+    FI = { p: x.p || (x.n ? TIENDAS.seccionDe(x.n) : 'Otros'), para: x.para || '' };
+    var personas = (LISTA.personas || []).concat(['Todos']);
+    abrir('<h2>' + (id ? esc(x.n) : 'Agregar cosa') + '</h2>' +
+      '<div class="caja" style="flex-direction:row;gap:14px;align-items:center"><div class="foto-g' + (x.foto ? '' : ' vacia') + '" id="fi-prev">' + (x.foto ? '<img data-foto="' + esc(x.foto) + '" alt="">' : '📷') + '</div>' +
+      '<div style="flex:1"><b>Foto (opcional)</b><div class="suave chico">El modelo, la marca o una captura</div><div class="chips" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="App.fotoItem(\'' + (id || '') + '\',true)">📷 Cámara</button><button class="chip" onclick="App.fotoItem(\'' + (id || '') + '\',false)">🖼 Galería</button>' + (x.foto ? '<button class="chip" onclick="App.quitarFotoItem(\'' + id + '\')">Quitar</button>' : '') + '</div></div></div>' +
+      '<label class="campo"><span>Qué</span><input id="fi-n" value="' + esc(x.n) + '" placeholder="Ej. Tenis para correr" oninput="App.fiAuto(this.value)"></label>' +
+      '<div class="suave chico">Sección</div><div class="chips" id="fi-secs" style="margin:6px 0 4px">' + TIENDAS.SECCIONES.map(function (sx) { return '<button type="button" class="chip' + (FI.p === sx ? ' on' : '') + '" data-v="' + esc(sx) + '" onclick="App.fiSel(\'p\',this)">' + TIENDAS.IC[sx] + ' ' + sx + '</button>'; }).join('') + '</div>' +
+      '<div class="suave chico">Para quién</div><div class="chips" id="fi-paras" style="margin:6px 0 4px">' + personas.map(function (px) { return '<button type="button" class="chip' + (FI.para === px ? ' on' : '') + '" data-v="' + esc(px) + '" onclick="App.fiSel(\'para\',this)">' + (px === 'Todos' ? '👪 ' : '👤 ') + esc(px) + '</button>'; }).join('') + '</div>' +
+      '<div class="dos"><label class="campo compacto"><span>Talla</span><input id="fi-talla" value="' + esc(x.talla || '') + '" placeholder="Ej. M, 9, 32"></label><label class="campo compacto"><span>Color</span><input id="fi-color" value="' + esc(x.color || '') + '" placeholder="Ej. Negro"></label></div>' +
+      '<div class="dos"><label class="campo compacto"><span>Cantidad</span><input id="fi-q" inputmode="numeric" value="' + esc(x.q === '' || x.q === undefined ? '' : String(x.q)) + '" placeholder="1"></label><label class="campo compacto"><span>Precio máximo</span><input id="fi-max" class="monto" data-dinero inputmode="decimal" value="' + (x.max ? String(x.max).replace('.', ',') : '') + '"></label></div>' +
+      '<label class="campo compacto"><span>Tienda (opcional)</span><input id="fi-tienda" value="' + esc(x.tienda || '') + '" placeholder="Ej. Albrook, Nike, Multiplaza"></label>' +
+      '<label class="campo compacto"><span>Nota</span><input id="fi-nota" placeholder="Marca, modelo, link…" value="' + esc(x.nota || '') + '"></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarItem(\'' + (id || '') + '\')">' + (id ? 'Guardar' : 'Agregar') + '</button>' + (id ? '<button class="btn sec peligro" id="fi-borrar" onclick="App.quitarItem(\'' + id + '\')">Quitar de la lista</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    pintarFotos();
+  }
+  function fiSel(campo, b) { FI[campo] = FI[campo] === b.dataset.v && campo === 'para' ? '' : b.dataset.v; Array.prototype.forEach.call(b.parentNode.children, function (c) { c.classList.toggle('on', c.dataset.v === FI[campo]); }); FI.manual = FI.manual || campo === 'p'; }
+  function fiAuto(v) { if (FI.manual) return; FI.p = TIENDAS.seccionDe(v); var c = $('fi-secs'); if (c) Array.prototype.forEach.call(c.children, function (x) { x.classList.toggle('on', x.dataset.v === FI.p); }); }
+  function datosItemTienda() {
+    return { n: val('fi-n').trim(), q: Number(val('fi-q')) || '', u: Number(val('fi-q')) ? 'u' : '', p: FI.p || 'Otros', para: FI.para || '', talla: val('fi-talla').trim(), color: val('fi-color').trim(),
+      max: C.leerNumero(val('fi-max')) || '', tienda: val('fi-tienda').trim(), nota: val('fi-nota').trim() };
+  }
   function formTerminar() {
-    var pend = (LISTA.items || []).filter(function (x) { return !x.on; }), otras = (LISTAS || []).filter(function (l) { return l.id !== LISTA.id; });
-    abrir('<h2>Terminar compra</h2><div class="caja" style="gap:4px"><b>' + ((LISTA.items || []).length - pend.length) + ' de ' + (LISTA.items || []).length + ' en el carrito ✓</b>' +
+    var propios = (LISTA.items || []).filter(function (x) { return !x.enc; }), pend = propios.filter(function (x) { return !x.on; }), otras = (LISTAS || []).filter(function (l) { return l.id !== LISTA.id; });
+    abrir('<h2>Terminar compra' + (LISTA.tipo === 'tiendas' ? 's' : '') + '</h2>' + ((LISTA.items || []).some(function (x) { return x.enc; }) ? '<div class="suave chico">Los encargos se quedan hasta que cierres la cuenta de cada persona (📦 Encargos → 🧾 Cuentas).</div>' : '') + '<div class="caja" style="gap:4px"><b>' + (propios.length - pend.length) + ' de ' + propios.length + (LISTA.tipo === 'tiendas' ? ' comprados ✓' : ' en el carrito ✓') + '</b>' +
       (pend.length ? '<div class="suave chico">Quedaron pendientes: ' + pend.map(function (x) { return esc(x.n); }).join(', ') + '</div>' : '<div class="verde chico fuerte">¡No quedó nada pendiente!</div>') + '</div>' +
       (pend.length ? '<div class="suave chico fuerte" style="margin-top:10px">¿QUÉ HACEMOS CON LOS PENDIENTES?</div>' +
         '<label class="op on"><input type="radio" name="tp" value="dejar" checked> Dejarlos para la próxima</label>' +
         (otras.length ? '<label class="op"><input type="radio" name="tp" value="mover"> Pasarlos a <select id="tp-dest" onclick="event.stopPropagation()">' + otras.map(function (l) { return '<option value="' + l.id + '">' + esc(l.icono + ' ' + l.nombre) + '</option>'; }).join('') + '</select></label>' : '') +
         '<label class="op"><input type="radio" name="tp" value="borrar"> Borrarlos de la lista</label>' : '') +
-      '<div class="caja" style="margin-top:12px;gap:6px"><b>¿El gasto?</b><div class="suave chico">Si pagaste con tarjeta o SINPE, el correo del banco lo anota solo: asignalo a tu sobre de super desde Por asignar. Si pagaste en efectivo, anotalo a mano.</div>' +
+      '<div class="caja" style="margin-top:12px;gap:6px"><b>¿El gasto?</b><div class="suave chico">' + (LISTA.tipo === 'tiendas' ? 'Lo que pagaste con tarjeta lo anota solo el correo del banco (y si estás de viaje, entra al viaje). En efectivo, anotalo a mano.' : 'Si pagaste con tarjeta o SINPE, el correo del banco lo anota solo: asignalo a tu sobre de super desde Por asignar. Si pagaste en efectivo, anotalo a mano.') + '</div>' +
       '<div class="dos"><button class="btn sec chico" onclick="App.terminarCompra(\'asignar\')">Ir a Por asignar</button><button class="btn sec chico" onclick="App.terminarCompra(\'mano\')">Anotar a mano</button></div></div>' +
       '<div class="acciones"><button class="btn" onclick="App.terminarCompra(\'\')">Terminar y limpiar marcas</button><button class="btn sec" onclick="App.cerrar()">Seguir comprando</button></div>');
   }
@@ -5678,7 +6094,7 @@ var App = (function () {
     nuevos.forEach(function (m) {
       if (pendFila[m.fila] || soFila[m.fila] || ivaFila[m.fila] || ajFila[m.fila]) return;
       if (transferenciaDudosa(m)) accion.push({ tipo: 'direccion', mov: m });
-      else if (m.tipo === 'Gasto' && !m.categoria && !m.para && !/@/.test(m.viaje || '')) accion.push({ tipo: 'categoria', mov: m });
+      else if (m.tipo === 'Gasto' && !m.categoria && !m.para && !C.esFamilia(m) && !/@/.test(m.viaje || '')) accion.push({ tipo: 'categoria', mov: m });
       else if (!confFila[m.fila]) listos.push(m);
     });
     var porFecha = function (a, b) { return new Date((b.mov || b).fecha) - new Date((a.mov || a).fecha); };
@@ -5702,6 +6118,7 @@ var App = (function () {
       return 'Entre tus cuentas' + (d && d.cuenta ? ' · vino de ' + d.cuenta : d && d.tipo === 'fuera' ? ' · de fuera de la app' : '');
     }
     if (m.para) return '🤝 Para ' + m.para + ' (Me deben)';
+    if (C.esFamilia(m)) return '👪 Tarjeta de ' + infoFamilia(m.cuenta).persona + ' · solo cuenta en viajes';
     if (C.esCompraTarjeta(D, m)) return 'Suma a la deuda de ' + etiquetaCuenta(m.cuenta) + (m.categoria ? ' · ' + m.categoria : '');
     if (C.esSacarMeter(m)) return (m.tipo === C.TIPO_SACAR ? '📤 Sale del sobre ' : '📥 Entra al sobre ') + nomSobre(m.sobre) + (m.tipo === C.TIPO_SACAR ? ' → disponible' : ' ← disponible');
     var fs0 = sb ? (sb.porMov[m.fila] || []) : [];
@@ -5782,7 +6199,7 @@ var App = (function () {
         var m = a.mov, f = m.fila, cuerpo = '';
         if (a.tipo === 'ajena') {
           cuerpo = '<div class="rev-q">Llegó una compra con la tarjeta <b>••' + esc(a.u4) + '</b>, que no está en tus cuentas. <b>¿Es tuya?</b></div><div class="ajena-op">' +
-            chipRev('➕ Sí, agregarla a mis cuentas', 'App.rvAjena(' + f + ',\'si\')') + chipRev('🚫 No es mía · ignorar esta tarjeta', 'App.rvAjena(' + f + ',\'no\')', true) +
+            chipRev('➕ Sí, agregarla a mis cuentas', 'App.rvAjena(' + f + ',\'si\')') + chipRev('👪 De mi familia · solo para viajes', 'App.formFamiliaTarjeta(\'' + q(a.u4) + '\',' + f + ')', true) + chipRev('🚫 No es mía · ignorar esta tarjeta', 'App.rvAjena(' + f + ',\'no\')') +
             chipRev('1️⃣ Solo esta vez (borrar esta compra)', 'App.rvAjena(' + f + ',\'una\')') + '</div><div class="suave chico" style="margin-top:8px">No se anota en ninguna cuenta ni sobre hasta que respondás.</div>';
         } else if (a.tipo === 'sobre' && !sacadasNo[f] && (a.sac = infoSacadas(a.p))) {
           if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
@@ -6373,7 +6790,7 @@ var App = (function () {
     recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     salarioLlego: salarioLlego, formSalarioOtro: formSalarioOtro, salarioManana: salarioManana, formSalario: formSalario, salPrev: salPrev, guardarSalario: guardarSalario, repCero: repCero,
-    rvAjena: rvAjena, bandejaLimpia: bandejaLimpia, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
+    rvAjena: rvAjena, formFamilia: formFamilia, formFamiliaTarjeta: formFamiliaTarjeta, guardarFamiliaTarjeta: guardarFamiliaTarjeta, familiaAgregar: familiaAgregar, familiaQuitar: familiaQuitar, tabLista: tabLista, vistaEncargos: vistaEncargos, marcarEnc: marcarEnc, formPagadoEnc: formPagadoEnc, peMedio: peMedio, guardarPagadoEnc: guardarPagadoEnc, formEncargo: formEncargo, feDe: feDe, feSec: feSec, feAuto: feAuto, guardarEncargo: guardarEncargo, fotoEncargo: fotoEncargo, formEncargante: formEncargante, guardarEncargante: guardarEncargante, quitarEncargante: quitarEncargante, cuentasEncargos: cuentasEncargos, mandarCuentaEnc: mandarCuentaEnc, estadoEnc: estadoEnc, pasarMeDeben: pasarMeDeben, baseSeccion: baseSeccion, vistaLista: vistaLista, formPagado: formPagado, guardarPagado: guardarPagado, fiSel: fiSel, fiAuto: fiAuto, bandejaLimpia: bandejaLimpia, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
     formActualizar: formActualizar, copiarCodigo: copiarCodigo, volverAnterior: volverAnterior, actualizarApp: actualizarApp,
     formNuevaLista: formNuevaLista, nlIcono: nlIcono, crearListaNueva: crearListaNueva, crearConBase: crearConBase, abrirLista: abrirLista, modoLista: modoLista, marcarItem: marcarItem,
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,

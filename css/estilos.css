@@ -967,3 +967,23 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 #panel .ig-fila .pl-in, #panel .pl-in { background: none; border: 0; border-bottom: 1.5px solid var(--acento); border-radius: 0; box-shadow: none; color: var(--texto); padding: 4px 0; text-align: right; font-weight: 800; font-size: 15px; min-height: 0; height: auto; }
 #panel .ig-fila { grid-template-columns: minmax(0, 1fr) 96px 66px; padding: 9px 12px; }
 #panel .ig-fila > span > b { overflow-wrap: anywhere; }
+/* listas de tiendas */
+.nl-tipos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.nl-tipo { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 8px; border-radius: 14px; border: 1.5px solid var(--linea); background: none; color: var(--texto); font-family: inherit; cursor: pointer; text-align: center; }
+.nl-tipo.on { border: 2px solid var(--acento); background: color-mix(in srgb, var(--acento) 8%, transparent); }
+.tgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.tg { font-size: 11px; padding: 2px 7px; border-radius: 8px; background: var(--fondo); color: var(--texto); white-space: nowrap; font-weight: 500; }
+.mini-btn { background: none; border: 1px solid var(--linea); color: var(--acento); border-radius: 10px; padding: 5px 9px; font-weight: 700; font-size: 12.5px; cursor: pointer; flex-shrink: 0; font-family: inherit; }
+.enlace-mini { background: none; border: 0; color: var(--acento); font-weight: 700; font-size: 12px; cursor: pointer; padding: 2px 4px; font-family: inherit; }
+/* encargos */
+.tabs-lista { display: flex; background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 12px; padding: 3px; margin: -4px 0 10px; }
+.tabs-lista button { flex: 1; border: 0; background: none; color: var(--texto); padding: 9px 6px; border-radius: 10px; font-weight: 800; font-size: 13.5px; font-family: inherit; cursor: pointer; }
+.tabs-lista button.on { background: var(--acento); color: #111; }
+.est-enc { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 9px; white-space: nowrap; background: var(--fondo); }
+.est-enc.comp { background: color-mix(in srgb, var(--positivo) 25%, transparent); }
+.est-enc.entr, .est-enc.cobr { background: color-mix(in srgb, #5B8DEF 28%, transparent); }
+.est-enc.nohay { background: color-mix(in srgb, var(--rojo) 22%, transparent); }
+.enc-card { padding: 10px 14px; gap: 2px; }
+.enc-nom { background: none; border: 0; color: var(--texto); text-align: left; padding: 0; display: flex; flex-direction: column; font-family: inherit; cursor: pointer; min-width: 0; }
+.it-su.en-card { padding-left: 0; padding-right: 0; }
+.btn-dash { width: 100%; border: 1.5px dashed var(--linea); background: none; color: var(--acento); border-radius: 12px; padding: 12px; font-weight: 800; font-size: 14px; font-family: inherit; cursor: pointer; margin-top: 6px; }

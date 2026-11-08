@@ -1,8 +1,8 @@
 {
- "web": "2.10.3",
- "servidor": "2.10.2",
- "sha256": "49e97ec24541d2ae9671805d78bd64749343e08ea3c8af3f024f9c06dc4068b9",
- "novedades": "Arreglo: ya no sale por error el aviso de que el servidor tiene una versión vieja.",
+ "web": "2.10.6",
+ "servidor": "2.10.6",
+ "sha256": "bcc0229ab4ef77659638430ca61a0eee7229143d67f4e1937d88f7eb35d7a270",
+ "novedades": "👪 Tarjetas de la familia en los viajes: las compras de tu esposa (reenviadas de BAC y Davibank) cuentan solo en el viaje, separadas por persona y tarjeta, con PDF de una página por tarjeta. No tocan tus cuentas ni sobres.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

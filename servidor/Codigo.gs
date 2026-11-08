@@ -39,6 +39,8 @@ var SOBRE_FONDOS = 'Fondos';
 
 /** BCR SAFI (fondos de inversión): se leen las "Solicitud de inversión / de retiro"; las confirmaciones con PDF se ignoran. */
 var FONDOS_CORREO = 'mensajerobcrsafi@bancobcr.com';
+// v2.10.6: BAC Credomatic (se lee aunque no esté en Config: ahí llegan, reenviadas, las compras de tarjetas de la familia)
+var BAC_CORREO = 'NotificacionBAC@baccredomatic.cr';
 
 
 // =====================================================================
@@ -461,11 +463,46 @@ function parsearSAFI(texto, fechaCorreo) {
 }
 
 /**
+ * v2.10.6 · BAC Credomatic: "Notificación de transacción". Campos en líneas:
+ *   Comercio: … · Ciudad y país: … · Fecha: Nov 1, 2026, 11:55 · VISA: ************1234 · Autorización: … · Referencia: … · Tipo de Transacción: COMPRA · Monto: CRC 1,234.56
+ */
+var MESES_BAC_ = { ene: 0, jan: 0, feb: 1, mar: 2, abr: 3, apr: 3, may: 4, jun: 5, jul: 6, ago: 7, aug: 7, sep: 8, set: 8, oct: 9, nov: 10, dic: 11, dec: 11 };
+function parsearBACNotificacion(texto) {
+  var t = limpioDavi_(texto);
+  if (!/Tipo de Transacci[oó]n/i.test(t) || !/Monto/i.test(t)) return null;
+  var ET = '(?=\\s+(?:Comercio|Ciudad y pa[ií]s|Fecha|VISA|MASTER\\s?CARD|AMEX|AMERICAN EXPRESS|Tarjeta|Autorizaci[oó]n|Referencia|Tipo de Transacci[oó]n|Monto|¿Tiene dudas)\\s*:?|\\s*$)';
+  function campo(nombre) { var m = t.match(new RegExp(nombre + '\\s*:\\s*(.+?)' + ET, 'i')); return m ? m[1].trim() : ''; }
+  var comercio = campo('Comercio'), lugar = campo('Ciudad y pa[ií]s'), fecha = campo('Fecha'), tipo = campo('Tipo de Transacci[oó]n');
+  var mt = t.match(/Monto\s*:\s*(USD|CRC|US\$|\$|₡|¢|EUR)\s*([\d.,]*\d)/i);
+  var u4 = t.match(/(?:VISA|MASTER\s?CARD|AMEX|AMERICAN EXPRESS|Tarjeta)\s*:\s*[*•xX\s]*(\d{4})\b/i);
+  if (!comercio || !mt || !u4) return null;
+  if (/declin|rechaz|denegad/i.test(tipo)) return [];
+  var f = null, a;
+  if ((a = fecha.match(/([A-Za-zé]{3})[a-zé]*\.?\s+(\d{1,2}),?\s+(\d{4}),?\s+(\d{1,2}):(\d{2})\s*([AaPp]\.?\s?[Mm]\.?)?/)) && MESES_BAC_[a[1].toLowerCase().slice(0, 3)] !== undefined) {
+    f = [+a[3], MESES_BAC_[a[1].toLowerCase().slice(0, 3)], +a[2], +a[4], +a[5], a[6]];
+  } else if ((a = fecha.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4}),?\s+(\d{1,2}):(\d{2})\s*([AaPp]\.?\s?[Mm]\.?)?/))) {
+    f = [a[3].length === 2 ? 2000 + +a[3] : +a[3], +a[2] - 1, +a[1], +a[4], +a[5], a[6]];
+  }
+  if (!f) return null;
+  var ap = (f[5] || '').toUpperCase().replace(/[.\s]/g, ''), h = f[3];
+  if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+  var devol = /devoluci|reversi|anulaci|cr[eé]dito|reembolso/i.test(tipo);
+  lugar = lugar.replace(/,\s*Costa Rica$/i, '').replace(/\s+/g, ' ');
+  lugar = lugar.toLowerCase().replace(/(^|\s)\S/g, function (x) { return x.toUpperCase(); });
+  return [{
+    fecha: crearFechaCR(f[0], f[1], f[2], h, f[4]).toISOString(), comercio: comercio, lugar: lugar,
+    monto: convertirNumero(mt[2]), moneda: identificarMoneda(mt[1]) || (/EUR/i.test(mt[1]) ? 'USD' : 'CRC'), tipo: devol ? 'ingreso' : 'gasto',
+    ultimos4: u4[1], autorizacion: 'BAC-' + (campo('Autorizaci[oó]n') || campo('Referencia')).replace(/\s/g, ''), banco: 'BAC', origen: 'correo'
+  }];
+}
+
+/**
  * Despacha el correo de un banco al lector que corresponde.
  * Devuelve una lista de transacciones (vacía = correo entendido pero sin nada que anotar) o null si no se pudo leer.
  */
 function parsearCorreoBanco(texto, html, fechaCorreo, banco) {
   var todo = String(texto || '') + '\n' + textoDeHtml_(html);
+  if (/Tipo de Transacci[oó]n/i.test(todo) && /Comercio/i.test(todo)) { var bac = parsearBACNotificacion(texto) || parsearBACNotificacion(textoDeHtml_(html)); if (bac) return bac; }   // v2.10.6
   if (/Detalle de Transacciones/i.test(todo)) { var r = parsearBCRTabla(texto, html); if (r) return r; }
   if (/pago de servicios/i.test(todo)) { var s = parsearDavibankServicio(texto, fechaCorreo) || parsearDavibankServicio(textoDeHtml_(html), fechaCorreo); if (s) return s; }
   if (/transacci[oó]n realizada en/i.test(todo)) { var d = parsearDavibankCompra(texto) || parsearDavibankCompra(textoDeHtml_(html)); if (d) return d; }
@@ -1810,8 +1847,25 @@ function leerCorreos_(guardar) {
 
   var ajenas = (prefs_().ajenas) || {}, saltadas = guardar ? ajenasSaltadas_() : {};
   var esMia4 = function (u4) { return cuentas.some(function (x) { return texto_(x['Últimos 4']) === u4; }); };
+  var familia = (prefs_().familia) || {};
+  var esFamilia4 = function (u4) { return !!(u4 && familia[u4] && !esMia4(u4)); };
+  /** v2.10.6: correo de otra persona (reenviado): solo se anotan las compras de las tarjetas de la familia */
+  function anotarAjeno(tx, etiquetaBanco) {
+    if (!esFamilia4(tx.ultimos4) || /pago de tarjeta/i.test(tx.tipoMov || '')) {
+      resumen.detalle.push('↪️ [' + etiquetaBanco + '] reenviado, no es compra de una tarjeta de la familia · no se anota');
+      return false;
+    }
+    anotar(tx, etiquetaBanco);
+    return true;
+  }
   function anotar(tx, etiquetaBanco) {
     tx.autorizacion = tx.autorizacion || claveAuto_(tx, etiquetaBanco);
+    // v2.10.6: tarjetas de la familia (Ajustes → Tarjetas de la familia): se anotan como "Familia ••1234" y solo cuentan en viajes
+    if (esFamilia4(tx.ultimos4) && !tx.cuentaNombre) {
+      if (/pago de tarjeta/i.test(tx.tipoMov || '')) { resumen.detalle.push('👪 [' + etiquetaBanco + '] pago de la tarjeta de la familia ••' + tx.ultimos4 + ' · no se anota'); return; }
+      tx.cuentaNombre = 'Familia ••' + tx.ultimos4; tx.esFamilia = true;
+      tx.nota = (tx.nota ? tx.nota + '. ' : '') + 'Tarjeta de la familia (solo viajes)';
+    }
     // v2.9.0: tarjetas que no son mías (Ajustes → Cuentas): el correo se marca como leído y no se anota
     if (tx.ultimos4 && !tx.cuentaNombre && ajenas[tx.ultimos4] && !esMia4(tx.ultimos4)) {
       resumen.ajenas = (resumen.ajenas || 0) + 1;
@@ -1823,6 +1877,7 @@ function leerCorreos_(guardar) {
     if (autorizaciones[tx.autorizacion]) { resumen.duplicados++; return; }
     autorizaciones[tx.autorizacion] = true;
     var fila = completarCompra_(tx, cuentas, reglas);
+    if (tx.esFamilia) { fila['Sobre'] = ''; resumen.familia = (resumen.familia || 0) + 1; }
     resumen.compras++;
     resumen.detalle.push('🧾 [' + etiquetaBanco + '] ' + fila['Tipo'] + ' · ' + fila['Comercio / descripción'] + ' · ' +
       fila['Monto'] + ' ' + fila['Moneda'] + ' · ' + (fila['Cuenta / tarjeta'] || 'sin cuenta') + ' · ' + (fila['Categoría'] || 'sin categoría'));
@@ -1847,10 +1902,25 @@ function leerCorreos_(guardar) {
   }
 
   // ---- Bancos de la pestaña Config (compras con tarjeta, pagos de servicio…) ----
-  bancosActivos_().forEach(function (banco) {
+  var bancos = bancosActivos_(), vistosMsg = {};
+  if (!bancos.some(function (b) { return b.correo.toLowerCase() === BAC_CORREO.toLowerCase(); })) bancos.push({ nombre: 'BAC', correo: BAC_CORREO, soloFamilia: true });
+  /** v2.10.6: reenviado automático (Gmail deja el remitente del banco y agrega X-Forwarded-For) → es de otra persona */
+  function esReenviado(msg) { try { return !!(msg.getHeader && (msg.getHeader('X-Forwarded-For') || msg.getHeader('X-Forwarded-To'))); } catch (e) { return false; } }
+  bancos.forEach(function (banco) {
     buscarMensajes_('from:' + banco.correo, desde).forEach(function (x) {
+      vistosMsg[x.msg.getId()] = true;
       var texto = x.msg.getSubject() + '\n' + x.msg.getPlainBody();
       var lista = parsearCorreoBanco(texto, x.msg.getBody(), x.msg.getDate(), banco.nombre);
+      if (banco.soloFamilia || esReenviado(x.msg)) {   // correos de otra persona: solo compras de tarjetas de la familia; lo demás no se toca
+        if (!lista || !lista.length) { if (esEstadoDeCuenta_(x.msg.getSubject())) return; resumen.detalle.push('↪️ [' + banco.nombre + '] reenviado sin compra · no se anota: ' + x.msg.getSubject()); return marcar(x, true); }
+        var ajeno = esReenviado(x.msg);
+        lista.forEach(function (tx) {
+          if (!tx.fecha) tx.fecha = x.msg.getDate().toISOString();
+          if (!ajeno && tx.ultimos4 && esMia4(tx.ultimos4)) anotar(tx, banco.nombre);   // una tarjeta BAC propia (si algún día la agregás a Cuentas)
+          else anotarAjeno(tx, banco.nombre);
+        });
+        return marcar(x, true);
+      }
       if ((!lista || !lista.length) && esEstadoDeCuenta_(x.msg.getSubject())) return dejarEnBandeja(x, banco.nombre);
       if (!lista) {
         resumen.revisar++;
@@ -1867,6 +1937,21 @@ function leerCorreos_(guardar) {
       marcar(x, true);
     });
   });
+
+  // ---- v2.10.6: reenviados a mano (el remitente es la persona, el correo del banco va en el texto) → solo tarjetas de la familia ----
+  if (Object.keys(familia).length) {
+    bancos.forEach(function (banco) {
+      buscarMensajes_('"' + banco.correo + '" -from:' + banco.correo, desde).forEach(function (x) {
+        if (vistosMsg[x.msg.getId()]) return;
+        vistosMsg[x.msg.getId()] = true;
+        var lista = parsearCorreoBanco(x.msg.getSubject() + '\n' + x.msg.getPlainBody(), x.msg.getBody(), x.msg.getDate(), banco.nombre);
+        var deFamilia = (lista || []).filter(function (tx) { return esFamilia4(tx.ultimos4) && !/pago de tarjeta/i.test(tx.tipoMov || ''); });
+        if (!deFamilia.length) return;   // no es de la familia: no se toca
+        deFamilia.forEach(function (tx) { if (!tx.fecha) tx.fecha = x.msg.getDate().toISOString(); anotar(tx, banco.nombre + ' (reenviado)'); });
+        marcar(x, true);
+      });
+    });
+  }
 
   // ---- SINPE Móvil del BCR ----
   buscarMensajes_('from:' + SINPE_CORREO.remitente + ' subject:' + SINPE_CORREO.asunto, desde).forEach(function (x) {
@@ -2075,7 +2160,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.10.2';
+var VERSION_APP = '2.10.6';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -2121,7 +2206,7 @@ var API = {
   actualizarServidor: function () { return actualizarServidor_(); },
   volverVersionAnterior: function () { return volverVersionAnterior_(); },
   listas: function () { return listasResumen_(); },
-  crearLista: function (n, i, it) { return crearLista_(n, i, it); },
+  crearLista: function (n, i, it, opc) { return crearLista_(n, i, it, opc); },
   obtenerLista: function (id, v) { return obtenerLista_(id, v); },
   cambiarLista: function (id, op, quien) { return cambiarLista_(id, op, quien, false); },
   eliminarLista: function (id) { return eliminarLista_(id); },
@@ -2685,21 +2770,23 @@ function guardarListaFila_(l) {
 /** Lo que ve el teléfono (sin el token si viene por link). */
 function vistaLista_(l, conToken) {
   return { id: l.id, nombre: l.nombre, icono: l.icono, editable: l.editable, v: l.v, items: (l.datos.items || []), cambio: l.datos.cambio || null,
+    tipo: l.datos.tipo || 'super', personas: l.datos.personas || [], encargantes: l.datos.encargantes || [],
     token: conToken ? (l.token || '') : undefined };
 }
 
 function listasResumen_() {
   return listasDatos_().map(function (l) {
     var it = l.datos.items || [];
-    return { id: l.id, nombre: l.nombre, icono: l.icono, compartida: !!l.token, total: it.length, marcados: it.filter(function (x) { return x.on; }).length,
+    return { id: l.id, nombre: l.nombre, icono: l.icono, compartida: !!l.token, total: it.length, marcados: it.filter(function (x) { return x.on; }).length, tipo: l.datos.tipo || 'super',
       consultas: it.filter(function (x) { return x.consulta && !x.consulta.resp; }).length, v: l.v };
   });
 }
 
-function crearLista_(nombre, icono, items) {
+function crearLista_(nombre, icono, items, opc) {
   return conBloqueo_(function () {
+    opc = opc || {};
     var l = { id: Utilities.getUuid().slice(0, 8), nombre: String(nombre || 'Lista').slice(0, 60), icono: String(icono || '🛒').slice(0, 4), token: '', editable: true, v: 0,
-      datos: { items: (items || []).map(limpiarItem_).filter(Boolean) } };
+      datos: { items: (items || []).map(limpiarItem_).filter(Boolean), tipo: opc.tipo === 'tiendas' ? 'tiendas' : 'super', personas: limpiarPersonas_(opc.personas) } };
     return vistaLista_(guardarListaFila_(l), true);
   });
 }
@@ -2708,8 +2795,14 @@ function limpiarItem_(it) {
   if (!it || !String(it.n || '').trim()) return null;
   return { id: String(it.id || Utilities.getUuid().slice(0, 8)), n: String(it.n).trim().slice(0, 80), q: it.q === '' || it.q === undefined || it.q === null ? '' : Number(it.q) || '',
     u: String(it.u || '').slice(0, 10), p: String(it.p || '').slice(0, 30), nota: String(it.nota || '').slice(0, 140), foto: it.foto ? String(it.foto) : '',
-    on: !!it.on, por: it.por ? String(it.por).slice(0, 30) : '', estado: it.estado === 'nohay' ? 'nohay' : '', consulta: it.consulta || null };
+    on: !!it.on, por: it.por ? String(it.por).slice(0, 30) : '', estado: it.estado === 'nohay' ? 'nohay' : '', consulta: it.consulta || null,
+    // v2.10.4: listas de tiendas
+    para: String(it.para || '').slice(0, 30), talla: String(it.talla || '').slice(0, 12), color: String(it.color || '').slice(0, 20), tienda: String(it.tienda || '').slice(0, 40),
+    max: Number(it.max) > 0 ? Math.round(Number(it.max) * 100) / 100 : '', pagado: Number(it.pagado) > 0 ? Math.round(Number(it.pagado) * 100) / 100 : '',
+    // v2.10.5: encargos (de parte de quién, con qué se pagó, movimiento ligado)
+    enc: String(it.enc || '').slice(0, 40), medio: String(it.medio || '').slice(0, 60), mov: Number(it.mov) > 0 ? Number(it.mov) : '' };
 }
+function limpiarPersonas_(l) { return (Array.isArray(l) ? l : []).map(function (x) { return String(x || '').trim().slice(0, 30); }).filter(String).slice(0, 10); }
 
 function obtenerLista_(id, vConocida) {
   var vc = CacheService.getScriptCache().get('lista_v_' + id);
@@ -2726,10 +2819,19 @@ function cambiarLista_(id, op, quien, porLink) {
     if (!l) throw new Error('Esa lista ya no existe.');
     var items = l.datos.items || [], it = op.item ? items.filter(function (x) { return x.id === op.item; })[0] : null;
     var nombre = String(quien || '').slice(0, 30) || 'Alguien';
-    var soloMarcar = { marcar: 1, nohay: 1, consulta: 1, responder: 1 };
+    var soloMarcar = { marcar: 1, nohay: 1, consulta: 1, responder: 1, pagado: 1, ligar: 1 };
     if (porLink && !l.editable && !soloMarcar[op.t]) throw new Error('En esta lista solo podés marcar.');
     var cambio = '';
-    if (op.t === 'marcar' && it) { it.on = !!op.on; it.por = op.on ? nombre : ''; if (op.on) it.estado = ''; cambio = nombre + (op.on ? ' marcó ' : ' desmarcó ') + it.n; }
+    if (op.t === 'marcar' && it) { it.on = !!op.on; it.por = op.on ? nombre : ''; if (op.on) it.estado = ''; if (!op.on) it.pagado = ''; cambio = nombre + (op.on ? ' marcó ' : ' desmarcó ') + it.n; }
+    else if (op.t === 'pagado' && it) { it.pagado = Number(op.monto) > 0 ? Math.round(Number(op.monto) * 100) / 100 : ''; if (op.medio !== undefined) it.medio = String(op.medio || '').slice(0, 60); if (it.pagado && !it.on) { it.on = true; it.por = nombre; } cambio = nombre + ' pagó ' + it.n; }
+    else if (op.t === 'encargante' && op.datos && String(op.datos.n || '').trim()) {
+      var lst = l.datos.encargantes || [], nn = String(op.datos.n).trim().slice(0, 40), e0 = lst.filter(function (e) { return e.n === (op.antes || nn); })[0];
+      var d0 = { n: nn, adelanto: Number(op.datos.adelanto) > 0 ? Math.round(Number(op.datos.adelanto) * 100) / 100 : 0, moneda: op.datos.moneda === 'CRC' ? 'CRC' : 'USD', estado: ['', 'entregado', 'cobrado', 'medeben'].indexOf(op.datos.estado) >= 0 ? op.datos.estado : '' };
+      if (e0) { if (op.antes && op.antes !== nn) items.forEach(function (x) { if (x.enc === op.antes) x.enc = nn; }); lst[lst.indexOf(e0)] = Object.assign({}, e0, d0); } else lst.push(d0);
+      l.datos.encargantes = lst.slice(0, 30); cambio = nombre + ': encargos de ' + nn;
+    }
+    else if (op.t === 'quitarEncargante' && op.n) { l.datos.encargantes = (l.datos.encargantes || []).filter(function (e) { return e.n !== op.n; }); items = items.filter(function (x) { return x.enc !== op.n; }); cambio = nombre + ' quitó los encargos de ' + op.n; }
+    else if (op.t === 'personas') { l.datos.personas = limpiarPersonas_(op.personas); }
     else if (op.t === 'nohay' && it) { it.estado = 'nohay'; it.on = false; it.por = nombre; cambio = nombre + ': no hay ' + it.n; }
     else if (op.t === 'agregar') { var nuevo = limpiarItem_(op.datos); if (nuevo) { items.push(nuevo); cambio = nombre + ' agregó ' + nuevo.n; } }
     else if (op.t === 'editar' && it) {
@@ -2746,13 +2848,13 @@ function cambiarLista_(id, op, quien, porLink) {
     }
     else if (op.t === 'terminar') {
       items.forEach(function (x) { if (x.consulta && x.consulta.foto) borrarFoto_(x.consulta.foto); x.consulta = null; });
-      var pend = items.filter(function (x) { return !x.on; });
-      if (op.pendientes === 'borrar') { pend.forEach(function (x) { if (x.foto) borrarFoto_(x.foto); }); items = items.filter(function (x) { return x.on; }); }
+      var pend = items.filter(function (x) { return !x.on && !x.enc; });
+      if (op.pendientes === 'borrar') { pend.forEach(function (x) { if (x.foto) borrarFoto_(x.foto); }); items = items.filter(function (x) { return x.on || x.enc; }); }
       else if (op.pendientes === 'mover' && op.destino) {
         var dest = listaPor_('id', op.destino);
-        if (dest && dest.id !== l.id) { dest.datos.items = (dest.datos.items || []).concat(pend.map(function (x) { return limpiarItem_(Object.assign({}, x, { on: false, estado: '', por: '' })); })); guardarListaFila_(dest); items = items.filter(function (x) { return x.on; }); }
+        if (dest && dest.id !== l.id) { dest.datos.items = (dest.datos.items || []).concat(pend.map(function (x) { return limpiarItem_(Object.assign({}, x, { on: false, estado: '', por: '' })); })); guardarListaFila_(dest); items = items.filter(function (x) { return x.on || x.enc; }); }
       }
-      items.forEach(function (x) { x.on = false; x.por = ''; x.estado = ''; });
+      items.forEach(function (x) { if (x.enc) return; x.on = false; x.por = ''; x.estado = ''; x.pagado = ''; });   // los encargos se quedan hasta cerrar su cuenta
       cambio = nombre + ' terminó la compra';
     }
     else if (op.t === 'orden' && op.ids) { items.sort(function (a, b) { return op.ids.indexOf(a.id) - op.ids.indexOf(b.id); }); }
@@ -2953,7 +3055,7 @@ var Calc = (function () {
       r.movimientos.push(m);
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
       if (m.tipo === 'Ingreso') { if (!esCobro(m)) r.ingresos[mon] += m.monto; return; }
-      if (m.tipo !== 'Gasto' || m.para) return;     // v2.2: lo comprado para otra persona no es gasto mío
+      if (m.tipo !== 'Gasto' || m.para || esFamilia(m)) return;     // v2.10.6: tarjetas de la familia solo cuentan en viajes · v2.2: lo comprado para otra persona no es gasto mío
       r.gastos[mon] += m.monto;
       if (!m.categoria) r.porRevisar++;
       var cat = m.categoria || 'Sin categoría';
@@ -2992,7 +3094,7 @@ var Calc = (function () {
         if (s.asignadoAuto) asignado = gastado;
       } else {
         d.movimientos.forEach(function (m) {
-          if (m.sobre === s.nombre && m.moneda === s.moneda && m.tipo === 'Gasto' && enMes(m.fecha, mes)) gastado += m.monto;
+          if (m.sobre === s.nombre && m.moneda === s.moneda && m.tipo === 'Gasto' && !esFamilia(m) && enMes(m.fecha, mes)) gastado += m.monto;
         });
       }
       var pct = asignado ? gastado / asignado : null;
@@ -3031,6 +3133,7 @@ var Calc = (function () {
   function sentidoSobre(d, m) {
     if (esSacarMeter(m) || esCompraTarjeta(d, m)) return null;   // v2.8.0
     if (m.para && m.tipo !== 'Ingreso') return null;   // v2.2: comprado para otra persona: no toca sobres
+    if (esFamilia(m)) return null;   // v2.10.6
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
     if (m.tipo === 'Inversión' || m.tipo === 'Pago de tarjeta' || m.tipo === 'Gasto') return 'sale';
     if (m.tipo === 'Transferencia') return entraTransferencia(m) ? 'entra' : 'sale';
@@ -3072,7 +3175,7 @@ var Calc = (function () {
     else (d.movimientos || []).forEach(function (m) {   // sin cuenta de ahorro en la hoja: como antes, por el tipo
       var s = sentidoSobre(d, m); if (s) neto[m.fila] = (s === 'entra' ? 1 : -1) * (m.monto || 0);
     });
-    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && !esSacarMeter(m) && !esCompraTarjeta(d, m) && !(m.para && m.tipo !== 'Ingreso') && Math.abs(neto[m.fila] || 0) > 0.005; })
+    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && !esSacarMeter(m) && !esCompraTarjeta(d, m) && !(m.para && m.tipo !== 'Ingreso') && !esFamilia(m) && Math.abs(neto[m.fila] || 0) > 0.005; })
       .slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
     movs.forEach(function (m) {
       var n = neto[m.fila], sentido = n > 0 ? 'entra' : 'sale', total = Math.abs(n);
@@ -3200,6 +3303,14 @@ var Calc = (function () {
     for (var i = 0; i < PALABRAS_VIAJE.length; i++) if (PALABRAS_VIAJE[i][1].test(m.comercio || '')) return PALABRAS_VIAJE[i][0];
     return CAT_A_VIAJE[m.categoria] || 'Otros';
   }
+  /** v2.10.6 · compras con tarjetas de la familia (esposa, hijos…): el correo llega reenviado y se anotan como "Familia ••1234".
+   *  No tocan cuentas, sobres ni el resumen del mes: solo cuentan en los viajes. */
+  var SIN_FAMILIA = '-Familia';
+  function esFamilia(m) { return !!m && /^familia\b/i.test(String(m.cuenta || '').trim()); }
+  function familia4(m) { var x = esFamilia(m) && String(m.cuenta).match(/(\d{4})\s*$/); return x ? x[1] : ''; }
+  function familiaPrefs(d) { return (d && (d.familia || (d.ajustes && d.ajustes.prefs && d.ajustes.prefs.familia))) || {}; }
+  /** Persona dueña de una tarjeta de la familia ('' si no se sabe) */
+  function personaFamilia(d, u4) { var x = familiaPrefs(d)[u4]; return (x && String(x.persona || '').trim()) || 'Familia'; }
   function esEfectivo(c) { return !c || normNom(c) === 'efectivo'; }
   function enViaje(v, m) {
     if (!m.fecha || m.viaje === 'Fuera' || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero')) return false;
@@ -3209,6 +3320,7 @@ var Calc = (function () {
     if (f < ini || f >= fin) return false;
     if (mk.mas) return true;
     var t = v.tarjetas || [];
+    if (esFamilia(m)) return t.indexOf(SIN_FAMILIA) < 0;   // v2.10.6: las tarjetas de la familia entran solas (salvo que el viaje diga que no)
     return t.indexOf(m.cuenta) >= 0 || (t.indexOf('Efectivo') >= 0 && esEfectivo(m.cuenta));
   }
   /** Montos en la moneda del viaje (los ₡ se pasan a $ con el tipo de cambio, y al revés). */
@@ -3221,16 +3333,18 @@ var Calc = (function () {
     var ini = soloFecha(new Date(v.desde)), fin = soloFecha(new Date(v.hasta)), h = soloFecha(hoy);
     var compras = (d.movimientos || []).filter(function (m) { return enViaje(v, m); }).map(function (m) {
       var f = new Date(m.fecha);
-      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc), antes: f < ini, cuenta: esEfectivo(m.cuenta) ? 'Efectivo' : m.cuenta };
+      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc), antes: f < ini, cuenta: esEfectivo(m.cuenta) ? 'Efectivo' : m.cuenta, familia: familia4(m), persona: familia4(m) ? personaFamilia(d, familia4(m)) : '' };
     }).sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
     var gastado = compras.reduce(function (s, c) { return s + c.monto; }, 0);
     var antes = compras.filter(function (c) { return c.antes; }).reduce(function (s, c) { return s + c.monto; }, 0);
-    var porCategoria = {}, porTarjeta = {}, ayer = 0, porCatAyer = {};
+    var porCategoria = {}, porTarjeta = {}, porPersona = {}, ayer = 0, porCatAyer = {};
     CATS_VIAJE.forEach(function (c) { porCategoria[c] = 0; });
     var dAyer = new Date(h.getFullYear(), h.getMonth(), h.getDate() - 1);
     compras.forEach(function (c) {
       porCategoria[c.categoria] += c.monto;
       var k = c.cuenta; porTarjeta[k] = porTarjeta[k] || { monto: 0, n: 0 }; porTarjeta[k].monto += c.monto; porTarjeta[k].n++;
+      var pp = c.persona; porPersona[pp] = porPersona[pp] || { persona: pp, monto: 0, n: 0, tarjetas: {} }; porPersona[pp].monto += c.monto; porPersona[pp].n++;
+      var tt = porPersona[pp].tarjetas; tt[k] = tt[k] || { monto: 0, n: 0, familia: c.familia }; tt[k].monto += c.monto; tt[k].n++;
       if (soloFecha(new Date(c.mov.fecha)).getTime() === dAyer.getTime()) { ayer += c.monto; porCatAyer[c.categoria] = (porCatAyer[c.categoria] || 0) + c.monto; }
     });
     // efectivo del viaje: retiros de cajero ligados (no son gasto) − lo gastado en efectivo
@@ -3245,7 +3359,7 @@ var Calc = (function () {
     var limite = v.limite || 0, disponible = limite - gastado;
     return {
       compras: compras, gastado: gastado, limite: limite, disponible: disponible, pct: limite ? gastado / limite : 0,
-      antes: antes, durante: gastado - antes, porTarjeta: porTarjeta, ayer: ayer, porCatAyer: porCatAyer,
+      antes: antes, durante: gastado - antes, porTarjeta: porTarjeta, porPersona: porPersona, hayFamilia: compras.some(function (c) { return !!c.familia; }), ayer: ayer, porCatAyer: porCatAyer,
       efectivo: { retiros: retiros, retirado: totRet, gastado: gastEf, queda: totRet - gastEf },
       presupuesto: hayPres ? presupuesto : null,
       diasTotal: total, diasRestantes: restantes, diaActual: h < ini ? 0 : Math.min(total, diasEntre(ini, h) + 1), porDia: restantes ? Math.max(0, disponible) / restantes : 0,
@@ -3360,7 +3474,7 @@ var Calc = (function () {
   }
   /** Compras hechas para otras personas que todavía no te pagaron, y posibles pagos (ingresos por el mismo monto). */
   function meDeben(d) {
-    var pend = (d.movimientos || []).filter(function (m) { return m.para && m.tipo !== 'Ingreso' && !m.cobro; })
+    var pend = (d.movimientos || []).filter(function (m) { return m.para && m.tipo !== 'Ingreso' && !m.cobro && !esFamilia(m); })
       .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
     var total = { CRC: 0, USD: 0 }, personas = {};
     pend.forEach(function (m) {
@@ -3470,6 +3584,7 @@ var Calc = (function () {
   }
   /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
   function efectoCuenta(d, m, o) {
+    if (esFamilia(m)) return null;   // v2.10.6: tarjeta de la familia (solo viajes)
     if (tarjetaDesconocida(d, m)) return null;   // v2.9.0: hasta saber de quién es la tarjeta, no toca ninguna cuenta
     if (m.cuenta && normNom(m.cuenta) === 'efectivo') return null;   // v2.10.0: gasto en efectivo (ya salió del banco al retirar)
     var cta = m.cuenta ? (d.cuentas || []).filter(function (c) { return normNom(c.nombre) === normNom(m.cuenta); })[0] : null;
@@ -3695,7 +3810,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

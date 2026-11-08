@@ -24,6 +24,12 @@
     .nom b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .on .nom b, .on .q { text-decoration: line-through; opacity: .5; }
     .q { font-weight: 800; white-space: nowrap; }
+    .tgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+    .tg { font-size: 11px; padding: 2px 7px; border-radius: 8px; background: rgba(127,127,127,.18); white-space: nowrap; }
+    .vistas { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .vista { border: 1.5px solid var(--borde); background: none; color: var(--texto); border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 13.5px; }
+    .vista.on { background: var(--verde); border-color: var(--verde); color: #fff; }
+    .mini { border: 1.5px solid var(--borde); background: none; color: var(--texto); border-radius: 10px; padding: 5px 9px; font: inherit; font-weight: 700; font-size: 12.5px; flex-shrink: 0; }
     .btn { display: block; width: 100%; border: 0; border-radius: 14px; padding: 13px; font: inherit; font-weight: 800; font-size: 15px; cursor: pointer; margin-top: 8px; background: var(--verde); color: #fff; }
     .btn.sec { background: transparent; border: 1.5px solid var(--borde); color: var(--texto); }
     .btn.ac { background: transparent; border: 1.5px solid var(--acento); color: var(--acento); }
@@ -45,6 +51,7 @@
   <div id="app"><div class="suave" style="text-align:center;margin-top:40vh">Abriendo la lista…</div></div>
   <div class="velo" id="velo" onclick="if (event.target === this) L.cerrar()"><div class="panel" id="panel"></div></div>
   <div class="toast" id="toast"></div>
+  <script src="js/tiendas.js"></script>
   <script src="js/lista.js"></script>
 </body>
 </html>

@@ -37,7 +37,7 @@ var L = (function () {
     var it = lista.items || [], marc = it.filter(function (x) { return x.on; }).length, yo = nombre();
     var html = '<h1>' + esc(lista.icono || '🛒') + ' ' + esc(lista.nombre) + '</h1><div class="suave chico">' + esc(yo) + ' · se actualiza solo' + (cola.length ? ' · ' + cola.length + ' por enviar' : '') + '</div>' +
       '<div class="vivo">' + (lista.cambio ? '● ' + esc(lista.cambio.txt) + ' · ' + hace(lista.cambio.cuando) : '') + '</div>' +
-      '<div class="caja" style="padding:12px 14px;margin-top:10px"><b>' + marc + ' de ' + it.length + ' en el carrito</b><div class="barra"><i style="width:' + (it.length ? Math.round(marc / it.length * 100) : 0) + '%"></i></div></div>';
+      '<div class="caja" style="padding:12px 14px;margin-top:10px"><b>' + marc + ' de ' + it.length + (lista.tipo === 'tiendas' ? ' comprados' : ' en el carrito') + '</b><div class="barra"><i style="width:' + (it.length ? Math.round(marc / it.length * 100) : 0) + '%"></i></div></div>';
     it.filter(function (x) { return x.consulta && !x.consulta.resp; }).forEach(function (x) {
       var mia = x.consulta.por === yo;
       html += '<div class="consulta"><b>📷 ' + (mia ? 'Preguntaste' : esc(x.consulta.por) + ' pregunta') + ': ¿este sirve?</b><div class="suave chico">' + esc(x.n) + ' · ' + esc(qty(x)) + '</div>' +
@@ -48,17 +48,44 @@ var L = (function () {
     it.filter(function (x) { return x.consulta && x.consulta.resp && x.consulta.por === yo; }).forEach(function (x) {
       html += '<div class="consulta" style="border-color:var(--borde)"><b>' + (x.consulta.resp.si ? '✓ Sí, llevalo' : '✗ No, dejalo') + '</b> <span class="suave chico">· ' + esc(x.consulta.resp.por) + ' sobre ' + esc(x.n) + '</span></div>';
     });
-    var g = {}; it.filter(function (x) { return !x.on; }).forEach(function (x) { var p = x.p || 'Otros'; (g[p] = g[p] || []).push(x); });
-    PASILLOS.forEach(function (p) { if (g[p]) html += '<div class="sec">' + IC[p] + ' ' + esc(p) + '</div><div class="caja">' + g[p].map(fila).join('') + '</div>'; });
+    var tienda = lista.tipo === 'tiendas';
+    if (tienda) {   // v2.10.4: lista de tiendas (por persona / sección / tienda)
+      var gastado = it.reduce(function (a, x) { return a + (x.on && x.pagado ? Number(x.pagado) : 0); }, 0);
+      if (gastado) html += '<div class="caja" style="padding:10px 14px;margin-top:8px;display:flex;justify-content:space-between"><span>Gastado hasta ahora</span><b>' + plata(gastado) + '</b></div>';
+      html += '<div class="vistas">' + [['persona', 'Por persona'], ['seccion', 'Por sección'], ['tienda', 'Por tienda']].map(function (v) { return '<button class="vista' + (vista === v[0] ? ' on' : '') + '" onclick="L.vista(\'' + v[0] + '\')">' + v[1] + '</button>'; }).join('') + '</div>';
+      gruposT(it.filter(function (x) { return !x.on && !x.enc; })).forEach(function (g) { html += '<div class="sec">' + g[2] + ' ' + esc(g[0]) + ' · ' + g[1].length + '</div><div class="caja">' + g[1].map(fila).join('') + '</div>'; });
+      // v2.10.5: encargos de otras personas (aparte)
+      var enc = {}, ordenE = []; it.filter(function (x) { return x.enc && !x.on; }).forEach(function (x) { if (!enc[x.enc]) { enc[x.enc] = []; ordenE.push(x.enc); } enc[x.enc].push(x); });
+      if (ordenE.length) html += '<div class="sec" style="margin-top:22px">📦 ENCARGOS</div>' + ordenE.map(function (n) { return '<div class="sec" style="margin-top:8px">📦 ' + esc(n) + ' · ' + enc[n].length + '</div><div class="caja">' + enc[n].map(fila).join('') + '</div>'; }).join('');
+    } else {
+      var g = {}; it.filter(function (x) { return !x.on; }).forEach(function (x) { var p = x.p || 'Otros'; (g[p] = g[p] || []).push(x); });
+      PASILLOS.forEach(function (p) { if (g[p]) html += '<div class="sec">' + IC[p] + ' ' + esc(p) + '</div><div class="caja">' + g[p].map(fila).join('') + '</div>'; });
+    }
     var en = it.filter(function (x) { return x.on; });
-    if (en.length) html += '<div class="sec">✓ En el carrito (' + en.length + ')</div><div class="caja">' + en.map(fila).join('') + '</div>';
-    if (lista.editable !== false) html += '<div class="agregar"><input class="txt" id="nuevo" placeholder="＋ Agregar algo…" onkeydown="if(event.key===\'Enter\')L.agregar()"><button class="btn" onclick="L.agregar()">Agregar</button></div>';
+    if (en.length) html += '<div class="sec">✓ ' + (tienda ? 'Comprado' : 'En el carrito') + ' (' + en.length + ')</div><div class="caja">' + en.map(fila).join('') + '</div>';
+    if (lista.editable !== false) html += '<div class="agregar"><input class="txt" id="nuevo" placeholder="' + (lista.tipo === 'tiendas' ? '＋ Ej. tenis talla 9 para ' + esc((lista.personas || [])[0] || 'Ana') : '＋ Agregar algo…') + '" onkeydown="if(event.key===\'Enter\')L.agregar()"><button class="btn" onclick="L.agregar()">Agregar</button></div>';
     var foco = document.activeElement && document.activeElement.id === 'nuevo', valor = foco ? $('nuevo').value : '';
     $('app').innerHTML = html;
     if (foco) { var n = $('nuevo'); n.value = valor; n.focus(); }
     pintarFotos();
   }
+  var vista = leer('lc-vista') || 'persona';
+  function plata(n) { var e = Math.floor(n), d = Math.round((n - e) * 100); return String(e).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (d ? ',' + ('0' + d).slice(-2) : ''); }
+  function gruposT(items) {
+    var g = {}, orden = [];
+    items.forEach(function (x) { var k = vista === 'persona' ? (x.para || 'Sin asignar') : vista === 'tienda' ? (x.tienda || 'Sin tienda') : (x.p || TIENDAS.seccionDe(x.n)); if (!g[k]) { g[k] = []; orden.push(k); } g[k].push(x); });
+    if (vista === 'seccion') orden = TIENDAS.SECCIONES.filter(function (k) { return g[k]; }).concat(orden.filter(function (k) { return TIENDAS.SECCIONES.indexOf(k) < 0; }));
+    else if (vista === 'persona') { var ps = (lista.personas || []).concat(['Todos']); orden.sort(function (a, b) { var ia = ps.indexOf(a), ib = ps.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); }); }
+    return orden.map(function (k) { return [k, g[k], vista === 'persona' ? (k === 'Todos' ? '👪' : '👤') : vista === 'tienda' ? '🏬' : (TIENDAS.IC[k] || '🛍')]; });
+  }
   function fila(x) {
+    if (lista.tipo === 'tiendas') {
+      var tags = TIENDAS.etiquetas(x, vista === 'persona'); if (vista !== 'seccion') tags.unshift((TIENDAS.IC[x.p] || '🛍') + ' ' + (x.p || TIENDAS.seccionDe(x.n))); if (x.enc) tags.unshift('📦 ' + x.enc);
+      var der = x.on && x.pagado ? '<span class="q" style="color:var(--verde)">' + plata(Number(x.pagado)) + '</span>' : x.on ? '<button class="mini" onclick="L.pagado(\'' + x.id + '\')">＋ $</button>' : x.max ? '<span class="q">≤ ' + plata(Number(x.max)) + '</span>' : '';
+      return '<div class="it' + (x.on ? ' on' : '') + '"><input type="checkbox"' + (x.on ? ' checked' : '') + ' onchange="L.marcar(\'' + x.id + '\',this.checked)" aria-label="' + esc(x.n) + '">' +
+        (x.foto ? '<button class="foto" onclick="L.ver(\'' + x.id + '\')"><img data-foto="' + esc(x.foto) + '" alt=""></button>' : '') +
+        '<button class="nom" onclick="L.ver(\'' + x.id + '\')"><b>' + esc(x.n) + '</b><span class="tgs">' + tags.map(function (t) { return '<span class="tg">' + esc(t) + '</span>'; }).join('') + '</span><span class="suave chico">' + [x.nota ? esc(x.nota) : '', x.estado === 'nohay' ? '<span style="color:var(--rojo)">✗ no hay</span>' : '', x.on && x.por ? esc(x.por) + ' lo compró' : ''].filter(String).join(' · ') + '</span></button>' + der + '</div>';
+    }
     return '<div class="it' + (x.on ? ' on' : '') + '"><input type="checkbox"' + (x.on ? ' checked' : '') + ' onchange="L.marcar(\'' + x.id + '\',this.checked)" aria-label="' + esc(x.n) + '">' +
       (x.foto ? '<button class="foto" onclick="L.ver(\'' + x.id + '\')"><img data-foto="' + esc(x.foto) + '" alt=""></button>' : '') +
       '<button class="nom" onclick="L.ver(\'' + x.id + '\')"><b>' + esc(x.n) + '</b><span class="suave chico">' + [x.nota ? esc(x.nota) : '', x.estado === 'nohay' ? '<span style="color:var(--rojo)">✗ no hay</span>' : '', x.on && x.por ? esc(x.por) + ' lo marcó' : ''].filter(String).join(' · ') + '</span></button>' +
@@ -77,15 +104,17 @@ var L = (function () {
     var x = item(id); if (!x) return;
     abrir('<div style="display:flex;justify-content:space-between;gap:10px"><h1>' + esc(x.n) + '</h1><b>' + esc(qty(x)) + '</b></div>' + (x.nota ? '<div class="suave">“' + esc(x.nota) + '”</div>' : '') +
       (x.foto ? '<img class="grande" data-foto="' + esc(x.foto) + '" alt="">' : '') +
-      '<button class="btn" onclick="L.cerrar();L.marcar(\'' + id + '\',true)">✓ Este es, va al carrito</button>' +
+      (lista.tipo === 'tiendas' && TIENDAS.etiquetas(x).length ? '<div class="tgs" style="margin:6px 0">' + TIENDAS.etiquetas(x).map(function (t) { return '<span class="tg">' + esc(t) + '</span>'; }).join('') + '</div>' : '') +
+      '<button class="btn" onclick="L.cerrar();L.marcar(\'' + id + '\',true)">' + (lista.tipo === 'tiendas' ? '✓ Lo compré' : '✓ Este es, va al carrito') + '</button>' +
       '<button class="btn ac" onclick="L.preguntar(\'' + id + '\')">📷 No está igual · ¿este sirve?</button>' +
       '<button class="btn sec" onclick="L.cerrar();L.op({t:\'nohay\',item:\'' + id + '\'})">✗ No hay</button><button class="btn sec" onclick="L.cerrar()">Cerrar</button>');
   }
   function aplicar(op) {
     var x = op.item ? item(op.item) : null, yo = nombre();
-    if (op.t === 'marcar' && x) { x.on = !!op.on; x.por = op.on ? yo : ''; if (op.on) x.estado = ''; }
+    if (op.t === 'marcar' && x) { x.on = !!op.on; x.por = op.on ? yo : ''; if (op.on) x.estado = ''; if (!op.on) x.pagado = ''; }
     else if (op.t === 'nohay' && x) { x.estado = 'nohay'; x.on = false; }
     else if (op.t === 'agregar' && op.datos) lista.items.push(Object.assign({ id: 'tmp' + Date.now(), on: false }, op.datos));
+    else if (op.t === 'pagado' && x) { x.pagado = Number(op.monto) > 0 ? Number(op.monto) : ''; if (x.pagado) x.on = true; }
     else if (op.t === 'consulta' && x) x.consulta = { foto: op.foto, msg: op.msg, por: yo, cuando: new Date().toISOString(), resp: null };
     else if (op.t === 'responder' && x && x.consulta) { x.consulta.resp = { si: op.si, por: yo }; if (op.si) x.on = true; }
   }
@@ -117,7 +146,17 @@ var L = (function () {
   }
   function ciclo() { clearTimeout(timer); timer = setTimeout(function () { if (!document.hidden) refrescar(false); ciclo(); }, 4000); }
   function marcar(id, on) { if (navigator.vibrate && on) { try { navigator.vibrate(15); } catch (e) { /* nada */ } } op({ t: 'marcar', item: id, on: !!on }); }
-  function agregar() { var n = $('nuevo').value.trim(); if (!n) return; op({ t: 'agregar', datos: { n: n.charAt(0).toUpperCase() + n.slice(1), q: '', u: '', p: 'Otros' } }); $('nuevo').value = ''; }
+  function agregar() {
+    var n = $('nuevo').value.trim(); if (!n) return;
+    op({ t: 'agregar', datos: lista.tipo === 'tiendas' ? TIENDAS.leer(n, lista.personas) : { n: n.charAt(0).toUpperCase() + n.slice(1), q: '', u: '', p: 'Otros' } }); $('nuevo').value = '';
+  }
+  function cambiarVista(v) { vista = v; guardar('lc-vista', v); pintar(); }
+  function pagado(id) {
+    var x = item(id); if (!x) return;
+    abrir('<h1>¿Cuánto pagaste?</h1><div class="suave">' + esc(x.n) + ' · opcional</div><input class="txt" id="pg" inputmode="decimal" placeholder="Monto" value="' + (x.pagado || '') + '"><button class="btn" onclick="L.guardarPagado(\'' + id + '\')">Guardar</button><button class="btn sec" onclick="L.cerrar()">Cancelar</button>');
+    setTimeout(function () { var e = $('pg'); if (e) e.focus(); }, 100);
+  }
+  function guardarPagado(id) { var t = String($('pg').value || '').replace(/\./g, '').replace(',', '.'); var m = Number(t) || 0; cerrar(); op({ t: 'pagado', item: id, monto: m }); }
   function responder(id, si) { op({ t: 'responder', item: id, si: !!si }); }
   function achicar(f) {
     return new Promise(function (ok, mal) {
@@ -157,5 +196,5 @@ var L = (function () {
   document.addEventListener('visibilitychange', function () { if (!document.hidden && nombre()) refrescar(false); });
   window.addEventListener('online', function () { enviar(); });
   arrancar();
-  return { guardarNombre: guardarNombre, marcar: marcar, ver: ver, cerrar: cerrar, op: op, agregar: agregar, responder: responder, preguntar: preguntar, enviarPregunta: enviarPregunta };
+  return { vista: cambiarVista, pagado: pagado, guardarPagado: guardarPagado, guardarNombre: guardarNombre, marcar: marcar, ver: ver, cerrar: cerrar, op: op, agregar: agregar, responder: responder, preguntar: preguntar, enviarPregunta: enviarPregunta };
 })();

@@ -217,7 +217,8 @@ var PDFPrestamo = (function () {
 if (typeof module !== 'undefined') module.exports = PDFPrestamo;
 
 /* v2.10.0 · PDF del resumen de un viaje (pdf-lib). PDFViaje.construir(PDFLib, d) → Promise<Uint8Array>
- * d = { nombre, desde, hasta, moneda, r (C.viaje), cats:[[cat, monto]], tarj:[[nombre, monto]], prev:{nombre, desde, dias, porDia, moneda}|null, compras:[[fecha, comercio, cat, tarjeta, monto]] } */
+ * d = { nombre, desde, hasta, moneda, r (C.viaje), cats:[[cat, monto]], tarj:[[nombre, monto]], prev:{nombre, desde, dias, porDia, moneda}|null, compras:[[fecha, comercio, cat, tarjeta, monto]] }
+ * v2.10.6: personas:[{nombre, monto, tarjetas:[{nombre, monto, compras:[[fecha, comercio, cat, monto]]}]}] → resumen por persona y tarjeta + una página por tarjeta · solo:'Ana' (PDF de una persona) */
 var PDFViaje = (function () {
   'use strict';
   var MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
@@ -240,17 +241,29 @@ var PDFViaje = (function () {
         function fila(a, b, fu, col) { espacio(18); y -= 15; t(a, M, y, 10.5, R); t(b, W - M, y, 10.5, fu || B, col, 'der'); }
         pagina();
         pg.drawRectangle({ x: 0, y: H - 110, width: W, height: 110, color: NEGRO });
-        t('RESUMEN DEL VIAJE', M, H - 42, 10, B, AMARILLO);
+        t(d.solo ? 'RESUMEN DEL VIAJE · SOLO ' + String(d.solo).toUpperCase() : 'RESUMEN DEL VIAJE', M, H - 42, 10, B, AMARILLO);
         t(corta(d.nombre, B, 24, W - 2 * M), M, H - 72, 24, B, BLANCO);
         t(fecha(d.desde) + ' al ' + fecha(d.hasta) + ' · ' + r.diasTotal + ' días', M, H - 94, 11, R, BLANCO);
         y = H - 140;
-        t('Costo total', M, y, 10, R, GRIS); t('Límite ' + dinero(r.limite, mon), W - M, y, 10, R, GRIS, 'der');
-        y -= 26; t(dinero(r.gastado, mon), M, y, 24, B); t(r.disponible < 0 ? dinero(-r.disponible, mon) + ' arriba' : dinero(r.disponible, mon) + ' debajo', W - M, y, 13, B, r.disponible < 0 ? ROJO : VERDE, 'der');
-        y -= 8;
-        fila('Por día', dinero(r.porDiaTotal, mon));
-        if (r.antes > 0.004) { fila('Antes del viaje (vuelos, hotel…)', dinero(r.antes, mon), R); fila('Durante el viaje', dinero(r.durante, mon), R); }
+        if (d.solo) {
+          t('Gastado por ' + d.solo, M, y, 10, R, GRIS); t('Costo del viaje (todos) ' + dinero(d.totalViaje, mon), W - M, y, 10, R, GRIS, 'der');
+          y -= 26; t(dinero(r.gastado, mon), M, y, 24, B); y -= 8;
+          fila('Por día', dinero(r.porDiaTotal, mon));
+        } else {
+          t('Costo total', M, y, 10, R, GRIS); t('Límite ' + dinero(r.limite, mon), W - M, y, 10, R, GRIS, 'der');
+          y -= 26; t(dinero(r.gastado, mon), M, y, 24, B); t(r.disponible < 0 ? dinero(-r.disponible, mon) + ' arriba' : dinero(r.disponible, mon) + ' debajo', W - M, y, 13, B, r.disponible < 0 ? ROJO : VERDE, 'der');
+          y -= 8;
+          fila('Por día', dinero(r.porDiaTotal, mon));
+        }
+        if (!d.solo && r.antes > 0.004) { fila('Antes del viaje (vuelos, hotel…)', dinero(r.antes, mon), R); fila('Durante el viaje', dinero(r.durante, mon), R); }
         if (d.cats.length) { titulo('Por categoría'); d.cats.forEach(function (c) { var pr = r.presupuesto && r.presupuesto[c[0]]; fila(c[0] + (pr ? '  (presupuesto ' + dinero(pr.limite, mon) + ')' : ''), dinero(c[1], mon), B, pr && c[1] > pr.limite ? ROJO : null); }); }
-        if (d.tarj.length) { titulo('Por tarjeta'); d.tarj.forEach(function (c) { fila(c[0], dinero(c[1], mon)); }); }
+        if (d.personas && d.personas.length) {
+          titulo(d.solo ? 'Por tarjeta' : 'Por persona y tarjeta');
+          d.personas.forEach(function (p) {
+            if (!d.solo) fila(p.nombre + ' · ' + p.tarjetas.reduce(function (a, x) { return a + x.compras.length; }, 0) + ' compras', dinero(p.monto, mon));
+            p.tarjetas.forEach(function (x) { espacio(16); y -= 14; t(corta(x.nombre, R, 9.5, 330), M + (d.solo ? 0 : 16), y, 9.5, R, d.solo ? NEGRO : GRIS); t(dinero(x.monto, mon), W - M, y, 9.5, d.solo ? B : R, d.solo ? null : GRIS, 'der'); });
+          });
+        } else if (d.tarj.length) { titulo('Por tarjeta'); d.tarj.forEach(function (c) { fila(c[0], dinero(c[1], mon)); }); }
         if (d.prev) { titulo('Comparado con'); fila(d.prev.nombre + ' · ' + fecha(d.prev.desde) + ' (' + d.prev.dias + ' días)', dinero(d.prev.porDia, d.prev.moneda) + ' por día', R); }
         if (d.compras.length) {
           titulo('Compras (' + d.compras.length + ')');
@@ -259,6 +272,25 @@ var PDFViaje = (function () {
             t(c[0], M, y, 9, R, GRIS); t(corta(c[1], R, 9.5, 210), M + 70, y, 9.5, R); t(corta(c[2], R, 9, 70), M + 290, y, 9, R, GRIS); t(corta(c[3], R, 9, 110), M + 362, y, 9, R, GRIS); t(dinero(c[4], mon), W - M, y, 9.5, B, null, 'der');
           });
         }
+        // v2.10.6: una página por tarjeta (para comparar con el estado de cuenta de cada una)
+        (d.personas || []).forEach(function (p) {
+          p.tarjetas.forEach(function (x) {
+            if (!x.compras.length) return;
+            pagina();
+            pg.drawRectangle({ x: 0, y: H - 86, width: W, height: 86, color: NEGRO });
+            t('PÁGINA DE UNA TARJETA · ' + d.nombre.toUpperCase(), M, H - 36, 9, B, AMARILLO);
+            t(corta(p.nombre + ' · ' + x.nombre, B, 18, W - 2 * M), M, H - 62, 18, B, BLANCO);
+            y = H - 112;
+            t(x.compras.length + ' compra' + (x.compras.length === 1 ? '' : 's'), M, y, 11, R, GRIS); t(dinero(x.monto, mon), W - M, y, 16, B, null, 'der');
+            y -= 10; pg.drawLine({ start: { x: M, y: y }, end: { x: W - M, y: y }, thickness: 0.8, color: LINEA });
+            x.compras.forEach(function (c) {
+              espacio(16); y -= 14;
+              t(c[0], M, y, 9, R, GRIS); t(corta(c[1], R, 9.5, 280), M + 70, y, 9.5, R); t(corta(c[2], R, 9, 90), M + 360, y, 9, R, GRIS); t(dinero(c[3], mon), W - M, y, 9.5, B, null, 'der');
+            });
+            espacio(24); y -= 8; pg.drawLine({ start: { x: M, y: y }, end: { x: W - M, y: y }, thickness: 0.8, color: LINEA });
+            y -= 16; t('Total de la tarjeta', M, y, 10.5, B); t(dinero(x.monto, mon), W - M, y, 10.5, B, null, 'der');
+          });
+        });
         var n = doc.getPageCount();
         doc.getPages().forEach(function (p, i) { p.drawText(limpio('Finanzas · ' + d.nombre + ' · página ' + (i + 1) + ' de ' + n), { x: M, y: 24, size: 8, font: R, color: GRIS }); });
         return doc.save();

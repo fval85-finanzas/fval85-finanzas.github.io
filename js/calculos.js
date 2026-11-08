@@ -117,7 +117,7 @@ var Calc = (function () {
       r.movimientos.push(m);
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
       if (m.tipo === 'Ingreso') { if (!esCobro(m)) r.ingresos[mon] += m.monto; return; }
-      if (m.tipo !== 'Gasto' || m.para) return;     // v2.2: lo comprado para otra persona no es gasto mío
+      if (m.tipo !== 'Gasto' || m.para || esFamilia(m)) return;     // v2.10.6: tarjetas de la familia solo cuentan en viajes · v2.2: lo comprado para otra persona no es gasto mío
       r.gastos[mon] += m.monto;
       if (!m.categoria) r.porRevisar++;
       var cat = m.categoria || 'Sin categoría';
@@ -156,7 +156,7 @@ var Calc = (function () {
         if (s.asignadoAuto) asignado = gastado;
       } else {
         d.movimientos.forEach(function (m) {
-          if (m.sobre === s.nombre && m.moneda === s.moneda && m.tipo === 'Gasto' && enMes(m.fecha, mes)) gastado += m.monto;
+          if (m.sobre === s.nombre && m.moneda === s.moneda && m.tipo === 'Gasto' && !esFamilia(m) && enMes(m.fecha, mes)) gastado += m.monto;
         });
       }
       var pct = asignado ? gastado / asignado : null;
@@ -195,6 +195,7 @@ var Calc = (function () {
   function sentidoSobre(d, m) {
     if (esSacarMeter(m) || esCompraTarjeta(d, m)) return null;   // v2.8.0
     if (m.para && m.tipo !== 'Ingreso') return null;   // v2.2: comprado para otra persona: no toca sobres
+    if (esFamilia(m)) return null;   // v2.10.6
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
     if (m.tipo === 'Inversión' || m.tipo === 'Pago de tarjeta' || m.tipo === 'Gasto') return 'sale';
     if (m.tipo === 'Transferencia') return entraTransferencia(m) ? 'entra' : 'sale';
@@ -236,7 +237,7 @@ var Calc = (function () {
     else (d.movimientos || []).forEach(function (m) {   // sin cuenta de ahorro en la hoja: como antes, por el tipo
       var s = sentidoSobre(d, m); if (s) neto[m.fila] = (s === 'entra' ? 1 : -1) * (m.monto || 0);
     });
-    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && !esSacarMeter(m) && !esCompraTarjeta(d, m) && !(m.para && m.tipo !== 'Ingreso') && Math.abs(neto[m.fila] || 0) > 0.005; })
+    var movs = (d.movimientos || []).filter(function (m) { return m.fecha && soloFecha(new Date(m.fecha)) >= desde && !esSacarMeter(m) && !esCompraTarjeta(d, m) && !(m.para && m.tipo !== 'Ingreso') && !esFamilia(m) && Math.abs(neto[m.fila] || 0) > 0.005; })
       .slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
     movs.forEach(function (m) {
       var n = neto[m.fila], sentido = n > 0 ? 'entra' : 'sale', total = Math.abs(n);
@@ -364,6 +365,14 @@ var Calc = (function () {
     for (var i = 0; i < PALABRAS_VIAJE.length; i++) if (PALABRAS_VIAJE[i][1].test(m.comercio || '')) return PALABRAS_VIAJE[i][0];
     return CAT_A_VIAJE[m.categoria] || 'Otros';
   }
+  /** v2.10.6 · compras con tarjetas de la familia (esposa, hijos…): el correo llega reenviado y se anotan como "Familia ••1234".
+   *  No tocan cuentas, sobres ni el resumen del mes: solo cuentan en los viajes. */
+  var SIN_FAMILIA = '-Familia';
+  function esFamilia(m) { return !!m && /^familia\b/i.test(String(m.cuenta || '').trim()); }
+  function familia4(m) { var x = esFamilia(m) && String(m.cuenta).match(/(\d{4})\s*$/); return x ? x[1] : ''; }
+  function familiaPrefs(d) { return (d && (d.familia || (d.ajustes && d.ajustes.prefs && d.ajustes.prefs.familia))) || {}; }
+  /** Persona dueña de una tarjeta de la familia ('' si no se sabe) */
+  function personaFamilia(d, u4) { var x = familiaPrefs(d)[u4]; return (x && String(x.persona || '').trim()) || 'Familia'; }
   function esEfectivo(c) { return !c || normNom(c) === 'efectivo'; }
   function enViaje(v, m) {
     if (!m.fecha || m.viaje === 'Fuera' || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero')) return false;
@@ -373,6 +382,7 @@ var Calc = (function () {
     if (f < ini || f >= fin) return false;
     if (mk.mas) return true;
     var t = v.tarjetas || [];
+    if (esFamilia(m)) return t.indexOf(SIN_FAMILIA) < 0;   // v2.10.6: las tarjetas de la familia entran solas (salvo que el viaje diga que no)
     return t.indexOf(m.cuenta) >= 0 || (t.indexOf('Efectivo') >= 0 && esEfectivo(m.cuenta));
   }
   /** Montos en la moneda del viaje (los ₡ se pasan a $ con el tipo de cambio, y al revés). */
@@ -385,16 +395,18 @@ var Calc = (function () {
     var ini = soloFecha(new Date(v.desde)), fin = soloFecha(new Date(v.hasta)), h = soloFecha(hoy);
     var compras = (d.movimientos || []).filter(function (m) { return enViaje(v, m); }).map(function (m) {
       var f = new Date(m.fecha);
-      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc), antes: f < ini, cuenta: esEfectivo(m.cuenta) ? 'Efectivo' : m.cuenta };
+      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc), antes: f < ini, cuenta: esEfectivo(m.cuenta) ? 'Efectivo' : m.cuenta, familia: familia4(m), persona: familia4(m) ? personaFamilia(d, familia4(m)) : '' };
     }).sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
     var gastado = compras.reduce(function (s, c) { return s + c.monto; }, 0);
     var antes = compras.filter(function (c) { return c.antes; }).reduce(function (s, c) { return s + c.monto; }, 0);
-    var porCategoria = {}, porTarjeta = {}, ayer = 0, porCatAyer = {};
+    var porCategoria = {}, porTarjeta = {}, porPersona = {}, ayer = 0, porCatAyer = {};
     CATS_VIAJE.forEach(function (c) { porCategoria[c] = 0; });
     var dAyer = new Date(h.getFullYear(), h.getMonth(), h.getDate() - 1);
     compras.forEach(function (c) {
       porCategoria[c.categoria] += c.monto;
       var k = c.cuenta; porTarjeta[k] = porTarjeta[k] || { monto: 0, n: 0 }; porTarjeta[k].monto += c.monto; porTarjeta[k].n++;
+      var pp = c.persona; porPersona[pp] = porPersona[pp] || { persona: pp, monto: 0, n: 0, tarjetas: {} }; porPersona[pp].monto += c.monto; porPersona[pp].n++;
+      var tt = porPersona[pp].tarjetas; tt[k] = tt[k] || { monto: 0, n: 0, familia: c.familia }; tt[k].monto += c.monto; tt[k].n++;
       if (soloFecha(new Date(c.mov.fecha)).getTime() === dAyer.getTime()) { ayer += c.monto; porCatAyer[c.categoria] = (porCatAyer[c.categoria] || 0) + c.monto; }
     });
     // efectivo del viaje: retiros de cajero ligados (no son gasto) − lo gastado en efectivo
@@ -409,7 +421,7 @@ var Calc = (function () {
     var limite = v.limite || 0, disponible = limite - gastado;
     return {
       compras: compras, gastado: gastado, limite: limite, disponible: disponible, pct: limite ? gastado / limite : 0,
-      antes: antes, durante: gastado - antes, porTarjeta: porTarjeta, ayer: ayer, porCatAyer: porCatAyer,
+      antes: antes, durante: gastado - antes, porTarjeta: porTarjeta, porPersona: porPersona, hayFamilia: compras.some(function (c) { return !!c.familia; }), ayer: ayer, porCatAyer: porCatAyer,
       efectivo: { retiros: retiros, retirado: totRet, gastado: gastEf, queda: totRet - gastEf },
       presupuesto: hayPres ? presupuesto : null,
       diasTotal: total, diasRestantes: restantes, diaActual: h < ini ? 0 : Math.min(total, diasEntre(ini, h) + 1), porDia: restantes ? Math.max(0, disponible) / restantes : 0,
@@ -524,7 +536,7 @@ var Calc = (function () {
   }
   /** Compras hechas para otras personas que todavía no te pagaron, y posibles pagos (ingresos por el mismo monto). */
   function meDeben(d) {
-    var pend = (d.movimientos || []).filter(function (m) { return m.para && m.tipo !== 'Ingreso' && !m.cobro; })
+    var pend = (d.movimientos || []).filter(function (m) { return m.para && m.tipo !== 'Ingreso' && !m.cobro && !esFamilia(m); })
       .sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
     var total = { CRC: 0, USD: 0 }, personas = {};
     pend.forEach(function (m) {
@@ -634,6 +646,7 @@ var Calc = (function () {
   }
   /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
   function efectoCuenta(d, m, o) {
+    if (esFamilia(m)) return null;   // v2.10.6: tarjeta de la familia (solo viajes)
     if (tarjetaDesconocida(d, m)) return null;   // v2.9.0: hasta saber de quién es la tarjeta, no toca ninguna cuenta
     if (m.cuenta && normNom(m.cuenta) === 'efectivo') return null;   // v2.10.0: gasto en efectivo (ya salió del banco al retirar)
     var cta = m.cuenta ? (d.cuentas || []).filter(function (c) { return normNom(c.nombre) === normNom(m.cuenta); })[0] : null;
@@ -859,7 +872,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
