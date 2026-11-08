@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.10.0';
+  var VERSION_WEB = '2.10.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -3642,6 +3642,7 @@ var App = (function () {
     h += grupo('co', '📧', '#5B8DEF', 'Correos de los bancos', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE',
       opcion('recargar', 'Revisar correos ahora', ult ? 'Última revisión: ' + fechaCorta(ult.toISOString()) + ' ' + hora(ult.toISOString()) : 'Todavía no se ha revisado', '', 'App.revisarCorreos(this)') +
       opcion('sobre', 'Bancos que se leen', esc(AJ.bancos.join(', ') || 'Ninguno') + ' + SINPE Móvil BCR + recibos del préstamo', '') +
+      opcion('correo', 'Sacar de la bandeja lo que la app ya leyó', 'Quedan leídos en Gmail → Finanzas › Procesado. Los que no entiende siguen en la bandeja.', interruptor('aj-bandeja', PREFS().bandejaLimpia !== false, 'App.bandejaLimpia(this.checked)', 'Sacar de la bandeja lo leído')) +
       '<div class="suave chico" style="padding:0 16px 14px">Para agregar un banco, escribí su correo en la pestaña <b>Config</b> de la hoja.</div>');
     h += grupo('sa', '💰', '#3DD68C', 'Salario', resumenSalario(), opcion('sobre', 'Tu salario', 'Monto, cuenta y fechas de pago (bisemanal, quincenal…)', '<span class="flecha">›</span>', 'App.formSalario()'));
     h += grupoAvisos();
@@ -4249,6 +4250,7 @@ var App = (function () {
     var t = l.length > 1 ? l.slice(0, -1).join(', ') + ' y ' + l[l.length - 1] : l[0];
     return t.charAt(0).toUpperCase() + t.slice(1);
   }
+  function bandejaLimpia(on) { guardarPrefs({ bandejaLimpia: !!on }, on ? 'Bandeja limpia: encendida' : 'Bandeja limpia: apagada'); toast(on ? '📥 Lo que la app lea sale de la bandeja de entrada' : 'Los correos leídos se quedan en la bandeja', 2500); }
   function avisoDiasPago() { var a = avCfg(); a.diasPago = val('av-dp').split(',').map(Number); guardarPrefs({ avisos: a }, 'Aviso de pago: ' + textoDiasPago(a.diasPago)); pintar(); }
   function avisoSilencio() { var a = avCfg(); a.silencio = { d: Number(val('av-sd')), h: Number(val('av-sh')) }; guardarPrefs({ avisos: a }, 'Avisos: horas de silencio'); }
   function avisoCorreo(on) { var a = avCfg(); a.correo.activo = !!on; a.urlApp = location.href.split(/[?#]/)[0]; guardarPrefs({ avisos: a }, 'Resumen por correo ' + (on ? 'encendido' : 'apagado')); pintar(); }
@@ -6371,7 +6373,7 @@ var App = (function () {
     recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     salarioLlego: salarioLlego, formSalarioOtro: formSalarioOtro, salarioManana: salarioManana, formSalario: formSalario, salPrev: salPrev, guardarSalario: guardarSalario, repCero: repCero,
-    rvAjena: rvAjena, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
+    rvAjena: rvAjena, bandejaLimpia: bandejaLimpia, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
     formActualizar: formActualizar, copiarCodigo: copiarCodigo, volverAnterior: volverAnterior, actualizarApp: actualizarApp,
     formNuevaLista: formNuevaLista, nlIcono: nlIcono, crearListaNueva: crearListaNueva, crearConBase: crearConBase, abrirLista: abrirLista, modoLista: modoLista, marcarItem: marcarItem,
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,

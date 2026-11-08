@@ -1831,10 +1831,12 @@ function leerCorreos_(guardar) {
       escribirFila_(mov.hoja, n, mov.cols, fila);
     }
   }
+  var hilosOk = {}, hilosMal = {};
   function marcar(x, ok) {
     if (!guardar) return;
-    if (ok) { procesado.addToThread(x.hilo); revisar.removeFromThread(x.hilo); }
-    else revisar.addToThread(x.hilo);
+    var id = x.hilo.getId ? x.hilo.getId() : null;
+    if (ok) { procesado.addToThread(x.hilo); revisar.removeFromThread(x.hilo); if (id) hilosOk[id] = x.hilo; }
+    else { revisar.addToThread(x.hilo); if (id) hilosMal[id] = true; }
   }
 
   // ---- Bancos de la pestaña Config (compras con tarjeta, pagos de servicio…) ----
@@ -1926,6 +1928,13 @@ function leerCorreos_(guardar) {
     marcar(x, true);
   });
 
+  // v2.10.1: bandeja limpia → lo leído sale de la bandeja de entrada y queda leído (lo que no entendió se queda)
+  if (guardar && (prefs_().bandejaLimpia !== false)) {
+    Object.keys(hilosOk).forEach(function (id) {
+      if (hilosMal[id]) return;
+      try { hilosOk[id].markRead(); hilosOk[id].moveToArchive(); resumen.archivados = (resumen.archivados || 0) + 1; } catch (e) { console.log('Archivar: ' + e); }
+    });
+  }
   return resumen;
 }
 
@@ -1940,6 +1949,7 @@ function procesarCorreos() {
     if (r.compras + r.pagos > 0) { try { tareasDespuesDeLeer_(); } catch (e) { console.log('Después de leer: ' + e); } }
     // La próxima vez revisa desde 10 min antes (por si un correo llegó tarde; no se duplica)
     PropertiesService.getScriptProperties().setProperty('ULTIMA_REVISION', String(inicio - 10 * 60 * 1000));
+    try { limpiarBandejaVieja_(); } catch (e) { console.log('Bandeja: ' + e); }
     var msg = 'Movimientos nuevos: ' + r.compras + ' · Pagos del préstamo: ' + r.pagos +
               ' · Repetidos ignorados: ' + r.duplicados + ' · Para revisar: ' + r.revisar;
     console.log(msg);
@@ -2017,6 +2027,23 @@ function desactivarAutomatico() {
 /** v2.9.0: cuántos correos se saltaron por tarjeta "que no es mía" ({ '1234': 3 }) */
 function ajenasSaltadas_() { try { return JSON.parse(props_().getProperty('AJENAS_SALTADAS') || '{}'); } catch (e) { return {}; } }
 
+/** v2.10.1 · Una sola vez (y hasta terminar): los correos ya procesados que siguen en la bandeja se archivan y quedan leídos. */
+function limpiarBandejaVieja_() {
+  var p = PropertiesService.getScriptProperties();
+  if (p.getProperty('BANDEJA_LIMPIA_V1') === 'si' || prefs_().bandejaLimpia === false) return 0;
+  var q = 'in:inbox label:' + ETIQUETA_PROCESADO.toLowerCase().replace(/[\/ ]/g, '-') + ' -label:' + ETIQUETA_REVISAR.toLowerCase().replace(/[\/ ]/g, '-');
+  var total = 0;
+  for (var vuelta = 0; vuelta < 5; vuelta++) {
+    var hilos = GmailApp.search(q, 0, 100);
+    if (!hilos.length) break;
+    GmailApp.markThreadsRead(hilos); GmailApp.moveThreadsToArchive(hilos);
+    total += hilos.length;
+    if (hilos.length < 100) break;
+  }
+  if (GmailApp.search(q, 0, 1).length === 0) p.setProperty('BANDEJA_LIMPIA_V1', 'si');
+  return total;
+}
+
 
 // =====================================================================
 // Ajustes
@@ -2028,7 +2055,7 @@ function ajenasSaltadas_() { try { return JSON.parse(props_().getProperty('AJENA
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.10.0';
+var VERSION_APP = '2.10.1';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
