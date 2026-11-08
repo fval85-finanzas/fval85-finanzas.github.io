@@ -2160,7 +2160,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.10.6';
+var VERSION_APP = '2.10.8';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -3055,7 +3055,7 @@ var Calc = (function () {
       r.movimientos.push(m);
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
       if (m.tipo === 'Ingreso') { if (!esCobro(m)) r.ingresos[mon] += m.monto; return; }
-      if (m.tipo !== 'Gasto' || m.para || esFamilia(m)) return;     // v2.10.6: tarjetas de la familia solo cuentan en viajes · v2.2: lo comprado para otra persona no es gasto mío
+      if (m.tipo !== 'Gasto' || m.para || esFamilia(m) || efectivoPropioViaje(m)) return;     // v2.10.6: tarjetas de la familia solo cuentan en viajes · v2.2: lo comprado para otra persona no es gasto mío
       r.gastos[mon] += m.monto;
       if (!m.categoria) r.porRevisar++;
       var cat = m.categoria || 'Sin categoría';
@@ -3134,6 +3134,7 @@ var Calc = (function () {
     if (esSacarMeter(m) || esCompraTarjeta(d, m)) return null;   // v2.8.0
     if (m.para && m.tipo !== 'Ingreso') return null;   // v2.2: comprado para otra persona: no toca sobres
     if (esFamilia(m)) return null;   // v2.10.6
+    if (efectivoPropioViaje(m)) return null;   // v2.10.7
     if (m.tipo === 'Ingreso' || m.tipo === 'Retiro de fondo') return 'entra';
     if (m.tipo === 'Inversión' || m.tipo === 'Pago de tarjeta' || m.tipo === 'Gasto') return 'sale';
     if (m.tipo === 'Transferencia') return entraTransferencia(m) ? 'entra' : 'sale';
@@ -3311,6 +3312,8 @@ var Calc = (function () {
   function familiaPrefs(d) { return (d && (d.familia || (d.ajustes && d.ajustes.prefs && d.ajustes.prefs.familia))) || {}; }
   /** Persona dueña de una tarjeta de la familia ('' si no se sabe) */
   function personaFamilia(d, u4) { var x = familiaPrefs(d)[u4]; return (x && String(x.persona || '').trim()) || 'Familia'; }
+  /** v2.10.7: efectivo que ya tenías y llevás al viaje (no salió de ninguna cuenta): no es gasto ni toca sobres */
+  function efectivoPropioViaje(m) { return !!m && marcaViaje(m).efectivo && normNom(m.cuenta || '') === 'efectivo'; }
   function esEfectivo(c) { return !c || normNom(c) === 'efectivo'; }
   function enViaje(v, m) {
     if (!m.fecha || m.viaje === 'Fuera' || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero')) return false;
@@ -3810,7 +3813,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

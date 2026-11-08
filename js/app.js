@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.10.6';
+  var VERSION_WEB = '2.10.8';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -2714,8 +2714,10 @@ var App = (function () {
     if ((v.tarjetas || []).indexOf('Efectivo') >= 0 || r.efectivo.retiros.length) {
       var ef = r.efectivo;
       h += '<div class="caja" style="gap:4px"><div class="fila"><div><div class="suave chico">💵 Te queda en efectivo</div><b style="font-size:22px" class="' + (ef.queda < -0.004 ? 'rojo' : '') + '">' + din(ef.queda, mon) + '</b></div></div>' +
-        '<div class="fila chico"><span class="suave">🏧 Retiros en cajero</span><span>' + din(ef.retirado, mon) + '</span></div><div class="fila chico"><span class="suave">− Gastado en efectivo</span><span>' + din(ef.gastado, mon) + '</span></div>' +
-        '<div class="dos" style="margin-top:8px"><button class="btn chico" onclick="App.formCompraManual(' + v.fila + ',\'Efectivo\')">＋ Gasto en efectivo</button><button class="btn sec chico" onclick="App.formRetiroViaje(' + v.fila + ')">🏧 Retiro de cajero</button></div></div>';
+        '<div class="fila chico"><span class="suave">🏧 Efectivo llevado y retiros</span><span>' + din(ef.retirado, mon) + '</span></div>' +
+        ef.retiros.map(function (x) { return '<button class="fila chico vj-ret" onclick="App.formRetiroQuitar(' + v.fila + ',' + x.mov.fila + ')"><span class="suave">· ' + esc(fechaCorta(x.mov.fecha).replace(/ \d{4}$/, '') + ' · ' + (nombreBonito(x.mov.comercio) || 'Retiro')) + ' <span style="color:var(--acento)">›</span></span><span class="suave">' + din(x.monto, mon) + '</span></button>'; }).join('') +
+        '<div class="fila chico"><span class="suave">− Gastado en efectivo</span><span>' + din(ef.gastado, mon) + '</span></div>' +
+        '<div class="dos" style="margin-top:8px"><button class="btn chico" onclick="App.formCompraManual(' + v.fila + ',\'Efectivo\')">＋ Gasto en efectivo</button><button class="btn sec chico" onclick="App.formRetiroViaje(' + v.fila + ')">＋ Efectivo / retiro</button></div></div>';
     }
     // compras con filtro por tarjeta
     var conCompras = fuentes.filter(function (k) { return r.porTarjeta[k]; });
@@ -2831,14 +2833,15 @@ var App = (function () {
     var v = viajePorFila(fila), ini = new Date(new Date(v.desde).getTime() - 3 * 86400000), fin = new Date(new Date(v.hasta).getTime() + 86400000);
     var cand = D.movimientos.filter(function (m) { var f = new Date(m.fecha); return m.fecha && m.fila > 0 && f >= ini && f < fin && !m.viaje && (m.tipo === 'Gasto' || m.tipo === 'Transferencia') && /RETIRO|CAJERO|ATM|CASH|EFECTIVO/i.test((m.comercio || '') + ' ' + (m.nota || '')); });
     var ctas = cuentasAhorro();
-    abrir('<div class="suave chico">✈ ' + esc(v.nombre) + '</div><h2>🏧 Retiro de cajero</h2><div class="suave">El retiro no es un gasto del viaje: pasa a efectivo. Lo que gastes en efectivo sí cuenta.</div>' +
+    abrir('<div class="suave chico">✈ ' + esc(v.nombre) + '</div><h2>💵 Efectivo para el viaje</h2><div class="suave">Un retiro de cajero o plata que ya tenés en efectivo. No es un gasto del viaje: lo que gastes en efectivo sí cuenta.</div>' +
       (cand.length ? '<div class="suave chico fuerte" style="margin-top:10px">¿ES UNO DE ESTOS?</div><div class="caja sinpad">' + cand.map(function (m) {
         return '<button class="item" onclick="App.vjUsarRetiro(' + fila + ',' + m.fila + ')"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || 'Retiro') + '</span><span class="det" style="display:block">' + esc(fechaCorta(m.fecha) + ' · ' + (etiquetaCuenta(m.cuenta) || '')) + '</span></span><span class="monto"><b>' + din(m.monto, m.moneda) + '</b></span></button>';
       }).join('') + '</div>' : '') +
       '<div class="suave chico fuerte" style="margin-top:10px">' + (cand.length ? 'O ANOTALO A MANO' : 'ANOTALO') + '</div>' +
       '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto</span><input id="rt-monto" class="monto" data-dinero inputmode="decimal"></label>' +
       '<label class="campo compacto"><span>Moneda</span><select id="rt-moneda"><option value="USD"' + (v.moneda === 'USD' ? ' selected' : '') + '>$</option><option value="CRC"' + (v.moneda === 'CRC' ? ' selected' : '') + '>₡</option></select></label></div>' +
-      '<label class="campo compacto"><span>De qué cuenta salió</span><select id="rt-cuenta">' + ctas.map(function (c) { return '<option' + (c.nombre === cuentaPrincipal() ? ' selected' : '') + '>' + esc(c.nombre) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="campo compacto"><span>¿De dónde sale?</span><select id="rt-cuenta">' + ctas.map(function (c) { return '<option' + (c.nombre === cuentaPrincipal() ? ' selected' : '') + '>' + esc(c.nombre) + '</option>'; }).join('') + '<option value="Efectivo">💵 De ninguna cuenta (ya lo tengo en efectivo)</option></select></label>' +
+      '<div class="suave chico">Si ya lo tenías en efectivo, no toca tus cuentas ni sobres: solo suma a lo que llevás al viaje.</div>' +
       '<div class="acciones"><button class="btn" onclick="App.guardarRetiroViaje(' + fila + ')">Anotar retiro</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
   function vjUsarRetiro(fila, mf) {
@@ -2846,12 +2849,24 @@ var App = (function () {
     encolar('marcarMovimiento', [mf, 'Viaje', 'Efectivo@' + v.id, { monto: m.monto }], 'Retiro para el viaje ' + v.nombre);
     hecho('🏧 Retiro pasado a efectivo del viaje');
   }
+  /** v2.10.7: tocar un retiro del viaje → quitarlo del viaje (sigue en tu cuenta) o borrarlo si lo anotaste a mano */
+  function formRetiroQuitar(vf, mf) {
+    var v = viajePorFila(vf), m = movPorFila(mf); if (!m || !v) return;
+    var aMano = /^VJR-/.test(m.autorizacion || '') || C.normNom(m.cuenta || '') === 'efectivo';
+    abrir('<div class="suave chico">✈ ' + esc(v.nombre) + ' · efectivo</div><h2>🏧 ' + esc(nombreBonito(m.comercio) || 'Retiro') + '</h2>' +
+      '<div class="caja" style="gap:4px"><div class="fila"><span class="suave">Monto</span><b>' + din(m.monto, m.moneda) + '</b></div><div class="fila chico"><span class="suave">Fecha</span><span>' + esc(fechaCorta(m.fecha)) + '</span></div><div class="fila chico"><span class="suave">Cuenta</span><span>' + esc(etiquetaCuenta(m.cuenta) || '—') + '</span></div></div>' +
+      '<div class="suave chico" style="margin-top:8px">' + (aMano ? 'Lo anotaste a mano en el viaje. Si no pasó, borralo.' : 'Es un movimiento real de tu cuenta: al quitarlo del viaje sigue igual en tu cuenta y sobres; solo deja de contar como efectivo del viaje.') + '</div>' +
+      '<div class="acciones">' + (aMano ? '<button class="btn peligro" onclick="App.retiroBorrar(' + mf + ')">🗑 Borrar</button>' : '') + (C.normNom(m.cuenta || '') === 'efectivo' ? '' : '<button class="btn' + (aMano ? ' sec' : '') + '" onclick="App.retiroQuitar(' + mf + ')">Quitar del viaje</button>') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function retiroQuitar(mf) { var m = movPorFila(mf); if (!m) return; encolar('marcarMovimiento', [mf, 'Viaje', 'Fuera', { monto: m.monto }], 'Retiro fuera del viaje'); hecho('🏧 Retiro quitado del viaje (sigue en tu cuenta)'); }
+  function retiroBorrar(mf) { var m = movPorFila(mf); if (!m) return; cerrar(); borrarMovSilencioso(m, '🗑 Retiro borrado'); }
   function guardarRetiroViaje(fila) {
     var v = viajePorFila(fila), monto = C.leerNumero(val('rt-monto'));
     if (!(monto > 0)) return toast('Escribí el monto.');
-    encolar('guardarMovimiento', [{ fila: null, control: null, fecha: new Date().toISOString(), monto: monto, moneda: val('rt-moneda'), tipo: 'Gasto', comercio: 'Retiro de cajero (efectivo del viaje)', lugar: '', cuenta: val('rt-cuenta'),
-      categoria: '', sobre: '', nota: 'Viaje ' + v.nombre, origen: 'Manual', autorizacion: 'VJR-' + grupoNuevo(), viaje: 'Efectivo@' + v.id, recordarRegla: false }], 'Retiro de cajero · ' + txt(monto, val('rt-moneda')));
-    hecho('🏧 Retiro anotado como efectivo del viaje');
+    var propio = val('rt-cuenta') === 'Efectivo';
+    encolar('guardarMovimiento', [{ fila: null, control: null, fecha: new Date().toISOString(), monto: monto, moneda: val('rt-moneda'), tipo: 'Gasto', comercio: propio ? 'Efectivo que ya tenía' : 'Retiro de cajero (efectivo del viaje)', lugar: '', cuenta: val('rt-cuenta'),
+      categoria: '', sobre: '', nota: 'Viaje ' + v.nombre, origen: 'Manual', autorizacion: 'VJR-' + grupoNuevo(), viaje: 'Efectivo@' + v.id, recordarRegla: false }], (propio ? 'Efectivo para el viaje · ' : 'Retiro de cajero · ') + txt(monto, val('rt-moneda')));
+    hecho(propio ? '💵 Efectivo anotado para el viaje' : '🏧 Retiro anotado como efectivo del viaje');
   }
   /** 📄 Resumen del viaje (con PDF y compartir) */
   function datosResumenViaje(v) {
@@ -2917,7 +2932,10 @@ var App = (function () {
   }
   /** Dentro de un movimiento: ✈ Es del viaje */
   function bloqueViajeDeMov(m) {
-    if (!m || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero') || !(D.viajes || []).length) return '';
+    if (!m || !(D.viajes || []).length) return '';
+    var mk = C.marcaViaje(m), ve = mk.efectivo && C.normNom(m.cuenta || '') !== 'efectivo' && (D.viajes || []).filter(function (v) { return v.id === mk.id; })[0];
+    if (ve) return '<div class="caja" style="margin-top:14px;background:var(--fondo);gap:6px"><b style="font-size:14px">🏧 Efectivo del viaje ' + esc(ve.nombre) + '</b><span class="suave chico">No cuenta como gasto: es plata que llevaste en efectivo.</span><div class="chips">' + chipRev('Ver viaje', 'App.cerrar();App.verViaje(' + ve.fila + ')') + chipRev('Quitar del viaje', 'App.retiroQuitar(' + m.fila + ')') + '</div></div>';
+    if (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero') return '';
     var en = (D.viajes || []).filter(function (v) { return C.enViaje(v, m); })[0];
     if (en) return '<div class="caja" style="margin-top:14px;background:var(--fondo);gap:6px"><b style="font-size:14px">✈ Es del viaje ' + esc(en.nombre) + '</b><div class="chips">' + chipRev('Ver viaje', 'App.cerrar();App.verViaje(' + en.fila + ')') + chipRev('Sacar del viaje', 'App.vjSacar(' + m.fila + ')') + '</div></div>';
     var vs = (D.viajes || []).filter(function (v) { return v.desde && new Date(v.hasta) > new Date(hoy.getTime() - 60 * 86400000); }).sort(function (a, b) { return new Date(a.desde) - new Date(b.desde); });
@@ -6790,7 +6808,7 @@ var App = (function () {
     recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     salarioLlego: salarioLlego, formSalarioOtro: formSalarioOtro, salarioManana: salarioManana, formSalario: formSalario, salPrev: salPrev, guardarSalario: guardarSalario, repCero: repCero,
-    rvAjena: rvAjena, formFamilia: formFamilia, formFamiliaTarjeta: formFamiliaTarjeta, guardarFamiliaTarjeta: guardarFamiliaTarjeta, familiaAgregar: familiaAgregar, familiaQuitar: familiaQuitar, tabLista: tabLista, vistaEncargos: vistaEncargos, marcarEnc: marcarEnc, formPagadoEnc: formPagadoEnc, peMedio: peMedio, guardarPagadoEnc: guardarPagadoEnc, formEncargo: formEncargo, feDe: feDe, feSec: feSec, feAuto: feAuto, guardarEncargo: guardarEncargo, fotoEncargo: fotoEncargo, formEncargante: formEncargante, guardarEncargante: guardarEncargante, quitarEncargante: quitarEncargante, cuentasEncargos: cuentasEncargos, mandarCuentaEnc: mandarCuentaEnc, estadoEnc: estadoEnc, pasarMeDeben: pasarMeDeben, baseSeccion: baseSeccion, vistaLista: vistaLista, formPagado: formPagado, guardarPagado: guardarPagado, fiSel: fiSel, fiAuto: fiAuto, bandejaLimpia: bandejaLimpia, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
+    rvAjena: rvAjena, formRetiroQuitar: formRetiroQuitar, retiroQuitar: retiroQuitar, retiroBorrar: retiroBorrar, formFamilia: formFamilia, formFamiliaTarjeta: formFamiliaTarjeta, guardarFamiliaTarjeta: guardarFamiliaTarjeta, familiaAgregar: familiaAgregar, familiaQuitar: familiaQuitar, tabLista: tabLista, vistaEncargos: vistaEncargos, marcarEnc: marcarEnc, formPagadoEnc: formPagadoEnc, peMedio: peMedio, guardarPagadoEnc: guardarPagadoEnc, formEncargo: formEncargo, feDe: feDe, feSec: feSec, feAuto: feAuto, guardarEncargo: guardarEncargo, fotoEncargo: fotoEncargo, formEncargante: formEncargante, guardarEncargante: guardarEncargante, quitarEncargante: quitarEncargante, cuentasEncargos: cuentasEncargos, mandarCuentaEnc: mandarCuentaEnc, estadoEnc: estadoEnc, pasarMeDeben: pasarMeDeben, baseSeccion: baseSeccion, vistaLista: vistaLista, formPagado: formPagado, guardarPagado: guardarPagado, fiSel: fiSel, fiAuto: fiAuto, bandejaLimpia: bandejaLimpia, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
     formActualizar: formActualizar, copiarCodigo: copiarCodigo, volverAnterior: volverAnterior, actualizarApp: actualizarApp,
     formNuevaLista: formNuevaLista, nlIcono: nlIcono, crearListaNueva: crearListaNueva, crearConBase: crearConBase, abrirLista: abrirLista, modoLista: modoLista, marcarItem: marcarItem,
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,

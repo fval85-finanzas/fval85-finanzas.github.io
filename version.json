@@ -1,8 +1,8 @@
 {
- "web": "2.10.6",
- "servidor": "2.10.6",
- "sha256": "bcc0229ab4ef77659638430ca61a0eee7229143d67f4e1937d88f7eb35d7a270",
- "novedades": "👪 Tarjetas de la familia en los viajes: las compras de tu esposa (reenviadas de BAC y Davibank) cuentan solo en el viaje, separadas por persona y tarjeta, con PDF de una página por tarjeta. No tocan tus cuentas ni sobres.",
+ "web": "2.10.8",
+ "servidor": "2.10.8",
+ "sha256": "17398519dde3bc50c50c6b1fa06e2d83277818c8952b7c55f56f8c1a0468a37d",
+ "novedades": "💵 Efectivo para el viaje: podés anotar plata que ya tenías en efectivo (sin que salga de ninguna cuenta). 🏧 Los retiros del viaje se pueden tocar para quitarlos o borrarlos.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
