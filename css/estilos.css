@@ -928,3 +928,42 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .ajena-op { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .ajena-op .chip { justify-content: flex-start; padding: 10px 12px; text-align: left; white-space: normal; }
 .tj.limpia > .mini-plastico { align-self: center; margin-top: 0; }
+
+/* ==================================================================== v2.10.0 */
+.sac-lista { background: color-mix(in srgb, var(--acento) 8%, transparent); border: 1px solid color-mix(in srgb, var(--acento) 35%, transparent); border-radius: 12px; padding: 8px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 3px; }
+.sac-lista .sac-tot { border-top: 1px solid var(--linea); padding-top: 5px; margin-top: 3px; }
+.pl-sob { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--linea); }
+.pl-sob .it-nom { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pl-sob .pl-in { width: 110px; text-align: right; font-weight: 800; font-size: 15px; background: none; border: 0; border-bottom: 1.5px solid var(--acento); color: var(--texto); padding: 4px 0; font-family: inherit; }
+.ig-fila { display: grid; grid-template-columns: minmax(0, 1fr) 110px 74px; gap: 8px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--linea); }
+.ig-fila .pl-in { width: 100%; }
+/* calculadora rápida */
+#calc-btn { position: fixed; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 9000; width: 46px; height: 46px; border-radius: 23px; border: 1.5px solid var(--acento); background: var(--tarjeta); font-size: 21px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,.45); touch-action: none; transition: opacity .3s; cursor: pointer; padding: 0; }
+#calc-btn.dormido { opacity: .45; }
+#calc-panel { position: fixed; left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 20px)); bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 9001; background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 20px; padding: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.55); color: var(--texto); }
+#calc-panel .calc-cab { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--suave, #9aa0a8); }
+#calc-panel .calc-cab button { background: none; border: 0; color: inherit; font-size: 16px; padding: 4px 8px; cursor: pointer; }
+#calc-panel .calc-expr { text-align: right; font-size: 14px; opacity: .7; min-height: 18px; word-break: break-all; }
+#calc-panel .calc-res { text-align: right; font-size: 30px; font-weight: 800; margin-bottom: 8px; overflow-wrap: anywhere; }
+#calc-panel .calc-teclas { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+#calc-panel .calc-teclas button { height: 46px; border-radius: 12px; border: 0; font-size: 19px; font-weight: 700; background: var(--fondo); color: var(--texto); cursor: pointer; font-family: inherit; }
+#calc-panel .calc-teclas button.op { color: var(--acento); background: color-mix(in srgb, var(--acento) 12%, var(--fondo)); }
+#calc-panel .calc-teclas button.eq { background: var(--acento); color: #111; }
+#calc-panel .calc-teclas button.c { color: var(--rojo); }
+#calc-panel .calc-teclas button:active { transform: scale(.96); }
+#calc-panel .calc-usar { width: 100%; margin-top: 9px; background: var(--acento); color: #111; border: 0; border-radius: 12px; padding: 11px; font-weight: 800; font-size: 15px; font-family: inherit; cursor: pointer; }
+#calc-panel .calc-pie { display: flex; gap: 7px; margin-top: 9px; }
+#calc-panel .calc-pie button { flex: 1; background: none; border: 1px solid var(--linea); color: var(--texto); border-radius: 12px; padding: 9px; font-size: 13px; font-family: inherit; cursor: pointer; }
+#calc-panel .calc-hist { display: flex; flex-direction: column; max-height: 230px; overflow: auto; }
+#calc-panel .calc-hist button { display: flex; justify-content: space-between; gap: 8px; background: none; border: 0; border-bottom: 1px solid var(--linea); color: var(--texto); padding: 9px 4px; font-size: 14px; font-family: inherit; text-align: left; cursor: pointer; }
+.calc-pista { display: block; text-align: right; color: var(--positivo); font-weight: 700; font-size: 13px; margin-top: 3px; }
+.vj-pl { display: inline-flex; align-items: flex-end; justify-content: flex-start; min-width: 26px; height: 17px; border-radius: 4px; color: #fff; font-size: 7.5px; font-weight: 800; padding: 1px 3px; flex-shrink: 0; line-height: 1; }
+.vj-filtro { margin: 4px 16px 6px; padding: 10px 12px; border: 1.5px solid #5B8DEF; border-radius: 12px; display: flex; flex-direction: column; gap: 3px; }
+.vj-pres { margin-top: 12px; }
+.vj-pres summary { cursor: pointer; list-style: none; padding: 4px 0; }
+.vj-pres .vj-pc { padding: 6px 0; border-bottom: 1px solid var(--linea); }
+.vj-pres .vj-pc .pl-in { width: 110px; }
+.ajena-op .chip { display: block; height: auto; min-height: 0; line-height: 1.35; }
+#panel .ig-fila .pl-in, #panel .pl-in { background: none; border: 0; border-bottom: 1.5px solid var(--acento); border-radius: 0; box-shadow: none; color: var(--texto); padding: 4px 0; text-align: right; font-weight: 800; font-size: 15px; min-height: 0; height: auto; }
+#panel .ig-fila { grid-template-columns: minmax(0, 1fr) 96px 66px; padding: 9px 12px; }
+#panel .ig-fila > span > b { overflow-wrap: anywhere; }

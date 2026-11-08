@@ -1,8 +1,8 @@
 {
- "web": "2.9.0",
- "servidor": "2.9.0",
- "sha256": "9659b983dd54ba697f29fea430892cdd4bec252068556e717899183da3ef30a7",
- "novedades": "Tarjetas más limpias: solo lo que debés (o \"a favor\" en verde) y la barra de uso; la deuda en dólares se ve grande. La fecha de pago queda adentro de cada tarjeta.\nAvisos de pago: en el teléfono 3 días antes, 1 día antes y el día (con el monto, y no avisa si ya pagaste); el correo de la mañana trae los pagos de los próximos 7 días. Se elige en Ajustes → Avisos.\nMovimientos de la cuenta: Este mes · Mes pasado · Todo · Rango (se quitó \"Desde el saldo\").\nTarjetas que no son mías: si llega una compra de una tarjeta que la app no conoce, Para revisar pregunta \"¿Es tuya?\" (agregarla, ignorarla o borrar solo esa). Lista en Ajustes → Cuentas.",
+ "web": "2.10.0",
+ "servidor": "2.10.0",
+ "sha256": "4fb9882c19dd9cf1e96f4dbecef37003d996a06c5620e4ee1a553805dc4b0e23",
+ "novedades": "Pagos con plata de varios sobres: si sacás de 2 o más sobres y hacés un solo pago, se une solo (o te muestra las sacadas para confirmar; si no alcanza, pregunta solo por la diferencia).\nPlanear pago nuevo: cuánto pagar (lo del estado o lo de hoy), en ₡ o $, y de qué sobres sale; anota las sacadas y el correo del banco anota el pago.\n⚖ Igualar al BCR: en cada sobre (o todos de una vez desde Sobres) ponés lo que dice el banco y la app hace el ajuste.\n🧮 Calculadora rápida flotante en toda la app, con \"Usar en Monto\".\nViajes: cada tarjeta por separado, compras de antes del viaje (\"Es del viaje\"), presupuesto por categoría, efectivo del viaje, compra a mano, aviso diario y resumen con PDF.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

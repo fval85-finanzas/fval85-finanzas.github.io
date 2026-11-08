@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.9.0';
+  var VERSION_WEB = '2.10.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -170,6 +170,7 @@ var App = (function () {
       var m = args[0];
       var datos = { fecha: m.fecha, comercio: m.comercio, lugar: m.lugar, monto: m.monto, moneda: m.moneda, tipo: m.tipo, cuenta: m.cuenta,
         categoria: m.categoria, sobre: m.sobre, origen: m.origen, autorizacion: m.autorizacion, nota: m.nota };
+      if (m.viaje !== undefined && m.viaje !== null) datos.viaje = m.viaje;
       if (m.fila) { var o = movF(m.fila); if (o) Object.assign(o, datos); (D.sobresMov || []).forEach(function (x) { if (x.movimiento === m.fila && m.fecha) x.fecha = m.fecha; }); }
       else if (!movF(it.temp)) D.movimientos.push(Object.assign({ fila: it.temp, subcuenta: '', viaje: '' }, datos));
     },
@@ -285,7 +286,7 @@ var App = (function () {
       if (cb) cb();
       if (cola.length) enviarCola();
       if (/compartido=1/.test(location.search)) setTimeout(revisarCompartido, 300);
-      intentarRepartoSalario(); finPlanPendiente(); migrarEspejo(); autoIVA(); autoSacado();
+      intentarRepartoSalario(); finPlanPendiente(); migrarEspejo(); autoIVA(); autoPlanEsp(); autoSacado();
       var irA = (location.search.match(/[?&]ir=([a-z]+)/) || [])[1];   // v2.5: al tocar un aviso
       if (irA && !cargar.irHecho) { cargar.irHecho = true; history.replaceState(null, '', location.pathname); ir(irA); }
       if (!cargar.verRevisada) { cargar.verRevisada = true; revisarVersion(); cfgSW(); }
@@ -372,6 +373,7 @@ var App = (function () {
       mas: pMas, calculadora: pCalc, tasacero: pTasaCero, tcdetalle: pTCDetalle, porasignar: pPorAsignar, reparto: pReparto, limpiar: pLimpiar, fondos: pFondos, medeben: pMeDeben, super: pSuper, lista: pLista, plan: pPlan, sobre: pSobre, ctamov: pCtaMov, revisar: pRevisar, aldia: pAlDia, viajes: pViajes, viaje: pViaje, reportes: pReportes, patrimonio: pPatrimonio
     })[pantalla](res, sob);
     formatearMontos();
+    montarCalc(); if (CALC.abierta) pintarCalc();
   }
 
   // ------------------------------------------------------------ INICIO
@@ -1886,7 +1888,7 @@ var App = (function () {
       (sb.reservadoTotal > 0.005 || sb.reservadoUSD > 0.005 ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Reservado para pagar tarjetas</span><b>' +
         [sb.reservadoTotal > 0.005 ? din(sb.reservadoTotal, 'CRC') : '', sb.reservadoUSD > 0.005 ? din(sb.reservadoUSD, 'USD') : ''].filter(String).join(' + ') + '</b></div>' : '') +
       '<div class="rapidos"><button class="principal" onclick="App.ir(\'porasignar\')">' + ico('flechas') + (nPend ? 'Asignar (' + nPend + ')' : 'Por asignar') + '</button>' +
-      '<button onclick="App.formMover()">' + ico('flechas') + 'Mover</button><button onclick="App.ir(\'limpiar\')">' + ico('recargar') + 'Limpiar</button></div></div>';
+      '<button onclick="App.formMover()">' + ico('flechas') + 'Mover</button><button onclick="App.formIgualarTodos()">⚖ Igualar</button><button onclick="App.ir(\'limpiar\')">' + ico('recargar') + 'Limpiar</button></div></div>';
     h += '<div class="caja sinpad">' + sb.lista.map(function (s, i) {
       var neg = s.saldo < -0.005;
       var det = (Math.abs(s.inicioMes) > 0.005 ? 'Venía ' + din(s.inicioMes, s.moneda) + ' · ' : '') + (s.entradas ? '+' + din(s.entradas, s.moneda) + ' · ' : '') + 'salió ' + din(s.salidas, s.moneda);
@@ -2613,8 +2615,8 @@ var App = (function () {
 
   // ------------------------------------------------------------ PRESUPUESTO DE VIAJE (v1.7)
   var viajeSel = null;
-  var ICON_CAT = { Transporte: '✈️', Comida: '🍽️', Hospedaje: '🏨', Tours: '🎟️', Compras: '🛍️', Otros: '•' };
-  var COLOR_CAT = { Transporte: '#3D8BFD', Comida: '#3DD68C', Hospedaje: '#FF8A3D', Tours: '#B57BFF', Compras: '#F5B82E', Otros: '#9AA1AB' };
+  var ICON_CAT = { Vuelos: '✈️', Transporte: '🚕', Comida: '🍽️', Hospedaje: '🏨', Tours: '🎟️', Compras: '🛍️', Otros: '•' };
+  var COLOR_CAT = { Vuelos: '#5B8DEF', Transporte: '#3D8BFD', Comida: '#3DD68C', Hospedaje: '#FF8A3D', Tours: '#B57BFF', Compras: '#F5B82E', Otros: '#9AA1AB' };
   function viajePorFila(f) { return (D.viajes || []).filter(function (v) { return v.fila === f; })[0]; }
   function viajeActual() {
     return (D.viajes || []).filter(function (v) { return v.activo && v.desde && v.hasta && C.viaje(D, v, hoy).estado === 'En curso'; })[0] || null;
@@ -2657,16 +2659,27 @@ var App = (function () {
     $('p-viajes').innerHTML = h;
   }
   function verViaje(f) { viajeSel = f; ir('viaje'); }
+  var VJ = { filtro: '' };
+  function etiquetaFuente(k) { return k === 'Efectivo' ? '💵 Efectivo' : '💳 ' + etiquetaCuenta(k); }
+  function cortoFuente(k) { if (k === 'Efectivo') return 'Efectivo'; var c = cuentaPorNombre(k); return c && c.banco ? c.banco : nombreCorto ? nombreCorto(k) : k; }
+  function plasticoMini(k) {
+    if (k === 'Efectivo') return '<span class="vj-pl" style="background:#2f6b45">💵</span>';
+    var c = cuentaPorNombre(k);
+    return '<span class="vj-pl" style="background:' + colorBanco(c ? c.banco : '') + '">' + esc(c && c.ultimos4 ? c.ultimos4 : '') + '</span>';
+  }
   function pViaje() {
     var v = viajePorFila(viajeSel);
     if (!v) { pantalla = 'viajes'; return pintar(); }
+    if (VJ.fila !== v.fila) VJ = { fila: v.fila, filtro: '' };
     var r = C.viaje(D, v, hoy), mon = r.moneda;
-    var h = '<div class="cab"><div class="atras-cab">' + botonAtras('App.ir(\'viajes\')') + '<div><div class="sobretitulo">' + fechaCorta(v.desde) + ' al ' + fechaCorta(v.hasta) + ' · ' + r.estado + '</div><h1 class="titulo">' + esc(v.nombre) + '</h1></div></div>' +
+    var h = '<div class="cab"><div class="atras-cab">' + botonAtras('App.ir(\'viajes\')') + '<div><div class="sobretitulo">' + fechaCorta(v.desde) + ' al ' + fechaCorta(v.hasta) + ' · ' + r.estado + (r.estado === 'En curso' ? ' · día ' + r.diaActual + ' de ' + r.diasTotal : '') + '</div><h1 class="titulo">' + esc(v.nombre) + '</h1></div></div>' +
       '<button class="btn-icono" aria-label="Editar viaje" onclick="App.formViaje(' + v.fila + ')">' + ico('lapiz') + '</button></div>';
-    h += '<div class="chips">' + v.tarjetas.map(function (t) { return '<span class="chip" style="cursor:default">' + (t === 'Efectivo' ? '💵 Efectivo' : '💳 ' + esc(etiquetaCuenta(t))) + '</span>'; }).join('') + '</div>';
-    h += '<div class="hero"><div class="fila" style="align-items:flex-end"><div><div class="et" style="font-size:13px;font-weight:600">Disponible</div><div class="grande" style="color:' + (r.disponible < 0 ? 'var(--rojo)' : 'var(--positivo)') + '">' + din(r.disponible, mon) + '</div></div>' +
-      '<div style="text-align:right"><div style="font-size:26px;font-weight:800">' + Math.round(r.pct * 100) + '%</div><a href="#" onclick="App.formLimiteViaje(' + v.fila + ');return false" class="et" style="font-size:12px;text-decoration:none;color:inherit">de ' + din(r.limite, mon) + ' <b style="color:var(--acento)">✎ cambiar</b></a></div></div>' +
+    h += sugerenciaAntes(v, r);
+    h += repetidasViaje(v, r);
+    h += '<div class="hero"><div class="fila" style="align-items:flex-end"><div><div class="et" style="font-size:13px;font-weight:600">' + (r.antes > 0.004 ? 'Costo del viaje' : 'Gastado') + '</div><div class="grande">' + din(r.gastado, mon) + '</div></div>' +
+      '<div style="text-align:right"><a href="#" onclick="App.formLimiteViaje(' + v.fila + ');return false" class="et" style="font-size:12px;text-decoration:none;color:inherit">de ' + din(r.limite, mon) + ' <b style="color:var(--acento)">✎</b></a><div style="font-weight:800;color:' + (r.disponible < 0 ? 'var(--rojo)' : 'var(--positivo)') + '">' + (r.disponible < 0 ? 'Te pasaste ' + din(-r.disponible, mon) : din(r.disponible, mon) + ' libres') + '</div></div></div>' +
       barra(r.pct, r.pct >= 0.8) +
+      (r.antes > 0.004 ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">✈ Antes del viaje</span><span>' + din(r.antes, mon) + '</span></div><div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">🧳 Durante el viaje</span><span>' + din(r.durante, mon) + '</span></div>' : '') +
       (r.estado === 'En curso' ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Quedan ' + r.diasRestantes + ' día' + (r.diasRestantes === 1 ? '' : 's') + '</span><b>Podés gastar ' + din(r.porDia, mon) + '/día</b></div>' : '') +
       (r.promedio ? '<div class="fila" style="font-size:13px"><span class="et" style="font-size:13px">Promedio por día</span><span>' + din(r.promedio, mon) + '</span></div>' : '');
     if (v.subcuenta && D.fondos) {
@@ -2675,22 +2688,212 @@ var App = (function () {
     }
     h += '</div>';
     if (r.pct >= 0.8) h += '<div class="aviso" style="padding:12px 14px;border-radius:14px;font-size:14px">' + (r.pct >= 1 ? '⚠️ Llegaste al límite del presupuesto.' : '🔔 Ya usaste más del 80 % del presupuesto.') + '</div>';
-    var cats = C.CATS_VIAJE.filter(function (c) { return r.porCategoria[c] > 0; });
-    if (cats.length) h += '<div class="caja" style="gap:6px"><h3>Por categoría</h3>' + cats.map(function (c) {
+    // por tarjeta
+    var fuentes = Object.keys(r.porTarjeta);
+    (v.tarjetas || []).forEach(function (t) { if (fuentes.indexOf(t) < 0) fuentes.push(t); });
+    if (fuentes.length > 1) h += '<div class="caja borde-acento" style="gap:4px"><div class="suave chico fuerte">POR TARJETA</div>' + fuentes.map(function (k) {
+      var x = r.porTarjeta[k] || { monto: 0, n: 0 }, pc = r.gastado ? x.monto / r.gastado : 0;
+      return '<div class="fila"><span style="display:flex;align-items:center;gap:6px;min-width:0">' + plasticoMini(k) + '<b style="overflow:hidden;text-overflow:ellipsis">' + esc(k === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(k)) + '</b></span><b>' + din(x.monto, mon) + '</b></div>' +
+        (x.n ? barra(pc) + '<div class="suave" style="font-size:11.5px;margin-bottom:4px">' + Math.round(pc * 100) + '% · ' + x.n + ' compra' + (x.n === 1 ? '' : 's') + '</div>' : '');
+    }).join('') + '</div>';
+    // categorías (con presupuesto si lo hay)
+    var cats = C.CATS_VIAJE.filter(function (c) { return r.porCategoria[c] > 0 || (r.presupuesto && r.presupuesto[c]); });
+    if (cats.length) h += '<div class="caja" style="gap:6px"><h3>' + (r.presupuesto ? 'Presupuesto por categoría' : 'Por categoría') + '</h3>' + cats.map(function (c) {
+      var pr = r.presupuesto && r.presupuesto[c];
+      if (pr) {
+        var pasa = pr.gastado > pr.limite + 0.004, col = pasa ? 'var(--rojo)' : pr.pct >= 0.8 ? 'var(--acento)' : COLOR_CAT[c];
+        return '<div class="fila chico"><span>' + ICON_CAT[c] + ' ' + c + '</span><span><b class="' + (pasa ? 'rojo' : '') + '">' + din(pr.gastado, mon) + '</b> <span class="suave">/ ' + din(pr.limite, mon) + '</span></span></div>' +
+          '<div class="barra"><i style="width:' + Math.min(100, pr.pct * 100).toFixed(1) + '%;background:' + col + '"></i></div><div class="' + (pasa ? 'rojo' : 'suave') + '" style="font-size:11.5px;margin-bottom:2px">' + (pasa ? 'te pasaste ' + din(pr.gastado - pr.limite, mon) : 'quedan ' + din(pr.limite - pr.gastado, mon)) + '</div>';
+      }
       return '<div class="fila chico"><span>' + ICON_CAT[c] + ' ' + c + '</span><b>' + din(r.porCategoria[c], mon) + '</b></div>' +
         '<div class="barra"><i style="width:' + (r.gastado ? r.porCategoria[c] / r.gastado * 100 : 0).toFixed(1) + '%;background:' + COLOR_CAT[c] + '"></i></div>';
     }).join('') + '</div>';
-    h += '<div class="caja sinpad"><div class="fila" style="padding:14px 16px 4px"><h3>Compras (' + r.compras.length + ')</h3></div>' +
-      (r.compras.length ? r.compras.map(function (c) {
-        var m = c.mov;
-        return '<button class="item" onclick="App.formCompraViaje(' + m.fila + ')"><span class="ico" style="background:transparent;font-size:18px">' + ICON_CAT[c.categoria] + '</span>' +
-          '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(m.comercio || 'Compra') + '</span><span class="det" style="display:block">' + esc(fechaCorta(m.fecha) + ' · ' + c.categoria + (m.moneda !== mon ? ' · ' + txt(m.monto, m.moneda) : '')) + '</span></span>' +
-          '<span class="monto"><b style="display:block">' + din(c.monto, mon) + '</b></span></button>';
-      }).join('') : '<div class="suave" style="padding:4px 16px 14px">Todavía no hay compras en estas fechas.</div>') + '</div>';
-    h += '<button class="btn sec" onclick="App.formAgregarViaje(' + v.fila + ')">＋ Agregar una compra de otra cuenta</button>';
-    h += '<div class="suave chico" style="text-align:center">Las compras de las tarjetas elegidas en estas fechas entran solas. Te avisamos al 80 % y al 100 % en la app y por correo.</div>';
+    // efectivo del viaje
+    if ((v.tarjetas || []).indexOf('Efectivo') >= 0 || r.efectivo.retiros.length) {
+      var ef = r.efectivo;
+      h += '<div class="caja" style="gap:4px"><div class="fila"><div><div class="suave chico">💵 Te queda en efectivo</div><b style="font-size:22px" class="' + (ef.queda < -0.004 ? 'rojo' : '') + '">' + din(ef.queda, mon) + '</b></div></div>' +
+        '<div class="fila chico"><span class="suave">🏧 Retiros en cajero</span><span>' + din(ef.retirado, mon) + '</span></div><div class="fila chico"><span class="suave">− Gastado en efectivo</span><span>' + din(ef.gastado, mon) + '</span></div>' +
+        '<div class="dos" style="margin-top:8px"><button class="btn chico" onclick="App.formCompraManual(' + v.fila + ',\'Efectivo\')">＋ Gasto en efectivo</button><button class="btn sec chico" onclick="App.formRetiroViaje(' + v.fila + ')">🏧 Retiro de cajero</button></div></div>';
+    }
+    // compras con filtro por tarjeta
+    var conCompras = fuentes.filter(function (k) { return r.porTarjeta[k]; });
+    var lista = r.compras.filter(function (c) { return !VJ.filtro || c.cuenta === VJ.filtro; });
+    h += '<div class="caja sinpad"><div class="fila" style="padding:14px 16px 4px"><h3>Compras (' + r.compras.length + ')</h3></div>';
+    if (conCompras.length > 1) {
+      h += '<div class="chips desliza" style="padding:0 16px">' + chipRev('Todas · ' + r.compras.length, 'App.vjFiltro(\'\')', !VJ.filtro) + conCompras.map(function (k) { return chipRev(esc(cortoFuente(k)) + ' · ' + r.porTarjeta[k].n, 'App.vjFiltro(\'' + q(k) + '\')', VJ.filtro === k); }).join('') + '</div>';
+      if (VJ.filtro && r.porTarjeta[VJ.filtro]) {
+        var porC = {}; r.compras.forEach(function (c) { if (c.cuenta === VJ.filtro) porC[c.categoria] = (porC[c.categoria] || 0) + c.monto; });
+        h += '<div class="vj-filtro"><div class="fila"><span style="display:flex;align-items:center;gap:6px">' + plasticoMini(VJ.filtro) + '<b>' + esc(VJ.filtro === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(VJ.filtro)) + '</b></span><b style="font-size:19px">' + din(r.porTarjeta[VJ.filtro].monto, mon) + '</b></div>' +
+          '<div class="suave chico">' + Object.keys(porC).sort(function (a, b) { return porC[b] - porC[a]; }).map(function (c) { return c + ' ' + din(porC[c], mon); }).join(' · ') + '</div></div>';
+      }
+    }
+    h += (lista.length ? lista.map(function (c) {
+      var m = c.mov;
+      return '<button class="item" onclick="App.formCompraViaje(' + m.fila + ')"><span class="ico" style="background:transparent;font-size:18px">' + ICON_CAT[c.categoria] + '</span>' +
+        '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || 'Compra') + '</span><span class="det" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' + esc(fechaCorta(m.fecha).replace(/ \d{4}$/, '') + ' · ' + c.categoria + (c.antes ? ' · antes del viaje' : '') + (m.moneda !== mon ? ' · ' + txt(m.monto, m.moneda) : '')) + ' · ' + plasticoMini(c.cuenta) + esc(cortoFuente(c.cuenta)) + '</span></span>' +
+        '<span class="monto"><b style="display:block">' + din(c.monto, mon) + '</b></span></button>';
+    }).join('') : '<div class="suave" style="padding:4px 16px 14px">Todavía no hay compras' + (VJ.filtro ? ' con esta tarjeta' : ' en estas fechas') + '.</div>') + '</div>';
+    h += '<div class="dos"><button class="btn" onclick="App.formCompraManual(' + v.fila + ')">＋ Anotar compra a mano</button><button class="btn sec" onclick="App.formAgregarViaje(' + v.fila + ')">＋ Sumar una de la app</button></div>';
+    h += '<button class="btn ' + (r.estado === 'Terminado' ? '' : 'sec') + '" style="width:100%;margin-top:8px" onclick="App.resumenViaje(' + v.fila + ')">📄 Resumen del viaje</button>';
+    h += '<div class="suave chico" style="text-align:center">Las compras de las tarjetas elegidas en estas fechas entran solas. Lo pagado antes (vuelos, hotel) se suma con “Es del viaje”. Te avisamos al 80 % y al 100 %.</div>';
     $('p-viaje').innerHTML = h;
   }
+  function vjFiltro(k) { VJ.filtro = k; pintar(); }
+  /** Compras de antes del viaje que parecen del viaje (aerolínea, hotel, Booking…) */
+  function candidatosAntes(v) {
+    var ini = new Date(v.desde), lim = new Date(ini.getTime() - 120 * 86400000);
+    return D.movimientos.filter(function (m) {
+      var f = new Date(m.fecha);
+      return m.fecha && (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && f < ini && f >= lim && !m.viaje && /^(Vuelos|Hospedaje|Tours)$/.test(C.categoriaViaje(m)) && m.fila > 0;
+    }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+  }
+  function sugerenciaAntes(v, r) {
+    if (r.estado === 'Terminado' || guardado('mf-vj-sug-' + v.id, '') === 'no') return '';
+    var c = candidatosAntes(v); if (!c.length) return '';
+    return '<div class="caja borde-acento" style="gap:6px"><div style="font-size:14px">🔎 Encontré ' + c.length + ' compra' + (c.length === 1 ? '' : 's') + ' de antes que parece' + (c.length === 1 ? '' : 'n') + ' del viaje: ' +
+      c.slice(0, 3).map(function (m) { return '<b>' + esc(nombreBonito(m.comercio)) + ' ' + txt(m.monto, m.moneda) + '</b>'; }).join(', ') + (c.length > 3 ? '…' : '') + '. ¿La' + (c.length === 1 ? '' : 's') + ' sumo?</div>' +
+      '<div class="chips">' + chipRev('✓ Sumar ' + (c.length === 1 ? 'la' : 'las ' + c.length), 'App.vjSumarAntes(' + v.fila + ')', true) + chipRev('Elegir…', 'App.formAgregarViaje(' + v.fila + ',1)') + chipRev('No', 'App.vjNoSugerir(' + v.fila + ')') + '</div></div>';
+  }
+  function vjSumarAntes(fila) {
+    var v = viajePorFila(fila), c = candidatosAntes(v);
+    c.forEach(function (m) { encolar('marcarMovimiento', [m.fila, 'Viaje', '+' + C.categoriaViaje(m) + '@' + v.id, { monto: m.monto }], 'Del viaje: ' + (m.comercio || 'compra')); });
+    pintar(); toast('✈ ' + c.length + ' compra' + (c.length === 1 ? '' : 's') + ' sumada' + (c.length === 1 ? '' : 's') + ' al viaje', 2500);
+  }
+  function vjNoSugerir(fila) { var v = viajePorFila(fila); guardar('mf-vj-sug-' + v.id, 'no'); pintar(); }
+  /** Compra anotada a mano y después llegó la misma por correo → avisar para no duplicar */
+  function repetidasViaje(v, r) {
+    var manuales = r.compras.filter(function (c) { return c.mov.origen === 'Manual' && c.cuenta !== 'Efectivo' && /@/.test(c.mov.viaje || ''); }), out = '';
+    manuales.forEach(function (c) {
+      var m = c.mov, k = 'mf-vj-dup-' + m.fila; if (guardado(k, '') === 'no') return;
+      var otra = D.movimientos.filter(function (x) { return x !== m && x.fila > 0 && x.origen !== 'Manual' && x.cuenta === m.cuenta && x.moneda === m.moneda && Math.abs(x.monto - m.monto) < 0.01 && Math.abs(new Date(x.fecha) - new Date(m.fecha)) < 36 * 3600000; })[0];
+      if (!otra) return;
+      out += '<div class="caja borde-acento" style="gap:6px"><div style="font-size:14px">¿Es la misma compra? Anotaste a mano <b>' + esc(nombreBonito(m.comercio)) + ' ' + txt(m.monto, m.moneda) + '</b> y llegó por correo <b>' + esc(nombreBonito(otra.comercio)) + '</b> (' + fechaCorta(otra.fecha).replace(/ \d{4}$/, '') + ').</div>' +
+        '<div class="chips">' + chipRev('✓ Sí: borrar la de a mano', 'App.vjDupBorrar(' + m.fila + ',' + otra.fila + ')', true) + chipRev('Son distintas', 'App.vjDupNo(' + m.fila + ')') + '</div></div>';
+    });
+    return out;
+  }
+  function vjDupBorrar(manual, correo) {
+    var m = movPorFila(manual), o = movPorFila(correo); if (!m) return;
+    var mk = C.marcaViaje(m);
+    borrarMovSilencioso(m, 'Listo: quedó solo la del correo', function () { if (o && mk.id) encolar('marcarMovimiento', [o.fila, 'Viaje', '+' + (mk.cat || C.categoriaViaje(o)) + '@' + mk.id, { monto: o.monto }], 'Del viaje: ' + (o.comercio || 'compra')); });
+  }
+  function vjDupNo(f) { guardar('mf-vj-dup-' + f, 'no'); pintar(); }
+  /** ＋ Anotar compra a mano (o gasto en efectivo) dentro del viaje */
+  var CM2 = null;
+  function formCompraManual(fila, fuente) {
+    var v = viajePorFila(fila), fuentes = (v.tarjetas || []).slice();
+    if (fuentes.indexOf('Efectivo') < 0) fuentes.push('Efectivo');
+    CM2 = { fila: fila, cat: 'Comida', fuente: fuente || fuentes[0] };
+    var hoyIso = new Date().toISOString(), dentro = new Date() >= new Date(v.desde) && new Date() <= new Date(new Date(v.hasta).getTime() + 86400000);
+    abrir('<div class="suave chico">✈ ' + esc(v.nombre) + '</div><h2>' + (fuente === 'Efectivo' ? '＋ Gasto en efectivo' : '＋ Anotar compra a mano') + '</h2>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto</span><input id="cm-monto" class="monto" data-dinero inputmode="decimal"></label>' +
+      '<label class="campo compacto"><span>Moneda</span><select id="cm-moneda"><option value="USD"' + (v.moneda === 'USD' ? ' selected' : '') + '>$</option><option value="CRC"' + (v.moneda === 'CRC' ? ' selected' : '') + '>₡</option></select></label></div>' +
+      '<label class="campo compacto"><span>Descripción</span><input id="cm-desc" placeholder="Ej. Taxi al hotel"></label>' +
+      '<label class="campo compacto"><span>Fecha</span><input id="cm-fecha" type="date" value="' + localInput(dentro ? hoyIso : v.desde) + '"></label>' +
+      '<div class="suave chico fuerte" style="margin-top:8px">CATEGORÍA</div><div class="chips" id="cm-cats">' + C.CATS_VIAJE.map(function (c) { return chipRev(ICON_CAT[c] + ' ' + c, 'App.cmCat(\'' + c + '\')', c === CM2.cat); }).join('') + '</div>' +
+      '<label class="campo compacto"><span>Pagado con</span><select id="cm-fuente">' + fuentes.map(function (k) { return '<option value="' + esc(k) + '"' + (k === CM2.fuente ? ' selected' : '') + '>' + esc(etiquetaFuente(k)) + '</option>'; }).join('') +
+      D.cuentas.filter(function (c) { return c.activa && fuentes.indexOf(c.nombre) < 0 && c.tipo !== 'Préstamo' && c.tipo !== 'Inversión'; }).map(function (c) { return '<option value="' + esc(c.nombre) + '">Otra: ' + esc(etiquetaCuenta(c.nombre)) + '</option>'; }).join('') + '</select></label>' +
+      '<div class="suave chico">Las compras con tarjeta normalmente llegan solas por correo. Usá esto para lo que no llega (efectivo, una tarjeta sin aviso, algo que pagó otra persona). Si después llega igual, la app te pregunta para no duplicarla.</div>' +
+      '<div class="acciones"><button class="btn" id="cm-ok" onclick="App.guardarCompraManual()">Anotar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function cmCat(c) { CM2.cat = c; document.querySelectorAll('#cm-cats .chip').forEach(function (b) { b.classList.toggle('on', b.textContent.indexOf(c) >= 0); }); }
+  function guardarCompraManual() {
+    var v = viajePorFila(CM2.fila), monto = C.leerNumero(val('cm-monto'));
+    if (!(monto > 0)) return toast('Escribí el monto.');
+    var fuente = val('cm-fuente'), f = desdeInput(val('cm-fecha')) || new Date().toISOString();
+    var fecha = new Date(f); var ahora = new Date(); fecha.setHours(ahora.getHours(), ahora.getMinutes(), 0, 0);
+    var cat = CM2.cat, desc = val('cm-desc').trim() || (cat + (fuente === 'Efectivo' ? ' (efectivo)' : ''));
+    encolar('guardarMovimiento', [{ fila: null, control: null, fecha: fecha.toISOString(), monto: monto, moneda: val('cm-moneda'), tipo: 'Gasto', comercio: desc, lugar: '', cuenta: fuente,
+      categoria: (D.categorias || []).indexOf('Viajes') >= 0 ? 'Viajes' : '', sobre: '', nota: 'Viaje ' + v.nombre, origen: 'Manual', autorizacion: 'VJ-' + grupoNuevo(), viaje: '+' + cat + '@' + v.id, recordarRegla: false }], 'Viaje ' + v.nombre + ': ' + desc + ' · ' + txt(monto, val('cm-moneda')));
+    hecho('✈ Anotado en ' + v.nombre + ': ' + desc);
+  }
+  /** 🏧 Retiro de cajero → efectivo del viaje (no es gasto) */
+  function formRetiroViaje(fila) {
+    var v = viajePorFila(fila), ini = new Date(new Date(v.desde).getTime() - 3 * 86400000), fin = new Date(new Date(v.hasta).getTime() + 86400000);
+    var cand = D.movimientos.filter(function (m) { var f = new Date(m.fecha); return m.fecha && m.fila > 0 && f >= ini && f < fin && !m.viaje && (m.tipo === 'Gasto' || m.tipo === 'Transferencia') && /RETIRO|CAJERO|ATM|CASH|EFECTIVO/i.test((m.comercio || '') + ' ' + (m.nota || '')); });
+    var ctas = cuentasAhorro();
+    abrir('<div class="suave chico">✈ ' + esc(v.nombre) + '</div><h2>🏧 Retiro de cajero</h2><div class="suave">El retiro no es un gasto del viaje: pasa a efectivo. Lo que gastes en efectivo sí cuenta.</div>' +
+      (cand.length ? '<div class="suave chico fuerte" style="margin-top:10px">¿ES UNO DE ESTOS?</div><div class="caja sinpad">' + cand.map(function (m) {
+        return '<button class="item" onclick="App.vjUsarRetiro(' + fila + ',' + m.fila + ')"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombreBonito(m.comercio) || 'Retiro') + '</span><span class="det" style="display:block">' + esc(fechaCorta(m.fecha) + ' · ' + (etiquetaCuenta(m.cuenta) || '')) + '</span></span><span class="monto"><b>' + din(m.monto, m.moneda) + '</b></span></button>';
+      }).join('') + '</div>' : '') +
+      '<div class="suave chico fuerte" style="margin-top:10px">' + (cand.length ? 'O ANOTALO A MANO' : 'ANOTALO') + '</div>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Monto</span><input id="rt-monto" class="monto" data-dinero inputmode="decimal"></label>' +
+      '<label class="campo compacto"><span>Moneda</span><select id="rt-moneda"><option value="USD"' + (v.moneda === 'USD' ? ' selected' : '') + '>$</option><option value="CRC"' + (v.moneda === 'CRC' ? ' selected' : '') + '>₡</option></select></label></div>' +
+      '<label class="campo compacto"><span>De qué cuenta salió</span><select id="rt-cuenta">' + ctas.map(function (c) { return '<option' + (c.nombre === cuentaPrincipal() ? ' selected' : '') + '>' + esc(c.nombre) + '</option>'; }).join('') + '</select></label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarRetiroViaje(' + fila + ')">Anotar retiro</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function vjUsarRetiro(fila, mf) {
+    var v = viajePorFila(fila), m = movPorFila(mf); if (!m) return;
+    encolar('marcarMovimiento', [mf, 'Viaje', 'Efectivo@' + v.id, { monto: m.monto }], 'Retiro para el viaje ' + v.nombre);
+    hecho('🏧 Retiro pasado a efectivo del viaje');
+  }
+  function guardarRetiroViaje(fila) {
+    var v = viajePorFila(fila), monto = C.leerNumero(val('rt-monto'));
+    if (!(monto > 0)) return toast('Escribí el monto.');
+    encolar('guardarMovimiento', [{ fila: null, control: null, fecha: new Date().toISOString(), monto: monto, moneda: val('rt-moneda'), tipo: 'Gasto', comercio: 'Retiro de cajero (efectivo del viaje)', lugar: '', cuenta: val('rt-cuenta'),
+      categoria: '', sobre: '', nota: 'Viaje ' + v.nombre, origen: 'Manual', autorizacion: 'VJR-' + grupoNuevo(), viaje: 'Efectivo@' + v.id, recordarRegla: false }], 'Retiro de cajero · ' + txt(monto, val('rt-moneda')));
+    hecho('🏧 Retiro anotado como efectivo del viaje');
+  }
+  /** 📄 Resumen del viaje (con PDF y compartir) */
+  function datosResumenViaje(v) {
+    var r = C.viaje(D, v, hoy), mon = r.moneda;
+    var prev = (D.viajes || []).filter(function (x) { return x !== v && x.desde && new Date(x.hasta) < new Date(v.desde); }).sort(function (a, b) { return new Date(b.hasta) - new Date(a.hasta); })[0];
+    var rp = prev ? C.viaje(D, prev, hoy) : null;
+    var cats = C.CATS_VIAJE.filter(function (c) { return r.porCategoria[c] > 0; }).sort(function (a, b) { return r.porCategoria[b] - r.porCategoria[a]; }).map(function (c) { return [c, r.porCategoria[c]]; });
+    var tarj = Object.keys(r.porTarjeta).sort(function (a, b) { return r.porTarjeta[b].monto - r.porTarjeta[a].monto; }).map(function (k) { return [k === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(k), r.porTarjeta[k].monto]; });
+    return { v: v, r: r, mon: mon, cats: cats, tarj: tarj, prev: prev, rp: rp };
+  }
+  function resumenViaje(fila) {
+    var v = viajePorFila(fila), x = datosResumenViaje(v), r = x.r, mon = x.mon;
+    var lin = function (a, b, cls) { return '<div class="fila chico"><span>' + a + '</span><b class="' + (cls || '') + '">' + b + '</b></div>'; };
+    abrir('<div class="suave chico">' + (r.estado === 'Terminado' ? 'Viaje terminado' : 'Viaje ' + r.estado.toLowerCase()) + ' · ' + fechaCorta(v.desde) + ' al ' + fechaCorta(v.hasta) + '</div><h2>✈ ' + esc(v.nombre) + ' · resumen</h2>' +
+      '<div class="caja" style="gap:4px"><div class="fila"><div><div class="suave chico">Costo total · ' + r.diasTotal + ' día' + (r.diasTotal === 1 ? '' : 's') + '</div><b style="font-size:24px">' + din(r.gastado, mon) + '</b></div><div style="text-align:right"><div class="suave chico">límite ' + din(r.limite, mon) + '</div><b class="' + (r.disponible < 0 ? 'rojo' : 'verde-pos') + '">' + (r.disponible < 0 ? din(-r.disponible, mon) + ' arriba' : din(r.disponible, mon) + ' debajo ✓') + '</b></div></div>' +
+      lin('Por día', din(r.porDiaTotal, mon)) + (r.antes > 0.004 ? lin('Antes / durante', din(r.antes, mon) + ' / ' + din(r.durante, mon)) : '') + '</div>' +
+      (x.cats.length ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">POR CATEGORÍA</div>' + x.cats.map(function (c) { return lin(ICON_CAT[c[0]] + ' ' + c[0], din(c[1], mon)); }).join('') + '</div>' : '') +
+      (x.tarj.length ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">POR TARJETA</div>' + x.tarj.map(function (t) { return lin((t[0] === 'Efectivo' ? '💵 ' : '💳 ') + esc(t[0]), din(t[1], mon)); }).join('') + '</div>' : '') +
+      (x.prev ? '<div class="caja" style="gap:4px"><div class="suave chico fuerte">COMPARADO CON</div>' + lin(esc(x.prev.nombre) + ' · ' + fechaCorta(x.prev.desde) + ' (' + x.rp.diasTotal + ' días)', din(x.rp.porDiaTotal, x.rp.moneda) + ' por día') + '</div>' : '') +
+      '<div class="dos"><button class="btn" id="vr-pdf" onclick="App.pdfViaje(' + fila + ',this)">📄 PDF</button><button class="btn sec" onclick="App.compartirViaje(' + fila + ')">↗ Compartir</button></div>' +
+      '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  function textoViaje(fila) {
+    var v = viajePorFila(fila), x = datosResumenViaje(v), r = x.r, mon = x.mon;
+    return '✈ ' + v.nombre + ' (' + fechaCorta(v.desde) + ' al ' + fechaCorta(v.hasta) + ')\nCosto total: ' + txt(r.gastado, mon) + ' de ' + txt(r.limite, mon) + ' · ' + txt(r.porDiaTotal, mon) + ' por día' +
+      (r.antes > 0.004 ? '\nAntes del viaje ' + txt(r.antes, mon) + ' · durante ' + txt(r.durante, mon) : '') +
+      (x.cats.length ? '\n\nPor categoría:\n' + x.cats.map(function (c) { return '• ' + c[0] + ': ' + txt(c[1], mon); }).join('\n') : '') +
+      (x.tarj.length ? '\n\nPor tarjeta:\n' + x.tarj.map(function (t) { return '• ' + t[0] + ': ' + txt(t[1], mon); }).join('\n') : '');
+  }
+  function compartirViaje(fila) {
+    var t = textoViaje(fila);
+    if (navigator.share) navigator.share({ title: 'Resumen del viaje', text: t }).catch(function () { /* cancelado */ });
+    else navigator.clipboard.writeText(t).then(function () { toast('📋 Resumen copiado'); }, function () { toast('No se pudo copiar'); });
+  }
+  function pdfViaje(fila, boton) {
+    var v = viajePorFila(fila), x = datosResumenViaje(v);
+    if (boton) boton.disabled = true;
+    toast('Preparando el PDF…', 6000);
+    cargarScript('js/vendor/pdf-lib.min.js').then(function () {
+      return PDFViaje.construir(window.PDFLib, {
+        nombre: v.nombre, desde: v.desde, hasta: v.hasta, moneda: x.mon, r: x.r, cats: x.cats, tarj: x.tarj,
+        prev: x.prev ? { nombre: x.prev.nombre, desde: x.prev.desde, dias: x.rp.diasTotal, porDia: x.rp.porDiaTotal, moneda: x.rp.moneda } : null,
+        compras: x.r.compras.slice().reverse().map(function (c) { return [fechaCorta(c.mov.fecha), nombreBonito(c.mov.comercio) || 'Compra', c.categoria, c.cuenta === 'Efectivo' ? 'Efectivo' : etiquetaCuenta(c.cuenta), c.monto]; })
+      });
+    }).then(function (bytes) {
+      if (boton) boton.disabled = false;
+      return compartirArchivo(bytes, 'Viaje ' + v.nombre.replace(/[\\/:*?"<>|]/g, '') + '.pdf', 'application/pdf', 'Resumen del viaje ' + v.nombre);
+    }).catch(function (e) { if (boton) boton.disabled = false; toast('⚠️ No se pudo crear el PDF: ' + (e && e.message ? e.message : e), 6000); });
+  }
+  /** Dentro de un movimiento: ✈ Es del viaje */
+  function bloqueViajeDeMov(m) {
+    if (!m || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero') || !(D.viajes || []).length) return '';
+    var en = (D.viajes || []).filter(function (v) { return C.enViaje(v, m); })[0];
+    if (en) return '<div class="caja" style="margin-top:14px;background:var(--fondo);gap:6px"><b style="font-size:14px">✈ Es del viaje ' + esc(en.nombre) + '</b><div class="chips">' + chipRev('Ver viaje', 'App.cerrar();App.verViaje(' + en.fila + ')') + chipRev('Sacar del viaje', 'App.vjSacar(' + m.fila + ')') + '</div></div>';
+    var vs = (D.viajes || []).filter(function (v) { return v.desde && new Date(v.hasta) > new Date(hoy.getTime() - 60 * 86400000); }).sort(function (a, b) { return new Date(a.desde) - new Date(b.desde); });
+    if (!vs.length) return '';
+    return '<div class="caja" style="margin-top:14px;background:var(--fondo);gap:6px"><b style="font-size:14px">✈ ¿Es de un viaje?</b><span class="suave chico">Sumala aunque sea de antes de las fechas (vuelos, hotel…).</span><div class="chips">' +
+      vs.map(function (v) { return chipRev(esc(v.nombre) + ' · ' + fechaCorta(v.desde).replace(/ \d{4}$/, ''), 'App.vjSumar(' + m.fila + ',' + v.fila + ')'); }).join('') + '</div></div>';
+  }
+  function vjSumar(mf, vf) { var m = movPorFila(mf), v = viajePorFila(vf); if (!m || !v) return; encolar('marcarMovimiento', [mf, 'Viaje', '+' + C.categoriaViaje(m) + '@' + v.id, { monto: m.monto }], 'Del viaje ' + v.nombre + ': ' + (m.comercio || 'compra')); hecho('✈ Sumada al viaje ' + v.nombre); }
+  function vjSacar(mf) { var m = movPorFila(mf); if (!m) return; encolar('marcarMovimiento', [mf, 'Viaje', 'Fuera', { monto: m.monto }], 'Fuera del viaje: ' + (m.comercio || 'compra')); hecho('Compra sacada del viaje'); }
   function formViaje(fila) {
     var v = fila ? viajePorFila(fila) : null;
     var hoyIso = new Date().toISOString();
@@ -2702,6 +2905,10 @@ var App = (function () {
       '<label class="campo compacto"><span>Hasta</span><input id="vj-hasta" type="date" value="' + localInput(v ? v.hasta : hoyIso) + '"></label></div>' +
       '<div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px"><label class="campo compacto"><span>Límite</span><input id="vj-limite" data-dinero inputmode="decimal" value="' + (v ? String(v.limite).replace('.', ',') : '') + '" placeholder="2.000"></label>' +
       '<label class="campo compacto"><span>Moneda</span><select id="vj-moneda"><option value="USD"' + (!v || v.moneda === 'USD' ? ' selected' : '') + '>$</option><option value="CRC"' + (v && v.moneda === 'CRC' ? ' selected' : '') + '>₡</option></select></label></div>' +
+      '<details class="vj-pres"' + (v && v.presupuesto && Object.keys(v.presupuesto).length ? ' open' : '') + '><summary class="suave chico fuerte">PRESUPUESTO POR CATEGORÍA (OPCIONAL) ›</summary>' +
+        C.CATS_VIAJE.map(function (c) { var x = v && v.presupuesto ? v.presupuesto[c] : ''; return '<div class="fila vj-pc"><span>' + ICON_CAT[c] + ' ' + c + '</span><input class="monto pl-in vj-cat" data-cat="' + c + '" data-dinero inputmode="decimal" value="' + (x ? String(x).replace('.', ',') : '') + '" oninput="App.vjSumaPres()"></div>'; }).join('') +
+        '<div class="fila" style="padding-top:6px"><b>Suma</b><b id="vj-suma">—</b></div><button type="button" class="btn sec chico" style="margin-top:6px" onclick="App.vjRepartir()">↔ Repartir el límite solo</button>' +
+        '<div class="suave chico" style="margin-top:4px">Si no ponés montos, se ve solo el total (como siempre).</div></details>' +
       '<div class="suave chico fuerte" style="margin-top:12px">TARJETAS O CUENTAS DEL VIAJE</div>' +
       tarjetas.map(function (t) { return '<label class="check" style="margin-top:8px"><input type="checkbox" class="vj-t" value="' + esc(t) + '"' + (sel.indexOf(t) >= 0 ? ' checked' : '') + '> ' + esc(t === 'Efectivo' ? 'Efectivo (gastos sin cuenta)' : etiquetaCuenta(t)) + '</label>'; }).join('') +
       (D.fondos && D.fondos.length ? '<label class="campo compacto"><span>Ligado a un fondo (opcional)</span><select id="vj-sub"><option value="">— Ninguno —</option>' + opcionesSubcuenta(v ? v.subcuenta : '') + '</select></label>' : '') +
@@ -2709,18 +2916,40 @@ var App = (function () {
       '<div class="acciones"><button class="btn" id="vj-ok" onclick="App.guardarViaje(' + (fila || 0) + ')">Guardar</button>' +
       (v ? '<button class="btn peligro" id="vj-borrar" onclick="App.borrarViaje(' + fila + ')">Eliminar presupuesto</button>' : '') +
       '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    setTimeout(vjSumaPres, 30);
   }
   function guardarViaje(fila) {
     var v0 = fila ? viajePorFila(fila) : null;
     var v = { fila: fila || null, nombre: val('vj-nombre').trim(), desde: desdeInput(val('vj-desde')), hasta: desdeInput(val('vj-hasta')), limite: C.leerNumero(val('vj-limite')),
       moneda: val('vj-moneda'), tarjetas: Array.prototype.slice.call(document.querySelectorAll('.vj-t:checked')).map(function (e) { return e.value; }),
-      subcuenta: $('vj-sub') ? val('vj-sub') : '', activo: $('vj-activo') ? $('vj-activo').checked : true };
+      subcuenta: $('vj-sub') ? val('vj-sub') : '', activo: $('vj-activo') ? $('vj-activo').checked : true, id: v0 ? v0.id : undefined, presupuesto: leerPresViaje() };
     if (!v.nombre) return toast('Falta el nombre.');
     if (!v.limite || v.limite <= 0) return toast('Escribí el límite.');
     if (!v.desde || !v.hasta) return toast('Elegí las fechas.');
     if (!v.tarjetas.length) return toast('Elegí al menos una tarjeta o cuenta.');
     if (v0 && v.limite > v0.limite) v.reiniciarAvisos = true;
     srv('guardarViaje', [v], function (f) { if (!fila) viajeSel = f; listo('✅ Presupuesto guardado'); if (!fila) setTimeout(function () { ir('viaje'); }, 0); }, $('vj-ok'));
+  }
+  function leerPresViaje() {
+    var o = {}; document.querySelectorAll('.vj-cat').forEach(function (e) { var n = C.leerNumero(e.value); if (n > 0) o[e.getAttribute('data-cat')] = n; });
+    return o;
+  }
+  function vjSumaPres() {
+    var o = leerPresViaje(), t = 0; Object.keys(o).forEach(function (k) { t += o[k]; });
+    var lim = C.leerNumero(val('vj-limite')) || 0, mon = val('vj-moneda') || 'USD', e = $('vj-suma'); if (!e) return;
+    if (!t) { e.textContent = '—'; e.className = ''; return; }
+    e.textContent = txt(t, mon) + (lim ? (Math.abs(t - lim) < 0.5 ? ' ✓ igual al límite' : t > lim ? ' (más que el límite)' : ' (faltan ' + txt(lim - t, mon) + ')') : '');
+    e.className = lim && Math.abs(t - lim) < 0.5 ? 'verde-pos' : 'acento';
+  }
+  /** Reparte el límite según cómo gastaste en viajes anteriores (o una base: vuelos y hotel 30 %, comida 20 %…) */
+  function vjRepartir() {
+    var lim = C.leerNumero(val('vj-limite')); if (!(lim > 0)) return toast('Primero poné el límite.');
+    var tot = {}, suma = 0;
+    (D.viajes || []).forEach(function (v) { var r = C.viaje(D, v, hoy); if (r.estado !== 'Terminado') return; C.CATS_VIAJE.forEach(function (c) { tot[c] = (tot[c] || 0) + r.porCategoria[c]; suma += r.porCategoria[c]; }); });
+    var base = suma > 0 ? tot : { Vuelos: 30, Hospedaje: 30, Comida: 20, Transporte: 10, Tours: 5, Compras: 5, Otros: 0 };
+    var sb = 0; C.CATS_VIAJE.forEach(function (c) { sb += base[c] || 0; });
+    document.querySelectorAll('.vj-cat').forEach(function (e) { var c = e.getAttribute('data-cat'), n = Math.round(lim * (base[c] || 0) / sb); e.value = n ? formatoMonto(String(n)) : ''; });
+    vjSumaPres(); toast(suma > 0 ? 'Repartido según tus viajes anteriores' : 'Repartido con una base; ajustalo a tu gusto', 2500);
   }
   function borrarViaje(fila) {
     var b = $('vj-borrar');
@@ -2743,24 +2972,24 @@ var App = (function () {
     abrir('<div class="suave chico">' + fechaCorta(m.fecha) + ' · ' + esc(etiquetaCuenta(m.cuenta) || 'sin cuenta') + '</div><h2>' + esc(m.comercio || 'Compra') + '</h2>' +
       '<div class="grande" style="font-size:24px;font-weight:800">' + din(m.monto, m.moneda) + '</div>' +
       '<div class="suave chico fuerte" style="margin-top:12px">CATEGORÍA DEL VIAJE</div><div class="chips" style="margin-top:6px">' +
-      C.CATS_VIAJE.map(function (c) { return '<button class="chip' + (c === cat ? ' on' : '') + '" onclick="App.marcarViaje(' + fila + ',\'' + (String(m.viaje || '').charAt(0) === '+' ? '+' : '') + c + '\',this)">' + ICON_CAT[c] + ' ' + c + '</button>'; }).join('') + '</div>' +
+      C.CATS_VIAJE.map(function (c) { var mk = C.marcaViaje(m); return '<button class="chip' + (c === cat ? ' on' : '') + '" onclick="App.marcarViaje(' + fila + ',\'' + (mk.mas ? '+' : '') + c + (mk.id ? '@' + mk.id : '') + '\',this)">' + ICON_CAT[c] + ' ' + c + '</button>'; }).join('') + '</div>' +
       '<div class="acciones"><button class="btn peligro" onclick="App.marcarViaje(' + fila + ',\'Fuera\',this)">Sacar del viaje</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
   }
   function marcarViaje(fila, valor, boton) {
     var m = movPorFila(fila);
     encolar('marcarMovimiento', [fila, 'Viaje', valor, { monto: m.monto }], 'Viaje: ' + (m.comercio || 'compra') + ' · ' + (valor === 'Fuera' ? 'fuera' : valor.replace('+', '')));
-    hecho(valor === 'Fuera' ? 'Compra sacada del viaje' : '✅ ' + valor.replace('+', '') + (valor.charAt(0) === '+' ? ' · agregada al viaje' : ''));
+    hecho(valor === 'Fuera' ? 'Compra sacada del viaje' : '✅ ' + valor.replace('+', '').replace(/@.*$/, '') + (valor.charAt(0) === '+' ? ' · agregada al viaje' : ''));
   }
-  function formAgregarViaje(fila) {
+  function formAgregarViaje(fila, soloAntes) {
     var v = viajePorFila(fila);
-    var ini = new Date(v.desde), fin = new Date(new Date(v.hasta).getTime() + 86400000);
+    var ini = new Date(v.desde), fin = new Date(new Date(v.hasta).getTime() + 86400000), lim = new Date(ini.getTime() - 120 * 86400000);
     var cand = D.movimientos.filter(function (m) {
       var f = new Date(m.fecha);
-      return (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && f >= ini && f < fin && !C.enViaje(v, m);
-    }).sort(function (a, b) { return new Date(b.fecha) - new Date(a.fecha); });
-    abrir('<h2>Agregar al viaje</h2><div class="suave">Compras de esas fechas que no están en el viaje. Tocá una para sumarla.</div>' +
-      (cand.length ? '<div class="caja sinpad" style="margin-top:10px">' + cand.slice(0, 40).map(function (m) {
-        return '<button class="item" onclick="App.marcarViaje(' + m.fila + ',\'+' + C.categoriaViaje(m) + '\',this)"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(m.comercio || 'Compra') + '</span>' +
+      return m.fila > 0 && (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && f >= (soloAntes ? lim : lim) && f < (soloAntes ? ini : fin) && !C.enViaje(v, m) && !C.marcaViaje(m).id && !C.marcaViaje(m).efectivo;
+    }).sort(function (a, b) { var ca = /^(Vuelos|Hospedaje)$/.test(C.categoriaViaje(a)) ? 0 : 1, cb = /^(Vuelos|Hospedaje)$/.test(C.categoriaViaje(b)) ? 0 : 1; return ca - cb || new Date(b.fecha) - new Date(a.fecha); });
+    abrir('<h2>Sumar al viaje</h2><div class="suave">Compras que ya están en la app (también las de antes del viaje: vuelos, hotel…). Tocá una para sumarla.</div>' +
+      (cand.length ? '<div class="caja sinpad" style="margin-top:10px">' + cand.slice(0, 50).map(function (m) {
+        return '<button class="item" onclick="App.marcarViaje(' + m.fila + ',\'+' + C.categoriaViaje(m) + (new Date(m.fecha) < ini ? '@' + v.id : '') + '\',this)"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(m.comercio || 'Compra') + (new Date(m.fecha) < ini ? ' <span class="pill" style="font-size:10px;padding:1px 6px">antes</span>' : '') + '</span>' +
           '<span class="det" style="display:block">' + esc(fechaCorta(m.fecha) + ' · ' + (etiquetaCuenta(m.cuenta) || 'sin cuenta')) + '</span></span><span class="monto"><b>' + din(m.monto, m.moneda) + '</b></span></button>';
       }).join('') + '</div>' : '<div class="caja vacio" style="margin-top:10px">No hay otras compras en esas fechas.</div>') +
       '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
@@ -2831,7 +3060,7 @@ var App = (function () {
   }
 
   // ------------------------------------------------------------ PANELES (formularios)
-  function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); }
+  function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); if (CALC.abierta) setTimeout(pintarCalc, 50); }
   function cerrar() { $('velo').classList.remove('abierto'); }
   function val(id) { var e = $(id); return e ? e.value : ''; }
   function listo(msg) {
@@ -2863,7 +3092,7 @@ var App = (function () {
       '<label class="campo"><span>Nota</span><input id="f-nota" value="' + esc(m.nota) + '" placeholder="Opcional"></label>' +
       '<label class="check"><input type="checkbox" id="f-regla"> Usar siempre esta categoría y sobre para este comercio</label>' +
       (fila && m.tipo === 'Pago de tarjeta' ? bloqueAbonosDePago(m) : '') +
-      (fila ? bloqueSobresDeMov(m) : '') +
+      (fila ? bloqueSobresDeMov(m) + bloqueViajeDeMov(m) : '') +
       '<div class="acciones"><button class="btn" id="f-guardar" onclick="App.guardarMov(' + (fila || 0) + ')">Guardar</button>' +
       (fila && m.tipo === 'Gasto' ? '<button class="btn sec" onclick="App.formTasaCero(' + fila + ')">Pasar a tasa cero</button>' : '') +
       (fila ? '<button class="btn peligro" id="f-borrar" onclick="App.borrarMov(' + fila + ')">Eliminar movimiento</button>' : '') +
@@ -3386,7 +3615,8 @@ var App = (function () {
         return '<button class="chip' + (letra === l[0] ? ' on' : '') + '" onclick="App.letra(\'' + l[0] + '\')">' + l[1] + '</button>';
       }).join('') + '</div>' +
       opcion('inicio', 'Editar Inicio', 'También manteniendo presionado cualquier widget en Inicio', '<span class="flecha">›</span>', 'App.editarInicio()') +
-      opcion('ojo', 'Ocultar montos', 'Muestra ****** en vez de las cantidades', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')));
+      opcion('ojo', 'Ocultar montos', 'Muestra ****** en vez de las cantidades', interruptor('aj-priv', privado, 'App.privado(this.checked)', 'Ocultar montos')) +
+      opcion('calculadora', 'Calculadora rápida 🧮', 'Botón flotante para sumar y restar sin salir de la app', interruptor('aj-calc', calcVisible(), 'App.calcMostrar(this.checked)', 'Calculadora rápida')));
 
     h += grupo('se', '🔒', '#E5484D', 'Seguridad', AJ.pinActivo ? 'PIN activo' + (huella ? ' · huella activa' : '') : 'Sin PIN',
       opcion('candado', 'PIN de acceso', AJ.pinActivo ? 'Activado · se pide al abrir y tras ' + MINUTOS_BLOQUEO + ' min fuera de la app' : 'Desactivado',
@@ -3674,6 +3904,7 @@ var App = (function () {
   function alEscribirMonto(e) {
     var c = e.target;
     if (!c.hasAttribute || !c.hasAttribute('data-dinero')) return;
+    if (esOperacion(c.value)) return pistaCalc(c);   // v2.10.0: "10.000+5.000-329" se calcula al salir del campo
     var v = c.value, pos = c.selectionStart === null ? v.length : c.selectionStart;
     // el punto del teclado se toma como coma decimal (si todavía no hay una)
     if (e.data === '.' && v.charAt(pos - 1) === '.') {
@@ -3988,7 +4219,7 @@ var App = (function () {
 
   // ---------------------------------------------------------------- AVISOS (A + C)
   var TIPOS_AVISO = [['asignar', '✉', 'Por asignar a sobres', ''], ['revisar', '⚠', 'Por revisar', 'sin categoría'], ['salario', '💰', 'Día de salario', 'según tus fechas de pago'],
-    ['tarjeta', '💳', 'Pago de tarjeta', ''], ['negativo', '🔴', 'Sobre en negativo', ''], ['super', '🛒', 'Super y Otros', '“¿este sirve?” y cambios en tus listas'], ['version', '⬆', 'Versión nueva de la app', '']];
+    ['tarjeta', '💳', 'Pago de tarjeta', ''], ['negativo', '🔴', 'Sobre en negativo', ''], ['viaje', '✈', 'Viajes', 'resumen de cada día mientras dura el viaje'], ['super', '🛒', 'Super y Otros', '“¿este sirve?” y cambios en tus listas'], ['version', '⬆', 'Versión nueva de la app', '']];
   function avCfg() { var a = PREFS().avisos || {}; a.tipos = a.tipos || {}; a.silencio = a.silencio || { d: 22, h: 7 }; a.correo = a.correo || { activo: false, hora: 20, siempre: false }; return a; }
   function avisosTel() { return guardado('mf-avisos-tel', 'no') === 'si' && typeof Notification !== 'undefined' && Notification.permission === 'granted'; }
   function grupoAvisos() {
@@ -4537,8 +4768,11 @@ var App = (function () {
         return '<button class="opcion" onclick="App.cerrar();App.abrirPlan(\'' + esc(c.nombre).replace(/'/g, "\\'") + '\')"><span class="cuerpo"><span class="nombre" style="display:block">' + esc(etiquetaCuenta(c.nombre)) + '</span><span class="det" style="display:block">' + txt(t, 'CRC') + ' sin pagar</span></span><span class="flecha">›</span></button>';
       }).join('') + '</div>');
     }
-    PL = { cuenta: nombre, items: movsSinPagar(nombre).map(function (x) { return x; }) };
-    planPreset(cuentaPorNombre(nombre) && cuentaPorNombre(nombre).diaCorte ? 'corte' : 'todo', true);
+    // v2.10.0: planeador "espejo del banco": cuánto pagar → de qué sobres sale → solo se anotan las sacadas
+    var c0 = cuentaPorNombre(nombre), pp = C.porPagarTarjeta(D, c0, hoy);
+    var mon0 = pp.CRC > 0.004 || !(pp.USD > 0.004) ? 'CRC' : 'USD';
+    PL = { esp: true, cuenta: nombre, paso: 1, modo: 'estado', moneda: mon0, monto: Math.max(0, pp[mon0]), pp: pp, sobres: {}, sinCorreo: false,
+      origen: (ORIG().porTarjeta || {})[nombre] || ORIG().tarjetas || cuentaPrincipal() };
     ir('plan');
   }
   /** Compras (y devoluciones) de la tarjeta que todavía no se marcaron como pagadas */
@@ -4593,6 +4827,7 @@ var App = (function () {
   }
   function pPlan() {
     if (!PL) return ir('tarjetas');
+    if (PL.esp) return pPlanEsp();
     var c = cuentaPorNombre(PL.cuenta), corte = ultimoCorte(c), T = planTotales();
     var h = cabSimple('📋 Planear pago', esc(etiquetaCuenta(PL.cuenta)), 'App.ir(\'tarjetas\')');
     var chip = function (k, n) { return '<button class="chip' + (PL.preset === k ? ' on' : '') + '" onclick="App.planPreset(\'' + k + '\')">' + n + '</button>'; };
@@ -4619,6 +4854,111 @@ var App = (function () {
     }
     $('p-plan').innerHTML = h;
   }
+  // ---- v2.10.0 · Planeador espejo
+  function plMontoModo() {
+    var pp = PL.pp, mon = PL.moneda;
+    if (PL.modo === 'estado') return Math.max(0, pp[mon]);
+    if (PL.modo === 'hoy') return Math.max(0, pp.deuda[mon]);
+    return PL.monto;
+  }
+  function plSobresTotal() { var t = 0; Object.keys(PL.sobres).forEach(function (k) { t += PL.sobres[k] || 0; }); return Math.round(t * 100) / 100; }
+  function pPlanEsp() {
+    var c = cuentaPorNombre(PL.cuenta), pp = PL.pp, mon = PL.moneda, h;
+    var f = c && c.diaPago ? C.proximaFecha(c.diaPago, hoy) : null;
+    var dosMon = pp.deuda.USD > 0.004 || pp.USD > 0.004 || (c && c.limiteUSD);
+    if (PL.paso === 1) {
+      h = cabSimple('Planear pago', esc(etiquetaCuenta(PL.cuenta)), 'App.ir(\'tarjetas\')');
+      h += '<div class="caja" style="gap:4px"><div class="suave chico">Por pagar' + (f ? ' · vence ' + DIAS_L[f.getDay()] + ' ' + f.getDate() : '') + '</div><div class="fuerte" style="font-size:26px">' + [pp.CRC > 0.004 || !(pp.USD > 0.004) ? din(Math.max(0, pp.CRC), 'CRC') : '', pp.USD > 0.004 ? din(pp.USD, 'USD') : ''].filter(String).join(' + ') + '</div>' +
+        '<div class="fila chico"><span class="suave">Deuda hoy</span><span>' + [din(pp.deuda.CRC, 'CRC'), pp.deuda.USD ? din(pp.deuda.USD, 'USD') : ''].filter(String).join(' + ') + '</span></div>' +
+        (pp.nuevas.CRC || pp.nuevas.USD ? '<div class="fila chico"><span class="suave">Compras después del corte (van al próximo)</span><span class="suave">−' + [pp.nuevas.CRC ? din(pp.nuevas.CRC, 'CRC') : '', pp.nuevas.USD ? din(pp.nuevas.USD, 'USD') : ''].filter(String).join(' + ') + '</span></div>' : '') + '</div>';
+      h += '<div class="caja" style="gap:6px"><div class="suave chico">¿Cuánto vas a pagar?</div><div class="chips">' + chipRev('Todo lo del estado', 'App.plModo(\'estado\')', PL.modo === 'estado') + chipRev('Todo lo de hoy', 'App.plModo(\'hoy\')', PL.modo === 'hoy') + chipRev('Otro monto', 'App.plModo(\'otro\')', PL.modo === 'otro') + '</div>' +
+        (PL.modo === 'otro' ? '<label class="campo compacto"><span>Monto</span><input id="pl-monto" class="monto" data-dinero inputmode="decimal" value="' + (PL.monto ? String(PL.monto).replace('.', ',') : '') + '" oninput="App.plMonto(this.value)"></label>' : '<div class="fuerte" style="font-size:18px">' + din(plMontoModo(), mon) + '</div>') +
+        (dosMon ? '<div class="suave chico" style="margin-top:6px">Moneda del pago</div><div class="chips">' + chipRev('₡ Colones', 'App.plMoneda(\'CRC\')', mon === 'CRC') + chipRev('$ Dólares', 'App.plMoneda(\'USD\')', mon === 'USD') + '</div>' : '') + '</div>';
+      h += '<div class="suave chico" style="margin:0 2px 10px">Solo lo que toca pagar (sin las compras nuevas). ' + (dosMon ? 'El pago en $ baja los dólares; el pago en ₡, los colones.' : '') + '</div>';
+      h += '<button class="btn" style="width:100%" onclick="App.plPaso(2)"' + (plMontoModo() > 0.004 ? '' : ' disabled') + '>Siguiente ›</button>';
+    } else if (PL.paso === 2) {
+      var total = plMontoModo(), enS = plSobresTotal(), disp = Math.round((total - enS) * 100) / 100;
+      var sbs = sinServidorSobres() ? [] : SB().lista.filter(function (s) { return (s.moneda === 'USD' ? 'USD' : 'CRC') === mon; });
+      var cpri = cuentaPorNombre(cuentaPrincipal()), dp = cpri ? disponibleDe(cpri) : null;
+      h = cabSimple('¿De dónde sale?', 'Planear pago · ' + txt(total, mon), 'App.plPaso(1)');
+      h += '<div class="caja sinpad"><div class="suave chico" style="padding:12px 16px 2px">Sobres del BCR</div>' + (sbs.length ? sbs.map(function (s) {
+        var on = PL.sobres[s.nombre] !== undefined;
+        return '<div class="pl-sob' + (on ? ' on' : '') + '"><label class="it-check"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.plSobre(\'' + q(s.nombre) + '\',this.checked)"></label><div class="it-nom"><b>' + esc(nomSobre(s.nombre)) + '</b><span class="suave chico">tiene ' + txt(s.saldo, mon) + '</span></div>' +
+          (on ? '<input class="monto pl-in" data-dinero inputmode="decimal" value="' + (PL.sobres[s.nombre] ? String(PL.sobres[s.nombre]).replace('.', ',') : '') + '" onchange="App.plSobreMonto(\'' + q(s.nombre) + '\',this.value)">' : '<span class="suave">—</span>') + '</div>';
+      }).join('') : '<div class="suave chico" style="padding:4px 16px 10px">No hay sobres en esta moneda.</div>') +
+        '<div class="pl-sob"><span style="font-size:18px;width:22px;text-align:center">🪙</span><div class="it-nom"><b>Del disponible</b><span class="suave chico">' + (dp && mon === 'CRC' ? 'tiene ' + txt(dp.disponible, 'CRC') : 'lo que no sale de sobres') + '</span></div><b class="' + (disp < -0.004 ? 'rojo' : '') + '">' + din(Math.max(0, disp), mon) + '</b></div>' +
+        '<div class="fila" style="padding:10px 16px;border-top:1px solid var(--linea)"><b>Total</b><b class="' + (disp < -0.004 ? 'rojo' : 'verde-pos') + '">' + (disp < -0.004 ? 'Te pasaste ' + txt(-disp, mon) : din(total, mon) + ' ✓') + '</b></div></div>';
+      var ctas = cuentasAhorro().filter(function (x) { return (x.moneda === 'USD' ? 'USD' : 'CRC') === mon; });
+      h += '<div class="caja"><label class="campo compacto"><span>Sale de</span><select id="pl-origen" onchange="App.plOrigen(this.value)">' + ctas.map(function (x) { return '<option' + (x.nombre === PL.origen ? ' selected' : '') + '>' + esc(x.nombre) + '</option>'; }).join('') + '</select></label></div>';
+      h += '<div class="suave chico" style="margin:0 2px 10px">Igual que en la app del banco: marcás los sobres y cuánto de cada uno. El resto, del disponible.</div>';
+      h += '<button class="btn" style="width:100%" onclick="App.plSacar()"' + (disp < -0.004 ? ' disabled' : '') + '>' + (enS > 0.004 ? '📤 Sacar de los sobres' : '✓ Listo (todo del disponible)') + '</button>';
+    } else {
+      var r = PL.hecho;
+      h = cabSimple('Listo para pagar', esc(etiquetaCuenta(PL.cuenta)), 'App.ir(\'tarjetas\')');
+      h += '<div class="caja" style="gap:4px"><b>✓ Anotado en la app</b>' + r.sacadas.map(function (x) { return '<div class="fila chico"><span>📤 ' + esc(nomSobre(x.sobre)) + ' → disponible</span><b>' + din(x.monto, r.moneda) + '</b></div>'; }).join('') +
+        (r.disp > 0.004 ? '<div class="fila chico"><span>🪙 Del disponible</span><b>' + din(r.disp, r.moneda) + '</b></div>' : '') +
+        (r.sacadas.length ? '<div class="suave chico">Cada sacada queda como fila en Movimientos: “Sobre → disponible · para pagar ' + esc(etiquetaCuenta(PL.cuenta)) + '”.</div>' : '') + '</div>';
+      h += '<div class="caja borde-acento" style="gap:6px"><div><b>Ahora pagá en tu banco</b> ' + din(r.total, r.moneda) + ' a la tarjeta' + (c && c.ultimos4 ? ' ••' + esc(c.ultimos4) : '') + '. Cuando llegue el correo del pago, se une solo con esto (no se descuenta dos veces).</div><button class="btn sec chico" style="align-self:flex-start" onclick="App.plCopiar()">📋 Copiar monto</button></div>';
+      h += '<div class="caja">' + opcion('correo', 'Este pago no llega por correo', r.anotado ? 'Pago anotado ✓' : 'Anotar el pago ya (sin esperar el correo)', interruptor('pl-sincorreo', !!r.anotado, 'App.plSinCorreo(this.checked)', 'Este pago no llega por correo')) + '</div>';
+      h += '<button class="btn sec" style="width:100%" onclick="App.ir(\'tarjetas\')">Volver a Tarjetas</button>';
+    }
+    $('p-plan').innerHTML = h;
+  }
+  var DIAS_L = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  function plModo(m) { PL.modo = m; if (m === 'otro' && !PL.monto) PL.monto = Math.max(0, PL.pp[PL.moneda]); pintar(); }
+  function plMonto(v) { PL.monto = C.leerNumero(v) || 0; }
+  function plMoneda(m) { PL.moneda = m; PL.sobres = {}; if (PL.modo === 'otro') PL.monto = Math.max(0, PL.pp[m]); var ctas = cuentasAhorro().filter(function (x) { return (x.moneda === 'USD' ? 'USD' : 'CRC') === m; }); if (ctas.length && !ctas.some(function (x) { return x.nombre === PL.origen; })) PL.origen = ctas[0].nombre; pintar(); }
+  function plPaso(n) { if (n === 2 && PL.modo === 'otro' && $('pl-monto')) PL.monto = C.leerNumero(val('pl-monto')) || 0; PL.paso = n; pintar(); window.scrollTo(0, 0); }
+  function plSobre(n, on) {
+    if (!on) delete PL.sobres[n];
+    else { var falta = Math.max(0, plMontoModo() - plSobresTotal()), s = sobreInfo(n); PL.sobres[n] = Math.round(Math.min(falta, s ? Math.max(0, s.saldo) : falta) * 100) / 100; }
+    pintar();
+  }
+  function plSobreMonto(n, v) { PL.sobres[n] = C.leerNumero(v) || 0; pintar(); }
+  function plOrigen(v) { PL.origen = v; }
+  function plCopiar() { var t = PL.hecho.total; navigator.clipboard.writeText(String(t).replace('.', ',')).then(function () { toast('📋 Copiado: ' + txt(t, PL.hecho.moneda)); }, function () { toast('No se pudo copiar'); }); }
+  function plSacar() {
+    var total = plMontoModo(), mon = PL.moneda, id = Date.now().toString(36), sacadas = [], auts = [];
+    if (cola.length > 20) return toast('Esperá a que se envíen los cambios pendientes.');
+    Object.keys(PL.sobres).forEach(function (n, i) {
+      var m = Math.round((PL.sobres[n] || 0) * 100) / 100; if (!(m > 0.004)) return;
+      var s = filaSobre(C.TIPO_SACAR, n, m, 'Sacado del sobre ' + nomSobre(n) + ' · para pagar ' + etiquetaCuenta(PL.cuenta), null, 'SAC-PL' + id + '-' + i, '', mon);
+      sacadas.push({ sobre: n, monto: m }); auts.push(s.autorizacion);
+    });
+    var disp = Math.round((total - plSobresTotal()) * 100) / 100;
+    var planes = (PREFS().planesEsp || []).filter(function (x) { return new Date(x.creado) > new Date(hoy.getTime() - 20 * 86400000); });
+    planes.push({ id: id, cuenta: PL.cuenta, monto: total, moneda: mon, auts: auts, disp: disp, creado: new Date().toISOString() });
+    guardarPrefs({ planesEsp: planes }, 'Plan de pago ' + etiquetaCuenta(PL.cuenta) + ' · ' + txt(total, mon));
+    PL.hecho = { id: id, total: total, moneda: mon, sacadas: sacadas, disp: disp, anotado: false };
+    PL.paso = 3; sbMemo = null; pintar(); window.scrollTo(0, 0);
+    toast(sacadas.length ? '📤 Sacado de ' + sacadas.length + ' sobre' + (sacadas.length === 1 ? '' : 's') : '✓ Listo', 2500);
+  }
+  function plSinCorreo(on) {
+    var r = PL.hecho; if (!r || r.anotado || !on) return;
+    var c = cuentaPorNombre(PL.cuenta);
+    encolar('guardarMovimiento', [{ fila: null, control: null, fecha: new Date().toISOString(), comercio: 'Pago de tarjeta' + (c && c.ultimos4 ? ' ••' + c.ultimos4 : ''), lugar: '', monto: r.total, moneda: r.moneda, tipo: 'Pago de tarjeta', cuenta: PL.cuenta,
+      categoria: '', sobre: '', origen: 'Manual', autorizacion: 'PLAN-' + r.id, nota: 'Planeador de pagos', recordarRegla: false }], 'Pago de ' + etiquetaCuenta(PL.cuenta) + ' · ' + txt(r.total, r.moneda));
+    r.anotado = true; pintar(); toast('✅ Pago anotado', 2000);
+  }
+  /** Llegó un pago (o la salida de plata) que coincide con un plan del planeador → se une con sus sacadas y lo del disponible */
+  function autoPlanEsp() {
+    var planes = PREFS().planesEsp || []; if (!planes.length || !D || sinServidorSobres()) return;
+    var usados = sacadasUsadas(), quedan = planes.slice(), n = 0;
+    SB().pendientes.forEach(function (p) {
+      if (p.sentido !== 'sale' || p.mov.fila <= 0) return;
+      var m = p.mov, pl = quedan.filter(function (x) {
+        return Math.abs(x.monto - p.falta) < 1 && (m.moneda === 'USD' ? 'USD' : 'CRC') === x.moneda && new Date(m.fecha) >= new Date(new Date(x.creado).getTime() - 86400000) &&
+          (m.tipo !== 'Pago de tarjeta' || normNomL(m.cuenta) === normNomL(x.cuenta));
+      })[0];
+      if (!pl) return;
+      var sacs = pl.auts.map(function (au) { return D.movimientos.filter(function (x) { return x.autorizacion === au && x.fila > 0; })[0]; }).filter(Boolean);
+      if (sacs.length !== pl.auts.length || sacs.some(function (x) { return usados[x.autorizacion]; })) return;   // todavía no llegaron a Google
+      unirSacadas(p, sacs, pl.disp > 0.004 ? 'disponible' : null); n++;
+      quedan = quedan.filter(function (x) { return x !== pl; });
+    });
+    if (n) { guardarPrefs({ planesEsp: quedan }, 'Plan de pago usado'); sbMemo = null; pintar(); toast('✓ Pago unido con lo que planeaste', 3000); }
+  }
+  function normNomL(s) { return C.normNom(s); }
   function planMarcar(i, on) { PL.items[i].sel = !!on; PL.preset = ''; pintar(); }
   function planSobre(i, v) { PL.items[i].sobre = v; if (v && !PL.items[i].sel) PL.items[i].sel = true; pintar(); }
   function planSugerir() { var sin = []; PL.items.forEach(function (x) { if (x.sel && !x.cred && !x.ya && !x.sobre) { x.sobre = sugerirSobre(x.m); if (!x.sobre) sin.push(nombreBonito(x.m.comercio)); } }); pintar(); if (sin.length) toast('No encontré sobre para ' + sin.join(', ') + '. Elegilo vos.'); }
@@ -5022,7 +5362,7 @@ var App = (function () {
       (meta ? ' · meta ' + din(meta, mon) : '') + (s.asignado ? ' · ' + din(s.asignado, mon) + '/mes' : '') + '</span></div></div>' +
       '<div class="sb-et">Saldo del sobre</div><div class="cifra-g' + (neg ? ' rojo' : '') + '">' + din(hs.saldo, mon) + '</div>' +
       (meta ? barra(pm) + '<div class="sb-et">' + Math.max(0, Math.round(pm * 100)) + '% de la meta' + (pm < 1 ? ' · faltan ' + din(meta - hs.saldo, mon) : ' · ¡lograda!') + '</div>' : '') +
-      iconos([['📥', 'Meter', 'App.formSacarMeter(1)', true], ['📤', 'Sacar', 'App.formSacarMeter(-1)'], ['🧾', 'Movimientos', 'App.irListaSobre()'], ['✏️', 'Editar', 'App.editarSobre()']]) + '</div>';
+      iconos([['📥', 'Meter', 'App.formSacarMeter(1)', true], ['📤', 'Sacar', 'App.formSacarMeter(-1)'], ['⚖', 'Igualar al BCR', 'App.formIgualar()'], ['✏️', 'Editar', 'App.editarSobre()']]) + '</div>';
     // período
     var r = SOB.f === 'mes' ? C.rangoPeriodo('mes', hoy) : SOB.f === 'pasado' ? C.rangoPeriodo('pasado', hoy) : [null, null];
     var en = hs.lista.filter(function (e) { var f = new Date(e.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]) && (SOB.f !== 'cargas' || e.monto >= 0) && (SOB.f !== 'descargas' || e.monto < 0); });
@@ -5055,6 +5395,97 @@ var App = (function () {
       }).join('');
     }
     $('p-sobre').innerHTML = h;
+  }
+  // ---- v2.10.0 · Igualar los sobres al saldo del BCR
+  var IG = null;
+  function saldoHoySobre(n) { return C.historialSobre(D, n).saldo; }
+  function dispFijo() { var pri = cuentaPrincipal(); return !!(pri && (ORIG().dispAnotado || {})[pri]); }
+  function formIgualar(nombre) {
+    nombre = nombre || SOB.nombre;
+    var s = sobreInfo(nombre); if (!s) return;
+    var mon = s.moneda === 'USD' ? 'USD' : 'CRC';
+    IG = { nombre: nombre, app: Math.round(saldoHoySobre(nombre) * 100) / 100, modo: 'si', mon: mon };
+    abrir('<div class="suave chico">' + esc(nomSobre(nombre)) + '</div><h2>⚖ Igualar al BCR</h2>' +
+      '<div class="caja" style="gap:6px"><div class="fila"><span class="suave">En la app</span><b>' + din(IG.app, mon) + '</b></div>' +
+      '<label class="campo compacto"><span>Lo que dice el BCR</span><input id="ig-bcr" class="monto" data-dinero inputmode="decimal" oninput="App.igCalc()"></label>' +
+      '<div class="fila" style="border-top:1px solid var(--linea);padding-top:8px"><b>Diferencia</b><b id="ig-dif">—</b></div></div>' +
+      '<div class="caja" style="gap:8px"><div class="suave chico">¿Por qué no coincide?</div><div class="ajena-op" id="ig-ops"></div></div>' +
+      '<div class="acciones"><button class="btn" id="ig-ok" onclick="App.guardarIgualar()" disabled>Igualar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    igCalc();
+    setTimeout(function () { var e = $('ig-bcr'); if (e) e.focus(); }, 150);
+  }
+  function igCalc() {
+    if (!IG) return;
+    var v = C.leerNumero(val('ig-bcr')), dif = v === null ? null : Math.round((v - IG.app) * 100) / 100;
+    IG.dif = dif;
+    var e = $('ig-dif'); if (e) { e.textContent = dif === null ? '—' : Math.abs(dif) < 0.005 ? '✓ igual' : (dif > 0 ? '+' : '−') + txt(Math.abs(dif), IG.mon); e.className = dif === null ? '' : Math.abs(dif) < 0.005 ? 'verde-pos' : dif > 0 ? 'verde-pos' : 'rojo'; }
+    var d = dif || 0, fijo = dispFijo();
+    var ops = $('ig-ops');
+    if (ops) ops.innerHTML = chipRev('✓ Corregir el sobre' + (fijo ? ' (el disponible no cambia)' : '') + '<br><span class="chico" style="font-weight:400;opacity:.8">Para cuando faltó anotar algo o el saldo inicial estaba mal</span>', 'App.igModo(\'si\')', IG.modo === 'si') +
+      chipRev((d >= 0 ? '📥 Lo metí desde el disponible' : '📤 Lo saqué al disponible') + '<br><span class="chico" style="font-weight:400;opacity:.8">El disponible ' + (d >= 0 ? 'baja' : 'sube') + ' ' + txt(Math.abs(d), IG.mon) + '</span>', 'App.igModo(\'disp\')', IG.modo === 'disp');
+    var ok = $('ig-ok'); if (ok) ok.disabled = !(dif !== null && Math.abs(dif) >= 0.005);
+  }
+  function igModo(m) { IG.modo = m; igCalc(); }
+  /** Aplica la diferencia a un sobre: corrigiendo su saldo inicial o con una fila Meter/Sacar */
+  function aplicarIgualar(nombre, dif, modo, listo2) {
+    var s = sobreInfo(nombre); if (!s || Math.abs(dif) < 0.005) return listo2 && listo2();
+    if (modo === 'disp') {
+      filaSobre(dif > 0 ? C.TIPO_METER : C.TIPO_SACAR, nombre, Math.abs(dif), (dif > 0 ? 'Metido al sobre ' : 'Sacado del sobre ') + nomSobre(nombre) + ' · igualar al BCR', null, null, '', s.moneda === 'USD' ? 'USD' : 'CRC');
+      return listo2 && listo2();
+    }
+    var nuevo = Math.round(((s.saldoInicial || 0) + dif) * 100) / 100;
+    srv('guardarSobre', [{ fila: s.fila, asignado: s.asignado || 0, saldoInicial: nuevo, meta: s.meta || '', tipo: s.tipo || 'Variable' }], function () { if (listo2) listo2(); });
+  }
+  function guardarIgualar() {
+    if (!IG || IG.dif === null || Math.abs(IG.dif) < 0.005) return;
+    var b = $('ig-ok'); if (b) b.disabled = true;
+    var n = IG.nombre, d = IG.dif;
+    aplicarIgualar(n, d, IG.modo, function () { listo('⚖ ' + nomSobre(n) + ' igualado al BCR (' + (d > 0 ? '+' : '−') + txt(Math.abs(d), IG.mon) + ')'); });
+  }
+  function formIgualarTodos() {
+    var lista = SB().lista.map(function (s) { return Object.assign({}, s, { saldo: saldoHoySobre(s.nombre) }); });
+    IG = { todos: true, modo: 'si', lista: lista };
+    var cpri = cuentaPorNombre(cuentaPrincipal()), dp = cpri ? disponibleDe(cpri) : null;
+    abrir('<h2>⚖ Igualar todos al BCR</h2><div class="suave">Abrí la app del BCR y copiá el saldo de cada sobre. Dejá en blanco los que ya están iguales.</div>' +
+      '<div class="caja sinpad" style="margin-top:10px"><div class="ig-fila suave chico" style="padding-top:10px"><span>Sobre</span><span>BCR</span><span style="text-align:right">Dif.</span></div>' +
+      lista.map(function (s, i) {
+        var mon = s.moneda === 'USD' ? 'USD' : 'CRC';
+        return '<div class="ig-fila"><span><b>' + esc(nomSobre(s.nombre)) + '</b><span class="suave chico" style="display:block">app ' + txt(s.saldo, mon) + '</span></span>' +
+          '<input class="monto pl-in" id="igt-' + i + '" data-dinero inputmode="decimal" placeholder="' + esc(numTexto(Math.round(s.saldo * 100) / 100)) + '" oninput="App.igTodosCalc()"><b class="chico" id="igd-' + i + '" style="text-align:right">—</b></div>';
+      }).join('') + '</div>' +
+      (dp ? '<div class="caja"><div class="ig-fila" style="padding:0;border:0"><span><b>Disponible</b><span class="suave chico" style="display:block">app ' + txt(dp.disponible, 'CRC') + '</span></span><input class="monto pl-in" id="igt-disp" data-dinero inputmode="decimal" oninput="App.igTodosCalc()"><b class="chico" id="igd-disp" style="text-align:right">—</b></div>' +
+        '<div class="suave chico" id="ig-disp-nota"></div></div>' : '') +
+      '<div class="caja" style="gap:6px"><div class="suave chico">Las diferencias de los sobres:</div><div class="chips">' + chipRev('✓ Corregir los sobres', 'App.igTodosModo(\'si\')', true) + chipRev('🪙 Meter/sacar del disponible', 'App.igTodosModo(\'disp\')') + '</div></div>' +
+      '<div class="acciones"><button class="btn" id="igt-ok" onclick="App.guardarIgualarTodos()" disabled>Igualar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function igTodosModo(m) { IG.modo = m; document.querySelectorAll('#panel .chips .chip').forEach(function (c) { c.classList.toggle('on', /Corregir/.test(c.textContent) === (m === 'si')); }); }
+  function igTodosCalc() {
+    var lista = IG.lista, n = 0;
+    lista.forEach(function (s, i) {
+      var v = C.leerNumero(val('igt-' + i)), e = $('igd-' + i), mon = s.moneda === 'USD' ? 'USD' : 'CRC';
+      if (v === null) { e.textContent = '—'; e.className = 'chico'; return; }
+      var d = Math.round((v - s.saldo) * 100) / 100;
+      if (Math.abs(d) < 0.005) { e.textContent = '✓'; e.className = 'chico verde-pos'; return; }
+      n++; e.textContent = (d > 0 ? '+' : '−') + txt(Math.abs(d), mon); e.className = 'chico ' + (d > 0 ? 'verde-pos' : 'rojo');
+    });
+    var cpri = cuentaPorNombre(cuentaPrincipal()), dp = cpri ? disponibleDe(cpri) : null;
+    if (dp && $('igt-disp')) {
+      var v2 = C.leerNumero(val('igt-disp')), e2 = $('igd-disp'), nt = $('ig-disp-nota');
+      if (v2 === null) { e2.textContent = '—'; nt.textContent = ''; }
+      else { var d2 = Math.round((v2 - dp.disponible) * 100) / 100; e2.textContent = Math.abs(d2) < 0.005 ? '✓ igual' : (d2 > 0 ? '+' : '−') + txt(Math.abs(d2), 'CRC'); e2.className = 'chico ' + (Math.abs(d2) < 0.005 ? 'verde-pos' : 'rojo'); nt.textContent = Math.abs(d2) < 0.005 ? '' : 'Después de igualar los sobres, si el disponible sigue distinto usá Cuadrar en la cuenta.'; }
+    }
+    var ok = $('igt-ok'); if (ok) { ok.disabled = !n; ok.textContent = n ? 'Igualar ' + n + ' sobre' + (n === 1 ? '' : 's') : 'Igualar'; }
+  }
+  function guardarIgualarTodos() {
+    var lista = IG.lista, cambios = [];
+    lista.forEach(function (s, i) { var v = C.leerNumero(val('igt-' + i)); if (v !== null && Math.abs(v - s.saldo) >= 0.005) cambios.push([s.nombre, Math.round((v - s.saldo) * 100) / 100]); });
+    if (!cambios.length) return;
+    var b = $('igt-ok'); if (b) b.disabled = true;
+    var modo = IG.modo, k = 0;
+    (function sig() {
+      if (k >= cambios.length) return listo('⚖ ' + cambios.length + ' sobre' + (cambios.length === 1 ? '' : 's') + ' igualado' + (cambios.length === 1 ? '' : 's') + ' al BCR');
+      var c = cambios[k++]; aplicarIgualar(c[0], c[1], modo, sig);
+    })();
   }
   function irListaSobre() { if (SOB.f !== 'todo') { SOB.f = 'todo'; pintar(); } var e = $('sb-filtros'); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   function editarSobre() { var i = -1; SB().lista.forEach(function (s, k) { if (s.nombre === SOB.nombre) i = k; }); if (i >= 0) formSobre(i, true); }
@@ -5245,7 +5676,7 @@ var App = (function () {
     nuevos.forEach(function (m) {
       if (pendFila[m.fila] || soFila[m.fila] || ivaFila[m.fila] || ajFila[m.fila]) return;
       if (transferenciaDudosa(m)) accion.push({ tipo: 'direccion', mov: m });
-      else if (m.tipo === 'Gasto' && !m.categoria && !m.para) accion.push({ tipo: 'categoria', mov: m });
+      else if (m.tipo === 'Gasto' && !m.categoria && !m.para && !/@/.test(m.viaje || '')) accion.push({ tipo: 'categoria', mov: m });
       else if (!confFila[m.fila]) listos.push(m);
     });
     var porFecha = function (a, b) { return new Date((b.mov || b).fecha) - new Date((a.mov || a).fecha); };
@@ -5259,8 +5690,8 @@ var App = (function () {
     var mios = ef.filter(function (e) { return e.mov === m; });
     if (m.tipo === 'Pago de tarjeta') {
       var de = mios.filter(function (e) { return e.grupo === 'pagos'; })[0];
-      var sc0 = sb ? (sb.porMov[m.fila] || []).filter(function (x) { return /Con lo sacado de /.test(x.nota || ''); })[0] : null;
-      return 'Pago de la tarjeta' + (sc0 ? ' con lo que sacaste de ' + nomSobre(sc0.nota.replace(/^Con lo sacado de /, '').replace(/ · .*$/, '')) : '') + (de ? ' · sale de ' + de.cuenta : '');
+      var sc0 = sb ? (sb.porMov[m.fila] || []).filter(function (x) { return /Con lo sacado de /.test(x.nota || ''); }) : [];
+      return 'Pago de la tarjeta' + (sc0.length ? ' con lo sacado de ' + sc0.map(textoSacado).join(' + ') : '') + (de ? ' · sale de ' + de.cuenta : '');
     }
     if (m.tipo === 'Transferencia') {
       var pago = D.movimientos.filter(function (p) { return p.tipo === 'Pago de tarjeta' && Math.abs(p.monto - m.monto) < 0.01 && Math.abs(new Date(p.fecha) - new Date(m.fecha)) < 2 * 86400000; })[0];
@@ -5272,8 +5703,8 @@ var App = (function () {
     if (C.esCompraTarjeta(D, m)) return 'Suma a la deuda de ' + etiquetaCuenta(m.cuenta) + (m.categoria ? ' · ' + m.categoria : '');
     if (C.esSacarMeter(m)) return (m.tipo === C.TIPO_SACAR ? '📤 Sale del sobre ' : '📥 Entra al sobre ') + nomSobre(m.sobre) + (m.tipo === C.TIPO_SACAR ? ' → disponible' : ' ← disponible');
     var fs0 = sb ? (sb.porMov[m.fila] || []) : [];
-    var sac = fs0.filter(function (x) { return /Con lo sacado de /.test(x.nota || ''); })[0];
-    if (sac) return '✓ Con lo que sacaste de ' + nomSobre(sac.nota.replace(/^Con lo sacado de /, '').replace(/ · .*$/, ''));
+    var sac = fs0.filter(function (x) { return /Con lo sacado de /.test(x.nota || ''); });
+    if (sac.length) return '✓ Con lo sacado de ' + sac.map(textoSacado).join(' + ');
     if (fs0.length && fs0.every(function (x) { return !x.sobre; })) return '🪙 ' + (fs0[0].monto > 0 ? 'Quedó en el disponible' : 'Salió del disponible');
     var filas = sb ? (sb.porMov[m.fila] || []).filter(function (x) { return x.sobre; }) : [];
     var nombres = []; filas.forEach(function (x) { if (nombres.indexOf(x.sobre) < 0) nombres.push(x.sobre); });
@@ -5281,6 +5712,13 @@ var App = (function () {
     if (m.sobre) return '✉ ' + nomSobre(m.sobre) + ' (recordado)';
     if (sb && sb.cubierto[m.fila]) return 'Cubierto con lo reservado';
     return (m.categoria ? m.categoria + ' · ' : '') + (m.cuenta ? etiquetaCuenta(m.cuenta) : 'sin cuenta');
+  }
+  /** "Con lo sacado de A + B · SAC-1 SAC-2" → "A ₡10.000 + B ₡5.000" (los montos salen de las sacadas) */
+  function textoSacado(x) {
+    var auts = ((x.nota || '').split(' · ')[1] || '').split(' ').filter(String);
+    var sacs = auts.map(function (au) { return D.movimientos.filter(function (m) { return m.autorizacion === au && m.tipo === C.TIPO_SACAR; })[0]; }).filter(Boolean);
+    if (sacs.length) return sacs.map(function (m) { return nomSobre(m.sobre) + ' ' + txt(m.monto, 'CRC'); }).join(' + ');
+    return (x.nota || '').replace(/^Con lo sacado de /, '').replace(/ · .*$/, '').split(' + ').map(nomSobre).join(' + ');
   }
   /** Sobres sugeridos para un movimiento: regla, el último usado con ese comercio, uno con el nombre de la categoría */
   function sugerirSobres(m, sentido) {
@@ -5344,6 +5782,9 @@ var App = (function () {
           cuerpo = '<div class="rev-q">Llegó una compra con la tarjeta <b>••' + esc(a.u4) + '</b>, que no está en tus cuentas. <b>¿Es tuya?</b></div><div class="ajena-op">' +
             chipRev('➕ Sí, agregarla a mis cuentas', 'App.rvAjena(' + f + ',\'si\')') + chipRev('🚫 No es mía · ignorar esta tarjeta', 'App.rvAjena(' + f + ',\'no\')', true) +
             chipRev('1️⃣ Solo esta vez (borrar esta compra)', 'App.rvAjena(' + f + ',\'una\')') + '</div><div class="suave chico" style="margin-top:8px">No se anota en ninguna cuenta ni sobre hasta que respondás.</div>';
+        } else if (a.tipo === 'sobre' && !sacadasNo[f] && (a.sac = infoSacadas(a.p))) {
+          if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
+          cuerpo += bloqueSacadas(a, a.sac);
         } else if (a.tipo === 'sobre') {
           var sug = sugerirSobres(m, 'sale');
           if (m.tipo === 'Gasto' && !m.categoria) cuerpo += '<div class="rev-q">¿Qué categoría?</div><div class="chips">' + sugerirCategorias(m).map(function (c) { return chipRev(iconoMov({ tipo: 'Gasto', categoria: c })[0] + ' ' + esc(c), 'App.rvCategoria(' + f + ',\'' + q(c) + '\',1)', false); }).join('') + chipRev('Otra…', 'App.formMovimiento(' + f + ')') + '</div>';
@@ -5598,8 +6039,8 @@ var App = (function () {
     if (borrar.length) toast('✉ Quité ' + borrar.length + ' asignación' + (borrar.length === 1 ? '' : 'es') + ' vieja' + (borrar.length === 1 ? '' : 's') + ' de compras con tarjeta. Los sobres ahora son como en el banco.', 6000);
   }
   /** Fila nueva en Movimientos: sacar de un sobre (→ disponible) o meter (← disponible) */
-  function filaSobre(tipo, sobre, monto, comercio, fecha, aut, nota) {
-    var m = { fila: null, control: null, fecha: fecha || new Date().toISOString(), monto: Math.round(monto * 100) / 100, moneda: 'CRC', tipo: tipo, comercio: comercio, lugar: '',
+  function filaSobre(tipo, sobre, monto, comercio, fecha, aut, nota, moneda) {
+    var m = { fila: null, control: null, fecha: fecha || new Date().toISOString(), monto: Math.round(monto * 100) / 100, moneda: moneda || 'CRC', tipo: tipo, comercio: comercio, lugar: '',
       cuenta: cuentaPrincipal(), categoria: '', sobre: sobre, nota: nota || '', origen: 'Manual', autorizacion: aut || ('SOB-' + grupoNuevo()), recordarRegla: false };
     encolar('guardarMovimiento', [m], comercio + ' · ' + txt(monto, 'CRC'));
     marcarVistos([m]);
@@ -5628,25 +6069,112 @@ var App = (function () {
     encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: Math.round(p.falta * 100) / 100, tipo: 'Al sobre', movimiento: fila, grupo: grupoNuevo(), nota: 'Metido a ' + sobre + ' · ' + s.autorizacion }]], 'Ingreso metido a ' + sobre);
     marcarVistos([m]); sbMemo = null; pintar(); toast('📥 Metido a ' + nomSobre(sobre), 2000);
   }
-  /** Si ya sacaste de un sobre (📤 Sacar) y después sale esa plata, se une sola */
+  /** Si ya sacaste de un sobre (📤 Sacar) y después sale esa plata, se une sola.
+   *  v2.10.0: también con varias sacadas (de varios sobres) que sumen el pago. */
+  function sacadasUsadas() {
+    var usados = {};
+    (D.sobresMov || []).forEach(function (x) { var re = /(SOB-[\w-]+|SAC-[\w-]+)/g, mm; while ((mm = re.exec(x.nota || ''))) usados[mm[1]] = 1; });
+    return usados;
+  }
+  function sacadasLibres(usados) {
+    usados = usados || sacadasUsadas();
+    return D.movimientos.filter(function (m) { return m.tipo === C.TIPO_SACAR && m.fila > 0 && m.autorizacion && !usados[m.autorizacion] && /para (pagar|pasar)/i.test(m.comercio || ''); });
+  }
+  /** Sacadas que pueden ser de este pago: { lista (candidatas), exacta (subconjunto que suma justo) , usar (lo que se propone), suma, falta } */
+  function infoSacadas(p, libres) {
+    if (!p || p.sentido !== 'sale' || p.mov.fila <= 0) return null;
+    var t = new Date(p.mov.fecha).getTime();
+    // las más cercanas al pago primero (si hay varias combinaciones, gana la de lo sacado justo antes)
+    var cand = (libres || sacadasLibres()).filter(function (x) { var tx = new Date(x.fecha).getTime(); return tx <= t + 3600000 && tx >= t - 4 * 86400000; })
+      .sort(function (a, b) { return Math.abs(new Date(a.fecha).getTime() - t) - Math.abs(new Date(b.fecha).getTime() - t); });
+    if (!cand.length) return null;
+    var objetivo = Math.round(p.falta * 100), exactas = [];
+    var lim = Math.min(cand.length, 8);
+    (function buscar(i, elegidas, suma) {
+      if (exactas.length > 1) return;
+      if (suma === objetivo && elegidas.length) { exactas.push(elegidas.slice()); return; }
+      if (i >= lim || suma > objetivo || elegidas.length >= 4) return;
+      elegidas.push(cand[i]); buscar(i + 1, elegidas, suma + Math.round(cand[i].monto * 100)); elegidas.pop();
+      buscar(i + 1, elegidas, suma);
+    })(0, [], 0);
+    var usar;
+    if (exactas.length) usar = exactas[0];
+    else {   // lo que alcance, de la más grande a la más chica, sin pasarse
+      usar = []; var acum = 0;
+      cand.slice().sort(function (a, b) { return b.monto - a.monto; }).forEach(function (x) { if (acum + x.monto <= p.falta + 0.004) { usar.push(x); acum += x.monto; } });
+      usar.sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+    }
+    var suma = usar.reduce(function (a, x) { return a + x.monto; }, 0);
+    return { lista: cand, exacta: exactas.length ? exactas[0] : null, unica: exactas.length === 1, usar: usar, suma: Math.round(suma * 100) / 100, falta: Math.round((p.falta - suma) * 100) / 100 };
+  }
+  /** Une el pago con esas sacadas; si sobra algo por cubrir: del disponible o de otro sobre */
+  function unirSacadas(p, usar, resto) {
+    var m = p.mov, suma = usar.reduce(function (a, x) { return a + x.monto; }, 0);
+    usar = usar.slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+    if (usar.length) {
+      var nombres = usar.map(function (x) { return x.sobre; }).join(' + '), auts = usar.map(function (x) { return x.autorizacion; }).join(' ');
+      encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: -Math.round(suma * 100) / 100, tipo: 'Del disponible', movimiento: m.fila, grupo: grupoNuevo(), nota: 'Con lo sacado de ' + nombres + ' · ' + auts }]], 'Salió con lo sacado de ' + nombres);
+    }
+    var falta = Math.round((p.falta - suma) * 100) / 100;
+    if (falta > 0.004 && resto) {
+      if (resto === 'disponible') encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: -falta, tipo: 'Del disponible', movimiento: m.fila, grupo: grupoNuevo(), nota: m.comercio || '' }]], 'Del disponible: ' + (m.comercio || m.tipo));
+      else {
+        var s = filaSobre(C.TIPO_SACAR, resto, falta, 'Sacado del sobre ' + nomSobre(resto) + ' · para ' + descMov(m), new Date(new Date(m.fecha).getTime() - 60000).toISOString(), 'SAC-' + (m.autorizacion || m.fila) + '-r');
+        encolar('guardarSobresMov', [[{ fecha: fechaSobre(m), sobre: '', monto: -falta, tipo: 'Del disponible', movimiento: m.fila, grupo: grupoNuevo(), nota: 'Con lo sacado de ' + resto + ' · ' + s.autorizacion }]], 'Salió con lo sacado de ' + resto);
+      }
+    }
+    marcarVistos([m]);
+  }
   function autoSacado() {
     if (!D || sinServidorSobres()) return;
-    var usados = {};
-    (D.sobresMov || []).forEach(function (x) { var mm = /(SOB-[\w-]+|SAC-[\w-]+)/.exec(x.nota || ''); if (mm) usados[mm[1]] = 1; });
-    var sacados = D.movimientos.filter(function (m) { return m.tipo === C.TIPO_SACAR && m.fila > 0 && !usados[m.autorizacion] && /para (pagar|pasar)/i.test(m.comercio || ''); });
-    if (!sacados.length) return;
-    var n = 0;
-    SB().pendientes.forEach(function (p) {
-      if (p.sentido !== 'sale' || p.mov.fila <= 0) return;
+    var usados = sacadasUsadas(), libres = sacadasLibres(usados);
+    if (!libres.length) return;
+    var n = 0, pend = SB().pendientes.filter(function (p) { return p.sentido === 'sale' && p.mov.fila > 0; });
+    pend.forEach(function (p) {
+      var info = infoSacadas(p, libres.filter(function (x) { return !usados[x.autorizacion]; }));
+      if (!info || !info.exacta || !info.unica) return;
+      // dudas: otro pago pendiente parecido (mismo monto en esos días) → se pregunta en Para revisar
       var t = new Date(p.mov.fecha).getTime();
-      var s = sacados.filter(function (x) { var tx = new Date(x.fecha).getTime(); return !usados[x.autorizacion] && Math.abs(x.monto - p.falta) < 0.01 && tx <= t + 3600000 && tx >= t - 4 * 86400000; })[0];
-      if (!s) return;
-      usados[s.autorizacion] = 1; n++;
-      encolar('guardarSobresMov', [[{ fecha: fechaSobre(p.mov), sobre: '', monto: -Math.round(p.falta * 100) / 100, tipo: 'Del disponible', movimiento: p.mov.fila, grupo: grupoNuevo(), nota: 'Con lo sacado de ' + s.sobre + ' · ' + s.autorizacion }]], 'Salió con lo sacado de ' + s.sobre);
-      marcarVistos([p.mov]);
+      if (pend.some(function (q) { return q !== p && Math.abs(q.falta - p.falta) < 0.01 && Math.abs(new Date(q.mov.fecha).getTime() - t) < 4 * 86400000; })) return;
+      info.exacta.forEach(function (x) { usados[x.autorizacion] = 1; });
+      unirSacadas(p, info.exacta, null); n++;
     });
-    if (n) { sbMemo = null; toast('✓ ' + n + ' pago' + (n === 1 ? '' : 's') + ' unido' + (n === 1 ? '' : 's') + ' con lo que sacaste del sobre', 3500); pintar(); }
+    if (n) { sbMemo = null; toast('✓ ' + n + ' pago' + (n === 1 ? '' : 's') + ' unido' + (n === 1 ? '' : 's') + ' con lo que sacaste de los sobres', 3500); pintar(); }
   }
+  /** Para revisar: respuestas a "Antes sacaste ₡X de N sobres" */
+  function rvSacadas(fila, que, resto) {
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p) return pintar();
+    var info = infoSacadas(p);
+    if (que === 'no') return rvDisponible(fila);
+    if (!info) return pintar();
+    if (que === 'si') {
+      if (info.falta > 0.004 && !resto) return toast('Elegí de dónde salen los ' + txt(info.falta, 'CRC') + ' que faltan.');
+      if (resto === 'otro') return formRestoSacadas(fila);
+      unirSacadas(p, info.usar, resto || null);
+      sbMemo = null; pintar(); toast('✓ Unido con lo que sacaste de ' + info.usar.map(function (x) { return nomSobre(x.sobre); }).join(' + '), 2500);
+    }
+  }
+  function formRestoSacadas(fila) {
+    var p = SB().pendientes.filter(function (x) { return x.mov.fila === fila; })[0]; if (!p) return;
+    var info = infoSacadas(p);
+    var sbs = SB().lista.filter(function (s) { return s.moneda !== 'USD' && s.saldo > 0.005; });
+    abrir('<h2>¿De qué sobre salen los ' + txt(info.falta, 'CRC') + '?</h2><div class="suave">El resto del pago (' + esc(nombreBonito(p.mov.comercio) || p.mov.tipo) + ').</div><div class="caja sinpad" style="margin-top:10px">' +
+      sbs.map(function (s) { return '<button class="item" onclick="App.cerrar();App.rvSacadas(' + fila + ',\'si\',\'' + q(s.nombre) + '\')"><span class="cuerpo"><span class="nombre" style="display:block">✉ ' + esc(nomSobre(s.nombre)) + '</span><span class="det" style="display:block">tiene ' + txt(s.saldo, 'CRC') + '</span></span></button>'; }).join('') +
+      '</div><div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function bloqueSacadas(a, info) {
+    var m = a.mov, f = m.fila, n = info.usar.length, sb = {};
+    var lista = '<div class="sac-lista">' + info.usar.map(function (x) { return '<div class="fila chico"><span>📤 ' + esc(nomSobre(x.sobre)) + ' <span class="suave">· ' + fechaCorta(x.fecha).replace(/ \d{4}$/, '') + (hora(x.fecha) ? ' ' + hora(x.fecha) : '') + '</span></span><b>' + txt(x.monto, 'CRC') + '</b></div>'; }).join('') +
+      '<div class="fila chico sac-tot"><span>' + (info.falta > 0.004 ? 'Sacado' : 'Total sacado') + '</span><b>' + txt(info.suma, 'CRC') + '</b></div>' +
+      (info.falta > 0.004 ? '<div class="fila chico acento"><span>Falta</span><b>' + txt(info.falta, 'CRC') + '</b></div>' : '') + '</div>';
+    if (info.falta > 0.004) return '<div class="rev-q">Sacaste <b>' + txt(info.suma, 'CRC') + ' de ' + n + ' sobre' + (n === 1 ? '' : 's') + '</b>; el pago fue de ' + txt(a.p.falta, m.moneda) + '.</div>' + lista +
+      '<div class="suave chico">¿Y los ' + txt(info.falta, 'CRC') + ' que faltan?</div><div class="chips">' + chipRev('🪙 Del disponible', 'App.rvSacadas(' + f + ',\'si\',\'disponible\')', true) + chipRev('📤 De otro sobre…', 'App.rvSacadas(' + f + ',\'si\',\'otro\')') + chipRev('No era para este pago', 'App.rvSacadasNo(' + f + ')') + '</div>';
+    return '<div class="rev-q">Antes sacaste <b>' + txt(info.suma, 'CRC') + ' de ' + n + ' sobre' + (n === 1 ? '' : 's') + '</b>. ¿Es para este pago?</div>' + lista +
+      '<div class="chips">' + chipRev('✓ Sí, es eso', 'App.rvSacadas(' + f + ',\'si\')', true) + chipRev('Otro sobre…', 'App.formAsignar(' + f + ')') + chipRev('🪙 No, del disponible', 'App.rvSacadas(' + f + ',\'no\')') + '</div>';
+  }
+  /** "No era para este pago": vuelve a la pregunta normal de sobres */
+  var sacadasNo = {};
+  function rvSacadasNo(fila) { sacadasNo[fila] = 1; pintar(); }
   // ---- Sacar / Meter desde la pantalla del sobre
   var SM = null;
   function formSacarMeter(dir, op, para) {
@@ -5701,6 +6229,122 @@ var App = (function () {
     hecho(SM.dir < 0 ? '📤 Sacaste ' + txt(monto, 'CRC') + ' de ' + nomSobre(yo) + (SM.para ? '. Cuando llegue el movimiento de ' + SM.para + ', se une solo.' : '. Queda disponible.') : '📥 Metiste ' + txt(monto, 'CRC') + ' a ' + nomSobre(yo));
   }
 
+  // ==================================================================== v2.10.0 · CALCULADORA RÁPIDA (flotante)
+  /** ¿El texto es una operación? (un signo + − × ÷ * / x después del primer número) */
+  function esOperacion(t) { return /\d\s*[+\-−×x*÷\/]\s*[\d(]/i.test(String(t || '').replace(/^\s*[-−]/, '')); }
+  /** Calcula "10.000+5.000−329", "13,99*505", "1500/3", "20000-10%" sin eval. Devuelve número o null. */
+  function calcular(expr) {
+    var t = String(expr || '').replace(/−/g, '-').replace(/[×x*]/gi, '*').replace(/[÷\/]/g, '/').replace(/\s+/g, '');
+    if (!t) return null;
+    var toks = [], re = /(\d[\d.,]*%?)|([+\-*/])/g, m, ult = 0;
+    while ((m = re.exec(t))) { if (m.index !== ult) return null; ult = re.lastIndex; toks.push(m[1] ? { n: m[1] } : { o: m[2] }); }
+    if (ult !== t.length || !toks.length) return null;
+    // números (con % = porcentaje del resultado anterior en + y −, o /100 en * y /)
+    var vals = [], ops = [], neg = false, acum = null;
+    for (var i = 0; i < toks.length; i++) {
+      var k = toks[i];
+      if (k.o) { if (!vals.length && k.o === '-' && !neg) { neg = true; continue; } if (vals.length === ops.length) return null; ops.push(k.o); continue; }
+      var pct = /%$/.test(k.n), v = C.leerNumero(k.n.replace('%', ''));
+      if (v === null) return null;
+      if (neg) { v = -v; neg = false; }
+      if (pct) { var op = ops[ops.length - 1]; v = (op === '+' || op === '-') && vals.length ? evaluar(vals.slice(), ops.slice(0, -1)) * v / 100 : v / 100; }
+      vals.push(v);
+    }
+    if (vals.length !== ops.length + 1) return null;
+    var r = evaluar(vals, ops);
+    return isFinite(r) ? Math.round(r * 100) / 100 : null;
+  }
+  function evaluar(vals, ops) {
+    vals = vals.slice(); ops = ops.slice();
+    for (var i = 0; i < ops.length; i++) if (ops[i] === '*' || ops[i] === '/') { vals.splice(i, 2, ops[i] === '*' ? vals[i] * vals[i + 1] : vals[i] / vals[i + 1]); ops.splice(i, 1); i--; }
+    var r = vals[0]; for (var j = 0; j < ops.length; j++) r = ops[j] === '+' ? r + vals[j + 1] : r - vals[j + 1];
+    return r;
+  }
+  function numTexto(n) { var neg = n < 0; n = Math.abs(n); var e = Math.floor(n), d = Math.round((n - e) * 100); if (d === 100) { e++; d = 0; } return (neg ? '−' : '') + String(e).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (d ? ',' + ('0' + d).slice(-2) : ''); }
+  function pistaCalc(c) {
+    var r = calcular(c.value), p = c.parentNode && c.parentNode.querySelector('.calc-pista');
+    if (!p && c.parentNode) { p = document.createElement('span'); p.className = 'calc-pista'; c.parentNode.appendChild(p); }
+    if (p) p.textContent = r === null ? '' : '= ' + numTexto(r);
+  }
+  document.addEventListener('focusout', function (e) {
+    var c = e.target; if (!c || !c.hasAttribute || !c.hasAttribute('data-dinero') || !esOperacion(c.value)) return;
+    var r = calcular(c.value), p = c.parentNode && c.parentNode.querySelector('.calc-pista');
+    if (r !== null) { c.value = formatoMonto(String(r).replace('.', ',')); c.dispatchEvent(new Event('change', { bubbles: true })); try { c.dispatchEvent(new Event('input', { bubbles: true })); } catch (x) { /* nada */ } toast('🧮 = ' + numTexto(r), 1800); }
+    if (p) p.remove();
+  }, true);
+  // ---- botón flotante + panel
+  var CALC = { expr: '', hist: [], ultMonto: null, abierta: false };
+  try { CALC.hist = JSON.parse(guardado('mf-calc-hist', '[]')) || []; CALC.expr = guardado('mf-calc-expr', '') || ''; } catch (e) { CALC.hist = []; }
+  function calcVisible() { return guardado('mf-calc', 'si') !== 'no'; }
+  function calcMostrar(on) { guardar('mf-calc', on ? 'si' : 'no'); montarCalc(); toast(on ? '🧮 Calculadora visible' : 'Calculadora oculta (se activa en Ajustes → Apariencia)', 2200); }
+  document.addEventListener('focusin', function (e) { var c = e.target; if (c && c.hasAttribute && c.hasAttribute('data-dinero')) CALC.ultMonto = c; });
+  function montarCalc() {
+    var b = document.getElementById('calc-btn');
+    if (!calcVisible() || !D) { if (b) b.remove(); cerrarCalc(); return; }
+    if (b) return;
+    b = document.createElement('button'); b.id = 'calc-btn'; b.type = 'button'; b.setAttribute('aria-label', 'Calculadora'); b.textContent = '🧮';
+    var pos = leerJSONSeguro('mf-calc-pos');
+    if (pos && typeof pos.x === 'number') { b.style.left = Math.max(4, Math.min(window.innerWidth - 50, pos.x)) + 'px'; b.style.top = Math.max(60, Math.min(window.innerHeight - 120, pos.y)) + 'px'; b.style.right = 'auto'; b.style.bottom = 'auto'; }
+    document.body.appendChild(b);
+    var arr = null, mov = false;
+    b.addEventListener('pointerdown', function (e) { arr = { x: e.clientX, y: e.clientY, l: b.offsetLeft, t: b.offsetTop }; mov = false; b.classList.remove('dormido'); try { b.setPointerCapture(e.pointerId); } catch (x) { /* nada */ } });
+    b.addEventListener('pointermove', function (e) {
+      if (!arr) return; var dx = e.clientX - arr.x, dy = e.clientY - arr.y;
+      if (!mov && Math.abs(dx) + Math.abs(dy) < 8) return;
+      mov = true; b.style.left = Math.max(4, Math.min(window.innerWidth - 50, arr.l + dx)) + 'px'; b.style.top = Math.max(60, Math.min(window.innerHeight - 120, arr.t + dy)) + 'px'; b.style.right = 'auto'; b.style.bottom = 'auto';
+    });
+    b.addEventListener('pointerup', function () {
+      if (!arr) return; arr = null;
+      if (mov) { var x = b.offsetLeft < window.innerWidth / 2 ? 6 : window.innerWidth - 52; b.style.left = x + 'px'; guardar('mf-calc-pos', JSON.stringify({ x: x, y: b.offsetTop })); }
+      else alternarCalc();
+      dormirCalc();
+    });
+    dormirCalc();
+  }
+  var tDormir = null;
+  function dormirCalc() { clearTimeout(tDormir); tDormir = setTimeout(function () { var b = document.getElementById('calc-btn'); if (b && !CALC.abierta) b.classList.add('dormido'); }, 4000); }
+  function alternarCalc() { if (CALC.abierta) cerrarCalc(); else abrirCalc(); }
+  function abrirCalc() {
+    CALC.abierta = true;
+    var p = document.getElementById('calc-panel');
+    if (!p) { p = document.createElement('div'); p.id = 'calc-panel'; document.body.appendChild(p); }
+    pintarCalc();
+  }
+  function cerrarCalc() { CALC.abierta = false; var p = document.getElementById('calc-panel'); if (p) p.remove(); dormirCalc(); }
+  function montoVisible() { var c = CALC.ultMonto; return c && document.body.contains(c) && c.offsetParent !== null ? c : null; }
+  function nombreCampo(c) { var l = c.closest('label'); var sp = l && l.querySelector('span'); return sp ? sp.textContent.replace(/\s*\(.*\)$/, '').trim() : 'Monto'; }
+  function pintarCalc() {
+    var p = document.getElementById('calc-panel'); if (!p) return;
+    var r = calcular(CALC.expr), campo = montoVisible();
+    var teclas = [['C', 'c'], ['⌫', 'op'], ['%', 'op'], ['÷', 'op'], ['7'], ['8'], ['9'], ['×', 'op'], ['4'], ['5'], ['6'], ['−', 'op'], ['1'], ['2'], ['3'], ['+', 'op'], ['00'], ['0'], [','], ['=', 'eq']];
+    p.innerHTML = '<div class="calc-cab"><span>🧮 Calculadora</span><span><button onclick="App.calcHist()" aria-label="Historial">↺</button><button onclick="App.cerrarCalc()" aria-label="Cerrar">✕</button></span></div>' +
+      '<div class="calc-expr">' + esc(CALC.expr.replace(/\*/g, '×').replace(/\//g, '÷').replace(/-/g, '−') || ' ') + '</div><div class="calc-res">' + (r === null ? (CALC.expr ? '…' : '0') : numTexto(r)) + '</div>' +
+      (CALC.verHist ? '<div class="calc-hist">' + (CALC.hist.length ? CALC.hist.map(function (h, i) { return '<button onclick="App.calcUsarHist(' + i + ')"><span>' + esc(h.e) + '</span><b>' + numTexto(h.r) + '</b></button>'; }).join('') : '<div class="suave chico">Todavía no hay cuentas.</div>') + '</div>' :
+        '<div class="calc-teclas">' + teclas.map(function (t) { return '<button class="' + (t[1] || '') + '" onclick="App.calcTecla(\'' + t[0] + '\')">' + t[0] + '</button>'; }).join('') + '</div>') +
+      (campo && r !== null ? '<button class="calc-usar" onclick="App.calcUsar()">Usar ' + numTexto(r) + ' en “' + esc(nombreCampo(campo)) + '”</button>' :
+        '<div class="calc-pie"><button onclick="App.calcCopiar()">📋 Copiar</button><button onclick="App.calcHist()">↺ Historial</button></div>');
+  }
+  function calcTecla(k) {
+    var e = CALC.expr;
+    if (k === 'C') e = '';
+    else if (k === '⌫') e = e.slice(0, -1);
+    else if (k === '=') { var r = calcular(e); if (r !== null) { CALC.hist.unshift({ e: e.replace(/\*/g, '×').replace(/\//g, '÷').replace(/-/g, '−'), r: r }); CALC.hist = CALC.hist.slice(0, 10); guardar('mf-calc-hist', JSON.stringify(CALC.hist)); e = String(r).replace('.', ','); } }
+    else if ('+−×÷'.indexOf(k) >= 0) { var o = { '+': '+', '−': '-', '×': '*', '÷': '/' }[k]; e = /[+\-*/]$/.test(e) ? e.slice(0, -1) + o : (e || (k === '−' ? '' : '0')) + o; }
+    else if (k === '%') { if (/\d$/.test(e)) e += '%'; }
+    else if (k === ',') { var ult = e.split(/[+\-*/]/).pop(); if (ult.indexOf(',') < 0) e += (/\d$/.test(e) ? '' : '0') + ','; }
+    else e += k;
+    CALC.expr = e; CALC.verHist = false; guardar('mf-calc-expr', e); pintarCalc();
+  }
+  function calcUsar() {
+    var c = montoVisible(), r = calcular(CALC.expr); if (!c || r === null) return;
+    c.value = formatoMonto(String(Math.abs(r)).replace('.', ','));
+    c.dispatchEvent(new Event('input', { bubbles: true })); c.dispatchEvent(new Event('change', { bubbles: true }));
+    toast('✓ ' + numTexto(Math.abs(r)) + ' en ' + nombreCampo(c), 1800); cerrarCalc();
+  }
+  function calcCopiar() { var r = calcular(CALC.expr); if (r === null) return; navigator.clipboard.writeText(String(r).replace('.', ',')).then(function () { toast('📋 Copiado: ' + numTexto(r), 1500); }, function () { toast('No se pudo copiar'); }); }
+  function calcHist() { CALC.verHist = !CALC.verHist; pintarCalc(); }
+  function calcUsarHist(i) { var h = CALC.hist[i]; if (!h) return; CALC.expr = String(h.r).replace('.', ','); CALC.verHist = false; pintarCalc(); }
+
   return {
     rvSacar: rvSacar, rvDisponible: rvDisponible, rvMeter: rvMeter, formSacarMeter: formSacarMeter, smMov: smMov, smBoton: smBoton, guardarSacarMeter: guardarSacarMeter,
     rvIVA: rvIVA, formIVA: formIVA, ivaCambiar: ivaCambiar, formConfirmar: formConfirmar, guardarConfirmar: guardarConfirmar, rvDireccion: rvDireccion,
@@ -5727,7 +6371,7 @@ var App = (function () {
     recargar: function () { cargar(function () { toast('Datos actualizados'); }); },
     conectar: conectar, cambiarConexion: cambiarConexion,
     salarioLlego: salarioLlego, formSalarioOtro: formSalarioOtro, salarioManana: salarioManana, formSalario: formSalario, salPrev: salPrev, guardarSalario: guardarSalario, repCero: repCero,
-    rvAjena: rvAjena, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
+    rvAjena: rvAjena, vjSumaPres: vjSumaPres, vjRepartir: vjRepartir, vjFiltro: vjFiltro, vjSumarAntes: vjSumarAntes, vjNoSugerir: vjNoSugerir, vjDupBorrar: vjDupBorrar, vjDupNo: vjDupNo, formCompraManual: formCompraManual, cmCat: cmCat, guardarCompraManual: guardarCompraManual, formRetiroViaje: formRetiroViaje, vjUsarRetiro: vjUsarRetiro, guardarRetiroViaje: guardarRetiroViaje, resumenViaje: resumenViaje, compartirViaje: compartirViaje, pdfViaje: pdfViaje, vjSumar: vjSumar, vjSacar: vjSacar, calcMostrar: calcMostrar, cerrarCalc: cerrarCalc, calcTecla: calcTecla, calcUsar: calcUsar, calcCopiar: calcCopiar, calcHist: calcHist, calcUsarHist: calcUsarHist, formIgualar: formIgualar, igCalc: igCalc, igModo: igModo, guardarIgualar: guardarIgualar, formIgualarTodos: formIgualarTodos, igTodosModo: igTodosModo, igTodosCalc: igTodosCalc, guardarIgualarTodos: guardarIgualarTodos, plModo: plModo, plMonto: plMonto, plMoneda: plMoneda, plPaso: plPaso, plSobre: plSobre, plSobreMonto: plSobreMonto, plOrigen: plOrigen, plCopiar: plCopiar, plSacar: plSacar, plSinCorreo: plSinCorreo, rvSacadas: rvSacadas, rvSacadasNo: rvSacadasNo, formAjenas: formAjenas, ajenaAgregar: ajenaAgregar, ajenaNombre: ajenaNombre, ajenaQuitar: ajenaQuitar, avisoTipo: avisoTipo, avisoDiasPago: avisoDiasPago, avisoSilencio: avisoSilencio, avisoCorreo: avisoCorreo, avisoCorreoHora: avisoCorreoHora, avisosTelefono: avisosTelefono, probarAviso: probarAviso,
     formActualizar: formActualizar, copiarCodigo: copiarCodigo, volverAnterior: volverAnterior, actualizarApp: actualizarApp,
     formNuevaLista: formNuevaLista, nlIcono: nlIcono, crearListaNueva: crearListaNueva, crearConBase: crearConBase, abrirLista: abrirLista, modoLista: modoLista, marcarItem: marcarItem,
     agregarItem: agregarItem, cantItem: cantItem, formItem: formItem, guardarItem: guardarItem, quitarItem: quitarItem, fotoItem: fotoItem, quitarFotoItem: quitarFotoItem, verItem: verItem,

@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que abra rápido y avisa cuando hay una versión nueva.
 // Al publicar cambios, subí el número de VERSION (y el de VERSION_WEB en js/app.js).
-const VERSION = '2.9.0';
+const VERSION = '2.10.0';
 const CACHE = 'misfinanzas-' + VERSION;
 const ARCHIVOS = [
   './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/pdf.js', './js/app.js', './js/lector.js', './js/ocr-worker.js', './js/vendor/pdf-lib.min.js',
@@ -115,6 +115,13 @@ async function revisarAvisos() {
           if (p.avisar === false) continue;
           if (!repetido('p' + p.nombre, p.dias)) await mostrar('pago-' + p.nombre, '💳 ' + p.nombre + ' · ' + (p.dias === 0 ? 'vence HOY' : p.dias === 1 ? 'vence mañana' : 'pagar en ' + p.dias + ' días'), cuerpoPago(p), './?ir=tarjetas', 'Ver tarjeta');
           nuevo['p' + p.nombre] = p.dias;
+        }
+        // v2.10.0: resumen diario del viaje en curso (una vez por día)
+        if (si('viaje')) for (const v of (x.viajes || [])) {
+          if (repetido('v' + v.nombre, v.dia)) continue;
+          const pas = (v.pasadas || []).map((p) => p.cat + ' ya se pasó ' + dinSW(p.exceso, v.moneda)).join(' · ');
+          await mostrar('viaje-' + v.nombre, '✈ ' + v.nombre + ' · día ' + v.dia + ' de ' + v.dias, 'Ayer gastaste ' + dinSW(v.ayer, v.moneda) + '. Te quedan ' + dinSW(v.quedan, v.moneda) + (v.restantes ? ': ' + dinSW(v.porDia, v.moneda) + ' por día.' : '.') + (pas ? ' ' + pas + '.' : ''), './?ir=viajes', 'Ver viaje');
+          nuevo['v' + v.nombre] = v.dia;
         }
         if (si('negativo') && (x.negativos || []).length && !repetido('n', x.negativos.join(','))) await mostrar('negativo', '🔴 Sobre en negativo', x.negativos.join(', '), './?ir=sobres', 'Ver sobres');
         if (si('super') && x.consultas && !repetido('c', x.consultas)) await mostrar('super', '🛒 ' + x.consultas + ' “¿este sirve?” sin responder', 'Abrí Super y Otros', './?ir=super', 'Ver');

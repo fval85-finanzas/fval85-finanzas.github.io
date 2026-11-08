@@ -343,28 +343,37 @@ var Calc = (function () {
   }
 
   // ---------------- Presupuesto de viaje (v1.7) ----------------
-  var CATS_VIAJE = ['Transporte', 'Comida', 'Hospedaje', 'Tours', 'Compras', 'Otros'];
+  var CATS_VIAJE = ['Vuelos', 'Transporte', 'Comida', 'Hospedaje', 'Tours', 'Compras', 'Otros'];   // v2.10.0: + Vuelos
   var PALABRAS_VIAJE = [
-    ['Transporte', /AVIANCA|COPA|AIRLINE|AIRWAYS|AEROL|VOLARIS|UNITED|DELTA|AMERICAN AIR|JETBLUE|SPIRIT|UBER|TAXI|CABIFY|DIDI|BOLT|RENT ?A ?CAR|HERTZ|AVIS|ALAMO|BUDGET|GASOL|FUEL|SHELL|TEXACO|METRO|BUS|PARKING|PARQUEO|PEAJE/i],
+    ['Vuelos', /AVIANCA|COPA|AIRLINE|AIRWAYS|AEROL|VOLARIS|UNITED|DELTA|AMERICAN AIR|JETBLUE|SPIRIT|IBERIA|LATAM|WINGO|ARAJET|SANSA|FRONTIER|SOUTHWEST|ALASKA AIR|AIR CANADA|AEROMEXICO|LUFTHANSA|KLM|AIR FRANCE|TACA/i],
+    ['Transporte', /UBER|TAXI|CABIFY|DIDI|BOLT|RENT ?A ?CAR|HERTZ|AVIS|ALAMO|BUDGET|GASOL|FUEL|SHELL|TEXACO|METRO|BUS|PARKING|PARQUEO|PEAJE/i],
     ['Hospedaje', /HOTEL|HOSTEL|AIRBNB|BOOKING|EXPEDIA|MARRIOTT|HILTON|HYATT|SHERATON|RESORT|INN\b|LODGE|SUITES/i],
     ['Comida', /REST|CAFE|COFFEE|STARBUCKS|BAR\b|GRILL|PIZZA|BURGER|MCDONALD|KFC|SUBWAY|FOOD|SUSHI|TACO|DINER|BAKERY|PANADER|SODA|POLLO|COMIDA/i],
     ['Tours', /TOUR|TICKET|ENTRADA|MUSEO|MUSEUM|PARK|PARQUE|EXCURS|CANOPY|ZOO|DISNEY|UNIVERSAL|GETYOURGUIDE|VIATOR/i],
     ['Compras', /MALL|STORE|SHOP|TIENDA|OUTLET|DUTY|WALMART|TARGET|ZARA|NIKE|ADIDAS|ALBROOK|MULTIPLAZA|AMAZON|FARMAC|PHARM|SUPER/i]
   ];
   var CAT_A_VIAJE = { Restaurantes: 'Comida', Transporte: 'Transporte', Compras: 'Compras', Ropa: 'Compras', Entretenimiento: 'Tours', Viajes: 'Otros', Supermercado: 'Comida' };
+  /** v2.10.0: m.viaje = "Cat" · "+Cat" (sumada en las fechas) · "+Cat@ID" (de ese viaje, aunque sea de antes) · "Efectivo@ID" (retiro de cajero) · "Fuera" */
+  function marcaViaje(m) {
+    var t = String(m.viaje || ''), x = t.match(/^(\+?)([^@]*)@(.+)$/);
+    return x ? { mas: !!x[1] || x[2] === 'Efectivo', cat: x[2], id: x[3], efectivo: x[2] === 'Efectivo' } : { mas: t.charAt(0) === '+', cat: t.replace(/^\+/, ''), id: '', efectivo: false };
+  }
   function categoriaViaje(m) {
-    var v = String(m.viaje || '').replace(/^\+/, '');
+    var v = marcaViaje(m).cat;
     if (CATS_VIAJE.indexOf(v) >= 0) return v;
     for (var i = 0; i < PALABRAS_VIAJE.length; i++) if (PALABRAS_VIAJE[i][1].test(m.comercio || '')) return PALABRAS_VIAJE[i][0];
     return CAT_A_VIAJE[m.categoria] || 'Otros';
   }
+  function esEfectivo(c) { return !c || normNom(c) === 'efectivo'; }
   function enViaje(v, m) {
     if (!m.fecha || m.viaje === 'Fuera' || (m.tipo !== 'Gasto' && m.tipo !== 'Compra tasa cero')) return false;
+    var mk = marcaViaje(m);
+    if (mk.id) return !mk.efectivo && mk.id === (v.id || '');   // ligada a un viaje: solo cuenta en ese (aunque sea de antes de las fechas)
     var f = new Date(m.fecha), ini = soloFecha(new Date(v.desde)), fin = new Date(soloFecha(new Date(v.hasta)).getTime() + 86400000);
     if (f < ini || f >= fin) return false;
-    if (String(m.viaje || '').charAt(0) === '+') return true;
+    if (mk.mas) return true;
     var t = v.tarjetas || [];
-    return t.indexOf(m.cuenta) >= 0 || (t.indexOf('Efectivo') >= 0 && !m.cuenta);
+    return t.indexOf(m.cuenta) >= 0 || (t.indexOf('Efectivo') >= 0 && esEfectivo(m.cuenta));
   }
   /** Montos en la moneda del viaje (los ₡ se pasan a $ con el tipo de cambio, y al revés). */
   function aMoneda(monto, de, a, tc) {
@@ -373,22 +382,38 @@ var Calc = (function () {
   }
   function viaje(d, v, hoy) {
     var tc = d.tipoCambio || 0, mon = v.moneda || 'USD';
+    var ini = soloFecha(new Date(v.desde)), fin = soloFecha(new Date(v.hasta)), h = soloFecha(hoy);
     var compras = (d.movimientos || []).filter(function (m) { return enViaje(v, m); }).map(function (m) {
-      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc) };
+      var f = new Date(m.fecha);
+      return { mov: m, categoria: categoriaViaje(m), monto: aMoneda(m.monto, m.moneda, mon, tc), antes: f < ini, cuenta: esEfectivo(m.cuenta) ? 'Efectivo' : m.cuenta };
     }).sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
     var gastado = compras.reduce(function (s, c) { return s + c.monto; }, 0);
-    var porCategoria = {};
+    var antes = compras.filter(function (c) { return c.antes; }).reduce(function (s, c) { return s + c.monto; }, 0);
+    var porCategoria = {}, porTarjeta = {}, ayer = 0, porCatAyer = {};
     CATS_VIAJE.forEach(function (c) { porCategoria[c] = 0; });
-    compras.forEach(function (c) { porCategoria[c.categoria] += c.monto; });
-    var ini = soloFecha(new Date(v.desde)), fin = soloFecha(new Date(v.hasta)), h = soloFecha(hoy);
+    var dAyer = new Date(h.getFullYear(), h.getMonth(), h.getDate() - 1);
+    compras.forEach(function (c) {
+      porCategoria[c.categoria] += c.monto;
+      var k = c.cuenta; porTarjeta[k] = porTarjeta[k] || { monto: 0, n: 0 }; porTarjeta[k].monto += c.monto; porTarjeta[k].n++;
+      if (soloFecha(new Date(c.mov.fecha)).getTime() === dAyer.getTime()) { ayer += c.monto; porCatAyer[c.categoria] = (porCatAyer[c.categoria] || 0) + c.monto; }
+    });
+    // efectivo del viaje: retiros de cajero ligados (no son gasto) − lo gastado en efectivo
+    var retiros = (d.movimientos || []).filter(function (m) { var mk = marcaViaje(m); return mk.efectivo && mk.id === (v.id || '') && m.fecha; })
+      .map(function (m) { return { mov: m, monto: aMoneda(m.monto, m.moneda, mon, tc) }; }).sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+    var totRet = retiros.reduce(function (s, x) { return s + x.monto; }, 0), gastEf = porTarjeta.Efectivo ? porTarjeta.Efectivo.monto : 0;
+    var pres = v.presupuesto || {}, presupuesto = {}, hayPres = false;
+    CATS_VIAJE.forEach(function (c) { var l = Number(pres[c]) || 0; if (l > 0) { hayPres = true; presupuesto[c] = { limite: l, gastado: porCategoria[c], pct: porCategoria[c] / l }; } });
     var total = Math.max(1, diasEntre(ini, fin) + 1);
     var restantes = h < ini ? total : h > fin ? 0 : diasEntre(h, fin) + 1;
     var transcurridos = Math.max(1, Math.min(total, diasEntre(ini, h) + 1));
     var limite = v.limite || 0, disponible = limite - gastado;
     return {
       compras: compras, gastado: gastado, limite: limite, disponible: disponible, pct: limite ? gastado / limite : 0,
-      diasTotal: total, diasRestantes: restantes, porDia: restantes ? Math.max(0, disponible) / restantes : 0,
-      promedio: h < ini ? 0 : gastado / transcurridos, porCategoria: porCategoria, moneda: mon,
+      antes: antes, durante: gastado - antes, porTarjeta: porTarjeta, ayer: ayer, porCatAyer: porCatAyer,
+      efectivo: { retiros: retiros, retirado: totRet, gastado: gastEf, queda: totRet - gastEf },
+      presupuesto: hayPres ? presupuesto : null,
+      diasTotal: total, diasRestantes: restantes, diaActual: h < ini ? 0 : Math.min(total, diasEntre(ini, h) + 1), porDia: restantes ? Math.max(0, disponible) / restantes : 0,
+      promedio: h < ini ? 0 : (gastado - antes) / transcurridos, porDiaTotal: gastado / total, porCategoria: porCategoria, moneda: mon,
       estado: h < ini ? 'Próximo' : h > fin ? 'Terminado' : 'En curso'
     };
   }
@@ -610,6 +635,7 @@ var Calc = (function () {
   /** ¿A qué cuenta de ahorro toca este movimiento? → { cuenta, signo, grupo } o null */
   function efectoCuenta(d, m, o) {
     if (tarjetaDesconocida(d, m)) return null;   // v2.9.0: hasta saber de quién es la tarjeta, no toca ninguna cuenta
+    if (m.cuenta && normNom(m.cuenta) === 'efectivo') return null;   // v2.10.0: gasto en efectivo (ya salió del banco al retirar)
     var cta = m.cuenta ? (d.cuentas || []).filter(function (c) { return normNom(c.nombre) === normNom(m.cuenta); })[0] : null;
     if (cta && !esCuentaReal(cta)) cta = null;
     if (m.tipo === 'Pago de tarjeta') return o.tarjetas ? { cuenta: o.tarjetas, signo: -1, grupo: 'pagos' } : null;
@@ -796,26 +822,31 @@ var Calc = (function () {
    * CRC/USD = lo que toca pagar: la deuda de hoy sin las compras hechas después del último corte (esas van al siguiente estado de cuenta).
    * avisar = hoy es uno de los días elegidos (p. ej. [3,1,0]) y todavía queda algo por pagar (si ya pagaste, no avisa).
    */
+  /** v2.10.0 · Lo que toca pagar de una tarjeta hoy: la deuda sin las compras hechas después del último corte. */
+  function porPagarTarjeta(d, c, hoy) {
+    var r2 = function (n) { return Math.round(n * 100) / 100; };
+    var dt = deudaTarjeta(d, c), corte = ultimoCorte(c, hoy), finCorte = corte ? new Date(corte.getFullYear(), corte.getMonth(), corte.getDate() + 1) : null;
+    var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null, finSaldo = fs && !isNaN(fs) ? new Date(fs.getFullYear(), fs.getMonth(), fs.getDate() + 1) : null;
+    var nuevas = { CRC: 0, USD: 0 }, pagado = false;
+    (d.movimientos || []).forEach(function (m) {
+      if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha) return;
+      var fm = new Date(m.fecha);
+      if (m.tipo === 'Pago de tarjeta' && finCorte && fm >= finCorte) pagado = true;
+      if ((m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
+    });
+    var crc = dt.CRC > 0.004 ? Math.max(0, dt.CRC - nuevas.CRC) : dt.CRC, usd = dt.USD > 0.004 ? Math.max(0, dt.USD - nuevas.USD) : dt.USD;
+    return { CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) }, nuevas: { CRC: r2(nuevas.CRC), USD: r2(nuevas.USD) }, pagado: pagado, corte: corte };
+  }
   function pagosProximos(d, hoy, diasAviso, ventana) {
     diasAviso = diasAviso && diasAviso.length ? diasAviso : [3, 1, 0]; ventana = ventana === undefined ? 7 : ventana;
-    var out = [], r2 = function (n) { return Math.round(n * 100) / 100; };
+    var out = [];
     (d.cuentas || []).forEach(function (c) {
       if (!c.activa || c.tipo !== 'Tarjeta de crédito' || !c.diaPago) return;
       var f = proximaFecha(c.diaPago, hoy), dias = diasEntre(hoy, f);
       if (dias < 0 || dias > ventana) return;
-      var dt = deudaTarjeta(d, c), corte = ultimoCorte(c, hoy), finCorte = corte ? new Date(corte.getFullYear(), corte.getMonth(), corte.getDate() + 1) : null;
-      var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null, finSaldo = fs && !isNaN(fs) ? new Date(fs.getFullYear(), fs.getMonth(), fs.getDate() + 1) : null;
-      var nuevas = { CRC: 0, USD: 0 }, pagado = false;
-      (d.movimientos || []).forEach(function (m) {
-        if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha) return;
-        var fm = new Date(m.fecha);
-        if (m.tipo === 'Pago de tarjeta' && finCorte && fm >= finCorte) pagado = true;
-        if ((m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
-      });
-      var crc = dt.CRC > 0.004 ? Math.max(0, dt.CRC - nuevas.CRC) : dt.CRC, usd = dt.USD > 0.004 ? Math.max(0, dt.USD - nuevas.USD) : dt.USD;
-      var debe = crc > 0.004 || usd > 0.004;
-      out.push({ nombre: c.nombre, ultimos4: c.ultimos4 || '', dias: dias, fecha: f.toISOString(), CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) },
-        pagado: pagado && !debe, debe: debe, avisar: debe && diasAviso.indexOf(dias) >= 0 });
+      var pp = porPagarTarjeta(d, c, hoy), debe = pp.CRC > 0.004 || pp.USD > 0.004;
+      out.push({ nombre: c.nombre, ultimos4: c.ultimos4 || '', dias: dias, fecha: f.toISOString(), CRC: pp.CRC, USD: pp.USD, deuda: pp.deuda,
+        pagado: pp.pagado && !debe, debe: debe, avisar: debe && diasAviso.indexOf(dias) >= 0 });
     });
     return out.sort(function (a, b) { return a.dias - b.dias; });
   }
@@ -828,7 +859,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
