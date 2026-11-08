@@ -1,7 +1,7 @@
 {
  "web": "2.10.8",
- "servidor": "2.10.8",
- "sha256": "17398519dde3bc50c50c6b1fa06e2d83277818c8952b7c55f56f8c1a0468a37d",
+ "servidor": "2.10.9",
+ "sha256": "bc7ada4e2ec1039534abaf4811c7e2cd87df0045e72076166788835f01e1072c",
  "novedades": "💵 Efectivo para el viaje: podés anotar plata que ya tenías en efectivo (sin que salga de ninguna cuenta). 🏧 Los retiros del viaje se pueden tocar para quitarlos o borrarlos.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",

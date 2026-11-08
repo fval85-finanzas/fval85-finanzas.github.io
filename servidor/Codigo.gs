@@ -785,10 +785,32 @@ function escribirFila_(h, fila, cols, obj) {
     var libre = i < ultimaCol && !formulas[i];
     if (libre && inicio === null) inicio = i;
     if (!libre && inicio !== null) {
-      h.getRange(fila, inicio + 1, 1, i - inicio).setValues([valores.slice(inicio, i)]);
+      var bloque = valores.slice(inicio, i);
+      try { h.getRange(fila, inicio + 1, 1, i - inicio).setValues([bloque]); }
+      catch (e) {
+        // v2.10.8: una columna con lista desplegable que rechaza otros valores (ej. "Cuenta / tarjeta" con Efectivo o Familia ••1234):
+        // se le permite aceptar otros valores (queda solo el aviso de la hoja) y se vuelve a escribir
+        if (!permitirFueraDeLista_(h, fila, inicio + 1, i - inicio)) throw e;
+        h.getRange(fila, inicio + 1, 1, i - inicio).setValues([bloque]);
+      }
       inicio = null;
     }
   }
+}
+
+/** Cambia las validaciones de lista "rechazar entrada" de esas columnas a "mostrar advertencia". Devuelve true si cambió alguna. */
+function permitirFueraDeLista_(h, fila, col0, n) {
+  var cambio = false;
+  try {
+    var reglas = h.getRange(fila, col0, 1, n).getDataValidations()[0];
+    reglas.forEach(function (r, i) {
+      if (!r || r.getAllowInvalid()) return;
+      var col = col0 + i, total = h.getMaxRows(), rango = h.getRange(1, col, total, 1), todas = rango.getDataValidations();
+      rango.setDataValidations(todas.map(function (fila1) { var x = fila1[0]; return [x && !x.getAllowInvalid() ? x.copy().setAllowInvalid(true).build() : x]; }));
+      cambio = true;
+    });
+  } catch (e) { console.log('permitirFueraDeLista_: ' + e); }
+  return cambio;
 }
 
 /** Fecha → texto ISO (google.script.run no acepta objetos Date). */
@@ -1020,7 +1042,11 @@ function guardarMovimiento_(m) {
     };
     // v2.10.0: compras de viaje anotadas a mano ("+Comida@id") o retiros para efectivo del viaje
     if (m.viaje !== undefined && m.viaje !== null) { if (!t.cols['Viaje']) { asegurarColumnas_('Movimientos', ['Viaje']); t = leerTabla_('Movimientos', 'Fecha'); } datosMov['Viaje'] = m.viaje; }
-    escribirFila_(t.hoja, fila, t.cols, datosMov);
+    try { escribirFila_(t.hoja, fila, t.cols, datosMov); }
+    catch (e) {   // v2.10.9: si no se pudo escribir completo, un movimiento nuevo no queda a medias en la hoja
+      if (!m.fila) { try { t.hoja.getRange(fila, 1, 1, t.hoja.getLastColumn()).getFormulas()[0].forEach(function (f, i) { if (!f) t.hoja.getRange(fila, i + 1).clearContent(); }); } catch (e2) { console.log(e2); } }
+      throw e;
+    }
     if (m.recordarRegla && m.comercio && (m.categoria || m.sobre)) guardarRegla_(m.comercio, m.categoria, m.sobre);
     if (m.fila) { try { fechaSobresDeMov_(m.fila, m.fecha); } catch (e) { console.log(e); } }
     return fila;
@@ -2160,7 +2186,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.10.8';
+var VERSION_APP = '2.10.9';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
