@@ -1,8 +1,8 @@
 {
- "web": "2.10.8",
+ "web": "2.10.9",
  "servidor": "2.10.9",
  "sha256": "bc7ada4e2ec1039534abaf4811c7e2cd87df0045e72076166788835f01e1072c",
- "novedades": "💵 Efectivo para el viaje: podés anotar plata que ya tenías en efectivo (sin que salga de ninguna cuenta). 🏧 Los retiros del viaje se pueden tocar para quitarlos o borrarlos.",
+ "novedades": "🛠 Arreglo: el efectivo del viaje (y las compras en efectivo) ya se guardan completos en la hoja.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
