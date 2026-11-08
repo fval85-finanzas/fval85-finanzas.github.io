@@ -786,17 +786,37 @@ function escribirFila_(h, fila, cols, obj) {
     if (libre && inicio === null) inicio = i;
     if (!libre && inicio !== null) {
       var bloque = valores.slice(inicio, i);
-      try { h.getRange(fila, inicio + 1, 1, i - inicio).setValues([bloque]); }
+      if (algunoFueraDeLista_(h, fila, inicio + 1, bloque)) permitirFueraDeLista_(h, fila, inicio + 1, i - inicio);   // v2.10.10: antes de escribir
+      // v2.10.10: Google junta las escrituras y el error de validación sale después (fuera del try): flush() lo trae acá
+      try { h.getRange(fila, inicio + 1, 1, i - inicio).setValues([bloque]); vaciar_(); }
       catch (e) {
         // v2.10.8: una columna con lista desplegable que rechaza otros valores (ej. "Cuenta / tarjeta" con Efectivo o Familia ••1234):
         // se le permite aceptar otros valores (queda solo el aviso de la hoja) y se vuelve a escribir
         if (!permitirFueraDeLista_(h, fila, inicio + 1, i - inicio)) throw e;
-        h.getRange(fila, inicio + 1, 1, i - inicio).setValues([bloque]);
+        h.getRange(fila, inicio + 1, 1, i - inicio).setValues([bloque]); vaciar_();
       }
       inicio = null;
     }
   }
 }
+
+/** ¿Algún valor nuevo no está en la lista desplegable (que rechaza) de su celda? */
+function algunoFueraDeLista_(h, fila, col0, bloque) {
+  try {
+    var reglas = h.getRange(fila, col0, 1, bloque.length).getDataValidations()[0];
+    return reglas.some(function (r, i) {
+      var v = bloque[i];
+      if (!r || r.getAllowInvalid() || v === '' || v === null || v === undefined) return false;
+      var tipo = String(r.getCriteriaType()), cv = r.getCriteriaValues() || [];
+      var lista = /VALUE_IN_LIST/.test(tipo) ? (cv[0] || []) : /VALUE_IN_RANGE/.test(tipo) && cv[0] && cv[0].getValues ? [].concat.apply([], cv[0].getValues()) : null;
+      if (!lista) return false;
+      return !lista.some(function (x) { return String(x).trim() === String(v).trim(); });
+    });
+  } catch (e) { console.log('algunoFueraDeLista_: ' + e); return false; }
+}
+
+/** Aplica ya las escrituras pendientes (para que un error salga en el momento) */
+function vaciar_() { if (typeof SpreadsheetApp !== 'undefined' && SpreadsheetApp.flush) SpreadsheetApp.flush(); }
 
 /** Cambia las validaciones de lista "rechazar entrada" de esas columnas a "mostrar advertencia". Devuelve true si cambió alguna. */
 function permitirFueraDeLista_(h, fila, col0, n) {
@@ -2186,7 +2206,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.10.9';
+var VERSION_APP = '2.10.10';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 

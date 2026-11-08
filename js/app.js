@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.10.9';
+  var VERSION_WEB = '2.10.10';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -4217,7 +4217,7 @@ var App = (function () {
   }
 
   // ==================================================================== v2.5
-  var SERVIDOR_MIN = '2.5.0';
+  var SERVIDOR_MIN = '2.10.10';
   function cmpVer(a, b) { var x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number); for (var i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; }
   function PREFS() { return (AJ && AJ.prefs) || (D && D.ajustes && D.ajustes.prefs) || leerJSONSeguro('mf-prefs') || {}; }
   function guardarPrefs(parcial, desc) {
