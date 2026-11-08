@@ -1,8 +1,8 @@
 {
- "web": "2.10.1",
- "servidor": "2.10.1",
- "sha256": "f02a8128d5b92d1bd356203ad53b271c30113eed5b7a6d42ca2a002724c66be8",
- "novedades": "Bandeja limpia: los correos de los bancos que la app ya leyó salen de la bandeja de entrada y quedan leídos en Gmail → Finanzas › Procesado (los que no entiende se quedan). Se apaga en Ajustes → Correos de los bancos.",
+ "web": "2.10.2",
+ "servidor": "2.10.2",
+ "sha256": "49e97ec24541d2ae9671805d78bd64749343e08ea3c8af3f024f9c06dc4068b9",
+ "novedades": "Estados de cuenta (tarjetas, préstamo, fondos): la app no los toca, se quedan en la bandeja de entrada como recordatorio. Los que 2.10.1 había movido vuelven a la bandeja. Compras, pagos y movimientos siguen yendo a Finanzas › Procesado.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

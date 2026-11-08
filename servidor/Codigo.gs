@@ -1832,6 +1832,13 @@ function leerCorreos_(guardar) {
     }
   }
   var hilosOk = {}, hilosMal = {};
+  /** v2.10.2: estados de cuenta → la app no los toca (se quedan en la bandeja como recordatorio); solo les quita "Revisar" si lo tenían */
+  function dejarEnBandeja(x, quien) {
+    resumen.detalle.push('📄 [' + quien + '] Estado de cuenta: se queda en la bandeja (no se anota): ' + x.msg.getSubject());
+    if (!guardar) return;
+    try { revisar.removeFromThread(x.hilo); } catch (e) { /* nada */ }
+    var id = x.hilo.getId ? x.hilo.getId() : null; if (id) hilosMal[id] = true;   // nunca se archiva
+  }
   function marcar(x, ok) {
     if (!guardar) return;
     var id = x.hilo.getId ? x.hilo.getId() : null;
@@ -1844,6 +1851,7 @@ function leerCorreos_(guardar) {
     buscarMensajes_('from:' + banco.correo, desde).forEach(function (x) {
       var texto = x.msg.getSubject() + '\n' + x.msg.getPlainBody();
       var lista = parsearCorreoBanco(texto, x.msg.getBody(), x.msg.getDate(), banco.nombre);
+      if ((!lista || !lista.length) && esEstadoDeCuenta_(x.msg.getSubject())) return dejarEnBandeja(x, banco.nombre);
       if (!lista) {
         resumen.revisar++;
         resumen.detalle.push('⚠️ [' + banco.nombre + '] No pude leer: ' + x.msg.getSubject());
@@ -1878,6 +1886,7 @@ function leerCorreos_(guardar) {
   // ---- BCR SAFI: solicitudes de inversión y de retiro (las confirmaciones con PDF y el estado de cuenta se ignoran) ----
   buscarMensajes_('from:' + FONDOS_CORREO, desde).forEach(function (x) {
     var asunto = x.msg.getSubject();
+    if (esEstadoDeCuenta_(asunto)) return dejarEnBandeja(x, 'Fondos');
     if (!/solicitud de (inversi|retiro)/i.test(asunto)) {
       resumen.detalle.push('📄 [Fondos] Confirmación o estado de cuenta (no se anota): ' + asunto);
       marcar(x, true);
@@ -1901,11 +1910,7 @@ function leerCorreos_(guardar) {
           (PRESTAMO_CORREO.asunto ? ' subject:(' + PRESTAMO_CORREO.asunto + ')' : '');
   buscarMensajes_(q, desde).forEach(function (x) {
     var txt = textoAdjuntos_(x.msg);
-    if (/estado de cuenta/i.test(x.msg.getSubject()) || esEstadoCuentaPrestamo(txt)) {
-      resumen.detalle.push('📄 [Préstamo] Estado de cuenta mensual (no se anota): ' + x.msg.getSubject());
-      marcar(x, true);
-      return;
-    }
+    if (/estado de cuenta/i.test(x.msg.getSubject()) || esEstadoCuentaPrestamo(txt)) return dejarEnBandeja(x, 'Préstamo');
     var p = txt ? parsearComprobantePrestamo(txt, x.msg.getDate()) : null;
     if (!p) {
       resumen.revisar++;
@@ -1949,6 +1954,7 @@ function procesarCorreos() {
     if (r.compras + r.pagos > 0) { try { tareasDespuesDeLeer_(); } catch (e) { console.log('Después de leer: ' + e); } }
     // La próxima vez revisa desde 10 min antes (por si un correo llegó tarde; no se duplica)
     PropertiesService.getScriptProperties().setProperty('ULTIMA_REVISION', String(inicio - 10 * 60 * 1000));
+    try { devolverEstadosDeCuenta_(); } catch (e) { console.log('Estados de cuenta: ' + e); }
     try { limpiarBandejaVieja_(); } catch (e) { console.log('Bandeja: ' + e); }
     var msg = 'Movimientos nuevos: ' + r.compras + ' · Pagos del préstamo: ' + r.pagos +
               ' · Repetidos ignorados: ' + r.duplicados + ' · Para revisar: ' + r.revisar;
@@ -2028,10 +2034,24 @@ function desactivarAutomatico() {
 function ajenasSaltadas_() { try { return JSON.parse(props_().getProperty('AJENAS_SALTADAS') || '{}'); } catch (e) { return {}; } }
 
 /** v2.10.1 · Una sola vez (y hasta terminar): los correos ya procesados que siguen en la bandeja se archivan y quedan leídos. */
+function esEstadoDeCuenta_(asunto) { return /estado\s+de\s+cuenta/i.test(String(asunto || '')); }
+/** v2.10.2 · Una sola vez: los estados de cuenta que 2.10.1 sacó de la bandeja vuelven a la bandeja (sin "Procesado"). */
+function devolverEstadosDeCuenta_() {
+  var p = PropertiesService.getScriptProperties();
+  if (p.getProperty('ESTADOS_BANDEJA_V2') === 'si') return 0;
+  var et = GmailApp.getUserLabelByName(ETIQUETA_PROCESADO), rev = GmailApp.getUserLabelByName(ETIQUETA_REVISAR), n = 0;
+  if (et) {
+    var hilos = GmailApp.search('-in:inbox label:' + ETIQUETA_PROCESADO.toLowerCase().replace(/[\/ ]/g, '-') + ' subject:"estado de cuenta"', 0, 100);
+    if (hilos.length) { GmailApp.moveThreadsToInbox(hilos); et.removeFromThreads(hilos); n += hilos.length; }
+  }
+  if (rev) { var r2 = GmailApp.search('label:' + ETIQUETA_REVISAR.toLowerCase().replace(/[\/ ]/g, '-') + ' subject:"estado de cuenta"', 0, 100); if (r2.length) rev.removeFromThreads(r2); }
+  p.setProperty('ESTADOS_BANDEJA_V2', 'si');
+  return n;
+}
 function limpiarBandejaVieja_() {
   var p = PropertiesService.getScriptProperties();
   if (p.getProperty('BANDEJA_LIMPIA_V1') === 'si' || prefs_().bandejaLimpia === false) return 0;
-  var q = 'in:inbox label:' + ETIQUETA_PROCESADO.toLowerCase().replace(/[\/ ]/g, '-') + ' -label:' + ETIQUETA_REVISAR.toLowerCase().replace(/[\/ ]/g, '-');
+  var q = 'in:inbox label:' + ETIQUETA_PROCESADO.toLowerCase().replace(/[\/ ]/g, '-') + ' -label:' + ETIQUETA_REVISAR.toLowerCase().replace(/[\/ ]/g, '-') + ' -subject:"estado de cuenta"';
   var total = 0;
   for (var vuelta = 0; vuelta < 5; vuelta++) {
     var hilos = GmailApp.search(q, 0, 100);
@@ -2055,7 +2075,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.10.1';
+var VERSION_APP = '2.10.2';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
