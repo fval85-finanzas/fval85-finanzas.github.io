@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.10.10';
+  var VERSION_WEB = '2.10.11';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -2802,8 +2802,10 @@ var App = (function () {
   /** ＋ Anotar compra a mano (o gasto en efectivo) dentro del viaje */
   var CM2 = null;
   function formCompraManual(fila, fuente) {
-    var v = viajePorFila(fila), fuentes = (v.tarjetas || []).slice();
+    var v = viajePorFila(fila), fuentes = (v.tarjetas || []).filter(function (t) { return t !== C.SIN_FAMILIA; });
     if (fuentes.indexOf('Efectivo') < 0) fuentes.push('Efectivo');
+    // v2.10.11: las tarjetas de la familia también (si el aviso no llegó todavía)
+    var fam = (v.tarjetas || []).indexOf(C.SIN_FAMILIA) >= 0 ? [] : Object.keys(familia()).map(function (u4) { return 'Familia ••' + u4; });
     CM2 = { fila: fila, cat: 'Comida', fuente: fuente || fuentes[0] };
     var hoyIso = new Date().toISOString(), dentro = new Date() >= new Date(v.desde) && new Date() <= new Date(new Date(v.hasta).getTime() + 86400000);
     abrir('<div class="suave chico">✈ ' + esc(v.nombre) + '</div><h2>' + (fuente === 'Efectivo' ? '＋ Gasto en efectivo' : '＋ Anotar compra a mano') + '</h2>' +
@@ -2813,6 +2815,7 @@ var App = (function () {
       '<label class="campo compacto"><span>Fecha</span><input id="cm-fecha" type="date" value="' + localInput(dentro ? hoyIso : v.desde) + '"></label>' +
       '<div class="suave chico fuerte" style="margin-top:8px">CATEGORÍA</div><div class="chips" id="cm-cats">' + C.CATS_VIAJE.map(function (c) { return chipRev(ICON_CAT[c] + ' ' + c, 'App.cmCat(\'' + c + '\')', c === CM2.cat); }).join('') + '</div>' +
       '<label class="campo compacto"><span>Pagado con</span><select id="cm-fuente">' + fuentes.map(function (k) { return '<option value="' + esc(k) + '"' + (k === CM2.fuente ? ' selected' : '') + '>' + esc(etiquetaFuente(k)) + '</option>'; }).join('') +
+      fam.map(function (k) { return '<option value="' + esc(k) + '"' + (k === CM2.fuente ? ' selected' : '') + '>👪 ' + esc(etiquetaCuenta(k)) + '</option>'; }).join('') +
       D.cuentas.filter(function (c) { return c.activa && fuentes.indexOf(c.nombre) < 0 && c.tipo !== 'Préstamo' && c.tipo !== 'Inversión'; }).map(function (c) { return '<option value="' + esc(c.nombre) + '">Otra: ' + esc(etiquetaCuenta(c.nombre)) + '</option>'; }).join('') + '</select></label>' +
       '<div class="suave chico">Las compras con tarjeta normalmente llegan solas por correo. Usá esto para lo que no llega (efectivo, una tarjeta sin aviso, algo que pagó otra persona). Si después llega igual, la app te pregunta para no duplicarla.</div>' +
       '<div class="acciones"><button class="btn" id="cm-ok" onclick="App.guardarCompraManual()">Anotar</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
@@ -2825,7 +2828,7 @@ var App = (function () {
     var fecha = new Date(f); var ahora = new Date(); fecha.setHours(ahora.getHours(), ahora.getMinutes(), 0, 0);
     var cat = CM2.cat, desc = val('cm-desc').trim() || (cat + (fuente === 'Efectivo' ? ' (efectivo)' : ''));
     encolar('guardarMovimiento', [{ fila: null, control: null, fecha: fecha.toISOString(), monto: monto, moneda: val('cm-moneda'), tipo: 'Gasto', comercio: desc, lugar: '', cuenta: fuente,
-      categoria: (D.categorias || []).indexOf('Viajes') >= 0 ? 'Viajes' : '', sobre: '', nota: 'Viaje ' + v.nombre, origen: 'Manual', autorizacion: 'VJ-' + grupoNuevo(), viaje: '+' + cat + '@' + v.id, recordarRegla: false }], 'Viaje ' + v.nombre + ': ' + desc + ' · ' + txt(monto, val('cm-moneda')));
+      categoria: (D.categorias || []).indexOf('Viajes') >= 0 ? 'Viajes' : '', sobre: '', nota: 'Viaje ' + v.nombre + (C.esFamilia({ cuenta: fuente }) ? '. Tarjeta de la familia (solo viajes)' : ''), origen: 'Manual', autorizacion: 'VJ-' + grupoNuevo(), viaje: '+' + cat + '@' + v.id, recordarRegla: false }], 'Viaje ' + v.nombre + ': ' + desc + ' · ' + txt(monto, val('cm-moneda')));
     hecho('✈ Anotado en ' + v.nombre + ': ' + desc);
   }
   /** 🏧 Retiro de cajero → efectivo del viaje (no es gasto) */

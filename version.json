@@ -1,8 +1,8 @@
 {
- "web": "2.10.10",
+ "web": "2.10.11",
  "servidor": "2.10.10",
  "sha256": "31bf585ebd79379d6a6b88f1e6e9b340e92246d9f0c71a3c4278404cfa959f88",
- "novedades": "🛠 Arreglo: el efectivo del viaje (y las compras en efectivo) ya se guardan completos en la hoja.",
+ "novedades": "👪 Compra a mano con la tarjeta de la familia: en el viaje, «Pagado con» ahora incluye las tarjetas de tu esposa. Si después llega el correo, la app te pregunta si es la misma.",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
