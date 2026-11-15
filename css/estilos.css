@@ -989,3 +989,57 @@ html, body, button, a, input, select, textarea, label { touch-action: manipulati
 .btn-dash { width: 100%; border: 1.5px dashed var(--linea); background: none; color: var(--acento); border-radius: 12px; padding: 12px; font-weight: 800; font-size: 14px; font-family: inherit; cursor: pointer; margin-top: 6px; }
 /* v2.10.7 · retiros del viaje tocables */
 .vj-ret { background: none; border: 0; padding: 2px 0 2px 10px; width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+/* v2.11.0 · #49 cobros repetidos */
+.rep-par { display: flex; gap: 8px; margin: 10px 0 4px; }
+.rep-c { flex: 1; min-width: 0; border: 1.5px solid var(--linea); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.rep-c.rojo { border-color: var(--rojo); }
+.rep-c .rep-t { font-size: 11px; font-weight: 700; }
+.rep-c.rojo .rep-t { color: var(--rojo); }
+.rep-c .rep-h { font-size: 19px; }
+.rep-c .rep-n { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rep-bot { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.rep-bot .btn { width: 100%; }
+/* v2.11.0 · #52 activar / desactivar */
+.cl-fila { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--linea); }
+.cl-fila:last-child { border-bottom: 0; }
+.cl-fila .cl-nom { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--texto); font: inherit; padding: 0; cursor: pointer; display: flex; flex-direction: column; }
+.cl-fila .cl-nom b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-fila.off .cl-nom { opacity: .55; }
+.tj-inact { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; border: 1px solid var(--linea); color: var(--texto); font: inherit; cursor: pointer; margin-top: 10px; }
+.tj-inact-pl { display: flex; gap: 4px; }
+
+/* v2.11.0 · #50 calculadora: botón encima del + y hoja grande desde abajo */
+#calc-btn { left: auto !important; top: auto !important; right: max(16px, calc(50% - 264px)) !important; bottom: calc(86px + env(safe-area-inset-bottom)) !important; width: 48px; height: 48px; border-radius: 24px; font-size: 22px; }
+body.calc-abierta #calc-btn { display: none; }
+#calc-panel { left: 0; right: 0; transform: none; margin: 0 auto; width: 100%; max-width: 560px; bottom: 0; border-radius: 24px 24px 0 0; padding: 4px 14px calc(14px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--linea); box-shadow: 0 -12px 34px rgba(0,0,0,.6); }
+#calc-panel .calc-asa { display: block; width: 100%; background: none; border: 0; padding: 6px 0 8px; cursor: pointer; }
+#calc-panel .calc-asa i { display: block; width: 40px; height: 5px; border-radius: 3px; background: var(--linea); margin: 0 auto; }
+#calc-panel .calc-cab { font-size: 13.5px; }
+#calc-panel .calc-cab button { font-size: 19px; padding: 6px 10px; }
+#calc-panel .calc-expr { font-size: 16px; min-height: 21px; margin-top: 4px; }
+#calc-panel .calc-res { font-size: 44px; line-height: 1.1; margin-bottom: 12px; }
+#calc-panel .calc-teclas { gap: 9px; }
+#calc-panel .calc-teclas button { height: 60px; border-radius: 16px; font-size: 26px; }
+#calc-panel .calc-teclas button.eq { font-size: 30px; }
+#calc-panel .calc-usar { padding: 15px; font-size: 16px; border-radius: 14px; margin-top: 12px; }
+#calc-panel .calc-pie { margin-top: 12px; gap: 9px; }
+#calc-panel .calc-pie button { padding: 13px; font-size: 14px; border-radius: 14px; }
+#calc-panel .calc-hist { max-height: 300px; }
+@media (max-height: 640px) { #calc-panel .calc-teclas button { height: 48px; font-size: 22px; } #calc-panel .calc-res { font-size: 34px; } }
+/* v2.12.0 · #53 presupuesto */
+.pr-barra { position: relative; height: 8px; border-radius: 4px; background: var(--linea); margin: 6px 0 4px; }
+.pr-barra > i { display: block; height: 100%; border-radius: 4px; }
+.pr-barra > span { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--texto); opacity: .85; border-radius: 1px; }
+.pr-cat { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--linea); color: var(--texto); font: inherit; padding: 10px 14px; }
+.pr-cat:last-child { border-bottom: 0; }
+.pr-cat.tocable { cursor: pointer; }
+.pr-inv { border: 1.5px solid #3DD68C; }
+.pr-inv .pr-cat { padding: 8px 0; }
+.pr-sin { display: block; width: 100%; text-align: left; color: var(--texto); font: inherit; border: 1px solid var(--linea); cursor: pointer; }
+.pr-mov { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--linea); color: var(--texto); font: inherit; padding: 8px 14px; cursor: pointer; }
+.pr-mov:last-child { border-bottom: 0; }
+.pr-mov > span { display: flex; flex-direction: column; min-width: 0; }
+.pf-fila { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--linea); }
+.pf-fila .pf-n { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pf-fila .pf-in { width: 112px; text-align: right; font: inherit; font-weight: 800; color: var(--texto); background: var(--fondo); border: 1.5px solid var(--linea); border-radius: 10px; padding: 8px 10px; }
+.pf-fila .pf-in:not(:placeholder-shown) { border-color: var(--acento); }

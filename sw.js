@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que abra rápido y avisa cuando hay una versión nueva.
 // Al publicar cambios, subí el número de VERSION (y el de VERSION_WEB en js/app.js).
-const VERSION = '2.10.11';
+const VERSION = '2.12.0';
 const CACHE = 'misfinanzas-' + VERSION;
 const ARCHIVOS = [
   './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/tiendas.js', './js/pdf.js', './js/app.js', './js/lector.js', './js/ocr-worker.js', './js/vendor/pdf-lib.min.js',
@@ -122,6 +122,12 @@ async function revisarAvisos() {
           const pas = (v.pasadas || []).map((p) => p.cat + ' ya se pasó ' + dinSW(p.exceso, v.moneda)).join(' · ');
           await mostrar('viaje-' + v.nombre, '✈ ' + v.nombre + ' · día ' + v.dia + ' de ' + v.dias, 'Ayer gastaste ' + dinSW(v.ayer, v.moneda) + '. Te quedan ' + dinSW(v.quedan, v.moneda) + (v.restantes ? ': ' + dinSW(v.porDia, v.moneda) + ' por día.' : '.') + (pas ? ' ' + pas + '.' : ''), './?ir=viajes', 'Ver viaje');
           nuevo['v' + v.nombre] = v.dia;
+        }
+        // v2.12.0 (#53): presupuesto al 80% o pasado (una vez por nivel y período)
+        if (si('presupuesto')) for (const b of (x.presupuesto || [])) {
+          const marca = b.periodo + ':' + b.nivel;
+          if (ult['b' + b.cat] !== marca) await mostrar('presu-' + b.cat, '📊 Presupuesto: ' + b.cat + (b.nivel === 100 ? ' · te pasaste' : ' al ' + b.pct + '%'), 'Llevás ' + dinSW(b.gastado, 'CRC') + ' de ' + dinSW(b.limite, 'CRC') + (b.nivel === 100 ? '. Te pasaste por ' + dinSW(-b.quedan, 'CRC') + '.' : ' y faltan ' + b.faltan + ' días. Te quedan ' + dinSW(b.quedan, 'CRC') + '.'), './?ir=presupuesto', 'Ver presupuesto');
+          nuevo['b' + b.cat] = marca;
         }
         if (si('negativo') && (x.negativos || []).length && !repetido('n', x.negativos.join(','))) await mostrar('negativo', '🔴 Sobre en negativo', x.negativos.join(', '), './?ir=sobres', 'Ver sobres');
         if (si('super') && x.consultas && !repetido('c', x.consultas)) await mostrar('super', '🛒 ' + x.consultas + ' “¿este sirve?” sin responder', 'Abrí Super y Otros', './?ir=super', 'Ver');

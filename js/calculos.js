@@ -1,6 +1,6 @@
 /* Calculos — funciones puras (sin pantalla). Se prueban con: node pruebas/pruebas.test.js */
 var Calc = (function () {
-  var NO_GASTO = { 'Pago de tarjeta': 1, 'Compra tasa cero': 1, 'Transferencia': 1 };
+  var NO_GASTO = { 'Pago de tarjeta': 1, 'Compra tasa cero': 1, 'Cuota tasa cero': 1, 'Transferencia': 1 };
 
   function claveMes(d) { return d.getFullYear() * 12 + d.getMonth(); }
   function enMes(iso, mes) { return !!iso && claveMes(new Date(iso)) === claveMes(mes); }
@@ -522,7 +522,7 @@ var Calc = (function () {
   /** Saldo puesto a una fecha + compras con la tarjeta desde ese día − pagos a la tarjeta desde ese día. */
   function deudaTarjeta(d, c) {
     var r = { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0, base: { CRC: c.saldoCRC || 0, USD: c.saldoUSD || 0 }, fecha: c.fechaSaldo || null,
-      compras: 0, sube: { CRC: 0, USD: 0 }, baja: { CRC: 0, USD: 0 }, vivo: !!c.fechaSaldo };
+      compras: 0, sube: { CRC: 0, USD: 0 }, baja: { CRC: 0, USD: 0 }, cuotas: { CRC: 0, USD: 0 }, nCuotas: 0, vivo: !!c.fechaSaldo };
     var desde = c.fechaSaldo ? new Date(c.fechaSaldo) : null;
     if (!desde || isNaN(desde)) { r.vivo = false; return r; }
     // la fecha del saldo es un día: cuenta lo de después de ese día
@@ -530,7 +530,9 @@ var Calc = (function () {
     (d.movimientos || []).forEach(function (m) {
       if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha || new Date(m.fecha) < corte) return;
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
-      if (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') { r.sube[mon] += m.monto; r.compras++; }
+      if (m.tipo === 'Compra tasa cero' && c.diaCorte) return;   // v2.11.0 (#51): con día de corte, la compra tasa cero entra en cuotas (filas "Cuota tasa cero" al corte)
+      if (m.tipo === 'Cuota tasa cero') { r.sube[mon] += m.monto; r.cuotas[mon] += m.monto; r.nCuotas++; }
+      else if (m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') { r.sube[mon] += m.monto; r.compras++; }
       else if (m.tipo === 'Pago de tarjeta' || m.tipo === 'Ingreso') r.baja[mon] += m.monto;   // pagos y devoluciones
     });
     r.CRC = r.base.CRC + r.sube.CRC - r.baja.CRC;
@@ -848,10 +850,164 @@ var Calc = (function () {
       if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha) return;
       var fm = new Date(m.fecha);
       if (m.tipo === 'Pago de tarjeta' && finCorte && fm >= finCorte) pagado = true;
-      if ((m.tipo === 'Gasto' || m.tipo === 'Compra tasa cero') && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
+      if ((m.tipo === 'Gasto' || (m.tipo === 'Compra tasa cero' && !c.diaCorte)) && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
     });
     var crc = dt.CRC > 0.004 ? Math.max(0, dt.CRC - nuevas.CRC) : dt.CRC, usd = dt.USD > 0.004 ? Math.max(0, dt.USD - nuevas.USD) : dt.USD;
     return { CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) }, nuevas: { CRC: r2(nuevas.CRC), USD: r2(nuevas.USD) }, pagado: pagado, corte: corte };
+  }
+  /**
+   * v2.11.0 (#51) · Cuotas tasa cero que se cargan a la tarjeta el día del corte.
+   * Cada cuota del plan (fecha = día de pago) se carga en el corte anterior a ese pago. Solo tarjetas con día de corte.
+   * Devuelve [{ t, n, meses, corte (Date), cuota, moneda, tarjeta, aut }] de los cortes entre `desde` (excluido) y `hasta` (incluido).
+   */
+  function cuotasAlCorte(d, c, desde, hasta) {
+    var out = [];
+    if (!c || !c.diaCorte) return out;
+    (d.tasaCero || []).forEach(function (t) {
+      if (normNom(t.tarjeta) !== normNom(c.nombre)) return;
+      planTasaCero(t, hasta).filas.forEach(function (f) {
+        if (!f.fecha) return;
+        var corte = ultimoCorte(c, f.fecha);
+        if (!corte || (desde && corte <= soloFecha(desde)) || corte > soloFecha(hasta)) return;
+        out.push({ t: t, n: f.n, meses: t.meses, corte: corte, cuota: Math.round(f.cuota * 100) / 100, moneda: t.moneda || 'CRC', tarjeta: c.nombre, aut: 'TC-' + (t.fila || normNom(t.descripcion).slice(0, 12)) + '-' + f.n });
+      });
+    });
+    return out.sort(function (a, b) { return a.corte - b.corte; });
+  }
+  /** Lo que falta de las compras tasa cero de una tarjeta (no entra al pago de contado) y las cuotas del próximo corte */
+  function saldoTasaCeroTarjeta(d, c, hoy) {
+    var r = { CRC: 0, USD: 0, proximo: { CRC: 0, USD: 0 }, proxCorte: null, n: 0 };
+    var cortadas = {};
+    cuotasAlCorte(d, c, null, hoy).forEach(function (x) { cortadas[x.aut] = 1; });
+    var sig = c && c.diaCorte ? (function () { var u = ultimoCorte(c, hoy); return u ? new Date(u.getFullYear(), u.getMonth() + 1, Math.min(c.diaCorte, new Date(u.getFullYear(), u.getMonth() + 2, 0).getDate())) : null; })() : null;
+    (d.tasaCero || []).forEach(function (t) {
+      if (!c || normNom(t.tarjeta) !== normNom(c.nombre)) return;
+      var mon = t.moneda === 'USD' ? 'USD' : 'CRC', algo = false;
+      planTasaCero(t, hoy).filas.forEach(function (f) {
+        var k = 'TC-' + (t.fila || normNom(t.descripcion).slice(0, 12)) + '-' + f.n;
+        if (c.diaCorte ? cortadas[k] : f.cobrada) return;
+        r[mon] += f.cuota; algo = true;
+        if (sig && f.fecha && ultimoCorte(c, f.fecha) && soloFecha(ultimoCorte(c, f.fecha)).getTime() === soloFecha(sig).getTime()) r.proximo[mon] += f.cuota;
+      });
+      if (algo) r.n++;
+    });
+    r.proxCorte = sig;
+    return r;
+  }
+  // ---------------- v2.12.0 · Presupuesto (#53) ----------------
+  function presuPrefs(d) { return (d && d.presupuesto) || (d && d.ajustes && d.ajustes.prefs && d.ajustes.prefs.presupuesto) || {}; }
+  /** Período del presupuesto: mes calendario o período de salario (del último pago al día antes del siguiente) */
+  function periodoPresupuesto(d, hoy, modo, cfgSalario, atras) {
+    var h = soloFecha(hoy), ini, fin, nombre;
+    atras = atras || 0;
+    if (modo === 'salario' && cfgSalario && cfgSalario.frecuencia) {
+      var fs = fechasSalario(cfgSalario, new Date(h.getTime() - 200 * 86400000), new Date(h.getTime() + 70 * 86400000));
+      var i = -1; fs.forEach(function (f, k) { if (f <= h) i = k; });
+      i -= atras;
+      if (i >= 0 && fs[i + 1]) { ini = fs[i]; fin = new Date(fs[i + 1].getFullYear(), fs[i + 1].getMonth(), fs[i + 1].getDate() - 1); nombre = 'salario'; }
+    }
+    if (!ini) { ini = new Date(h.getFullYear(), h.getMonth() - atras, 1); fin = new Date(h.getFullYear(), h.getMonth() - atras + 1, 0); nombre = 'mes'; }
+    var dias = Math.round((fin - ini) / 86400000) + 1, dia = Math.max(0, Math.min(dias, Math.round((h - ini) / 86400000) + 1));
+    return { modo: nombre, ini: ini, fin: fin, dias: dias, dia: dia, pct: dias ? dia / dias : 1, faltan: Math.max(0, dias - dia), factor: nombre === 'mes' ? 1 : dias / 30.4375 };
+  }
+  /** ¿Cuenta este movimiento en el presupuesto? Devuelve la categoría ('' = no cuenta) */
+  function categoriaPresupuesto(d, m) {
+    if (!m || m.tipo !== 'Gasto' || m.para || efectivoPropioViaje(m)) return '';
+    var mk = marcaViaje(m);
+    if (mk.efectivo) return '';
+    if ((d.viajes || []).some(function (v) { return enViaje(v, m); })) return '';   // lo del viaje cuenta solo en el viaje
+    if (esFamilia(m)) {
+      var x = familiaPrefs(d)[familia4(m)], pr = x && x.presu;
+      if (!pr) return '';
+      return pr === '*' ? (m.categoria || 'Sin categoría') : pr;
+    }
+    return m.categoria || 'Sin categoría';
+  }
+  function enCRC(d, monto, moneda) { return moneda === 'USD' ? monto * (d.tipoCambio || 1) : monto; }
+  /**
+   * Presupuesto del período. o = { modo, salario (cfg), atras (0 = actual, 1 = el anterior) }
+   * Todo en colones (los dólares se pasan al tipo de cambio).
+   */
+  function presupuesto(d, hoy, o) {
+    o = o || {};
+    var pp = presuPrefs(d), per = periodoPresupuesto(d, hoy, o.modo || pp.modo || 'mes', o.salario, o.atras), lim = pp.limites || {};
+    var cats = {}, t0 = per.ini.getTime(), t1 = per.fin.getTime() + 86400000;
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha) return;
+      var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
+      var cat = categoriaPresupuesto(d, m); if (!cat) return;
+      var c = cats[cat] = cats[cat] || { cat: cat, gastado: 0, n: 0, compras: [], porPersona: {} };
+      var v = enCRC(d, m.monto, m.moneda), per1 = esFamilia(m) ? personaFamilia(d, familia4(m)) : '', k = esEfectivo(m.cuenta) ? 'Efectivo' : m.cuenta;
+      c.gastado += v; c.n++; c.compras.push({ mov: m, monto: v, persona: per1 });
+      var pe = c.porPersona[per1] = c.porPersona[per1] || { persona: per1, monto: 0, tarjetas: {} };
+      pe.monto += v; pe.tarjetas[k] = (pe.tarjetas[k] || 0) + v;
+    });
+    var lista = [], sin = { monto: 0, cats: [] }, total = { limite: 0, gastado: 0 };
+    Object.keys(lim).forEach(function (k) { if (lim[k] > 0 && !cats[k]) cats[k] = { cat: k, gastado: 0, n: 0, compras: [], porPersona: {} }; });
+    Object.keys(cats).forEach(function (k) {
+      var c = cats[k], l = lim[k] > 0 ? lim[k] * per.factor : 0;
+      c.compras.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+      if (!l) { sin.monto += c.gastado; sin.cats.push(c); return; }
+      c.limite = l; c.pct = c.gastado / l; c.quedan = l - c.gastado;
+      c.estado = c.pct > 1.0001 ? 'pasado' : (c.pct > per.pct + 0.10 && c.pct >= 0.5) ? 'rapido' : 'bien';
+      total.limite += l; total.gastado += c.gastado; lista.push(c);
+    });
+    lista.sort(function (a, b) { return b.pct - a.pct; });
+    sin.cats.sort(function (a, b) { return b.gastado - a.gastado; });
+    total.pct = total.limite ? total.gastado / total.limite : 0; total.quedan = total.limite - total.gastado;
+    total.estado = total.pct > 1.0001 ? 'pasado' : (total.pct > per.pct + 0.10 && total.pct >= 0.5) ? 'rapido' : 'bien';
+    total.porDia = per.faltan > 0 ? Math.max(0, total.quedan) / per.faltan : Math.max(0, total.quedan);
+    // inversión: aportes − retiros del período, por fondo
+    var metas = pp.inv || {}, inv = [], invT = { meta: 0, aportado: 0 };
+    (d.fondos || []).forEach(function (f) {
+      var meta = (metas[f.nombre] || 0) * per.factor, ap = 0;
+      (d.movimientos || []).forEach(function (m) {
+        if ((m.tipo !== 'Inversión' && m.tipo !== 'Retiro de fondo') || m.subcuenta !== f.nombre || !m.fecha) return;
+        var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
+        ap += (m.tipo === 'Inversión' ? 1 : -1) * m.monto;
+      });
+      if (!meta && !ap) return;
+      var mon = f.moneda || 'CRC';
+      inv.push({ nombre: f.nombre, moneda: mon, meta: meta, aportado: ap, pct: meta ? ap / meta : 0, cumplida: meta > 0 && ap >= meta - 0.004, faltan: Math.max(0, meta - ap) });
+      invT.meta += enCRC(d, meta, mon); invT.aportado += enCRC(d, ap, mon);
+    });
+    invT.pct = invT.meta ? invT.aportado / invT.meta : 0;
+    return { periodo: per, cats: lista, sin: sin, total: total, inversion: inv, invTotal: invT, hayLimites: lista.length > 0, hayMetas: inv.some(function (x) { return x.meta > 0; }) };
+  }
+  /** Promedio mensual por categoría de los últimos n meses completos (para sugerir límites) */
+  function promediosPresupuesto(d, hoy, n) {
+    n = n || 3;
+    var h = soloFecha(hoy), ini = new Date(h.getFullYear(), h.getMonth() - n, 1).getTime(), fin = new Date(h.getFullYear(), h.getMonth(), 1).getTime(), r = { cats: {}, inv: {}, salario: 0, meses: n };
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha) return;
+      var t = new Date(m.fecha).getTime(); if (t < ini || t >= fin) return;
+      var cat = categoriaPresupuesto(d, m);
+      if (cat) r.cats[cat] = (r.cats[cat] || 0) + enCRC(d, m.monto, m.moneda) / n;
+      if ((m.tipo === 'Inversión' || m.tipo === 'Retiro de fondo') && m.subcuenta) r.inv[m.subcuenta] = (r.inv[m.subcuenta] || 0) + (m.tipo === 'Inversión' ? 1 : -1) * m.monto / n;
+      if (esSalario(m)) r.salario += enCRC(d, m.monto, m.moneda) / n;
+    });
+    return r;
+  }
+  /** Lo que queda libre al mes: salario − sobres − cuotas tasa cero − préstamo − meta de inversión (sin restar doble lo que ya va por un sobre) */
+  function librePresupuesto(d, hoy) {
+    var pp = presuPrefs(d), pr = promediosPresupuesto(d, hoy, 3), esp = d.sobreEspecial || {}, res = resumenMes(d, hoy);
+    var salario = pr.salario;
+    if (!salario) (d.movimientos || []).forEach(function (m) { if (esSalario(m) && enMes(m.fecha, hoy)) salario += enCRC(d, m.monto, m.moneda); });
+    var sob = 0, haySobreTC = false, haySobrePr = false, haySobreInv = false;
+    (d.sobres || []).forEach(function (s) {
+      var a = s.asignado || 0;
+      if (s.nombre === esp.tasaCero) { haySobreTC = true; if (s.asignadoAuto) a = res.cuotasTC[s.moneda] || 0; }
+      if (s.nombre === esp.prestamo) haySobrePr = true;
+      if (/inversi|fondo/i.test(s.nombre) && a > 0) haySobreInv = true;
+      sob += enCRC(d, a, s.moneda);
+    });
+    var tc = haySobreTC ? 0 : enCRC(d, res.cuotasTC.CRC, 'CRC') + enCRC(d, res.cuotasTC.USD, 'USD');
+    var prest = haySobrePr || !d.prestamo || !d.prestamo.estimado ? 0 : (d.prestamo.estimado.total || 0);
+    var inv = 0; (d.fondos || []).forEach(function (f) { inv += enCRC(d, (pp.inv || {})[f.nombre] || 0, f.moneda || 'CRC'); });
+    var invResta = haySobreInv ? 0 : inv;
+    var limites = 0; Object.keys(pp.limites || {}).forEach(function (k) { limites += pp.limites[k] || 0; });
+    var libre = salario - sob - tc - prest - invResta;
+    return { salario: salario, sobres: sob, tasaCero: tc, prestamo: prest, inversion: inv, inversionEnSobre: haySobreInv, libre: libre, limites: limites, caben: !salario || limites <= libre + 0.5 };
   }
   function pagosProximos(d, hoy, diasAviso, ventana) {
     diasAviso = diasAviso && diasAviso.length ? diasAviso : [3, 1, 0]; ventana = ventana === undefined ? 7 : ventana;
@@ -875,7 +1031,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
