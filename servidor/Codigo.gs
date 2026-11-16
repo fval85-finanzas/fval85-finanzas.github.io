@@ -861,7 +861,7 @@ function listaConfig_(titulo) {
   var h = hoja_('Config');
   var cols = columnas_(h, 4);
   if (!cols[titulo]) return [];
-  var v = h.getRange(5, cols[titulo], 30, 1).getValues();
+  var v = h.getRange(5, cols[titulo], Math.max(30, Math.min(300, h.getLastRow() - 4)), 1).getValues();   // v2.13.0: más de 30
   return v.map(function (r) { return texto_(r[0]); }).filter(String);
 }
 
@@ -913,6 +913,7 @@ function cambiarClaveApp() {
 // LECTURA: todo lo que la app necesita, en una sola llamada
 // ---------------------------------------------------------------------
 function obtenerDatos_() {
+  var marca0 = marcaDatos_();   // v2.14: se lee ANTES de leer la hoja (si algo cambia mientras tanto, la próxima vez trae todo)
   try { asegurarTiposV28_(); } catch (e) { console.log(e); }
   var cfgH = hoja_('Config');
   var tc = num_(cfgH.getRange('B15').getValue()) || 0;
@@ -949,11 +950,12 @@ function obtenerDatos_() {
       fila: r._fila, nombre: texto_(r['Sobre']), moneda: texto_(r['Moneda']) || 'CRC',
       asignado: num_(r['Asignado por mes']), tipo: texto_(r['Tipo']) || 'Variable', notas: texto_(r['Notas']),
       asignadoAuto: !!formulasSob[r._fila - 1][0],
-      saldoInicial: num_(r['Saldo inicial']) || 0, ajuste: texto_(r['Ajuste del reparto']) === 'Sí', meta: num_(r['Meta'])
+      saldoInicial: num_(r['Saldo inicial']) || 0, ajuste: texto_(r['Ajuste del reparto']) === 'Sí', meta: num_(r['Meta']),
+      archivado: texto_(r['Archivado']) === 'Sí'   // v2.14 (#58f)
     };
   });
 
-  var tasaCero = leerTabla_('Tasa Cero', 'Descripción').filas.map(function (r) {
+  var tasaCero = leerTabla_('Tasa Cero', 'Descripción').filas.filter(function (r) { return texto_(r['Estado']) !== 'Quitada'; }).map(function (r) {
     return {
       fila: r._fila, descripcion: texto_(r['Descripción']), tarjeta: texto_(r['Tarjeta']),
       fechaCompra: iso_(r['Fecha de compra']), monto: num_(r['Monto total']) || 0, moneda: texto_(r['Moneda']) || 'CRC',
@@ -968,6 +970,7 @@ function obtenerDatos_() {
 
   return JSON.stringify({
     hoy: new Date().toISOString(),
+    marca: marca0,
     tipoCambio: tc,
     cuentas: cuentas,
     movimientos: movimientos,
@@ -978,12 +981,14 @@ function obtenerDatos_() {
       return { fecha: iso_(r['Fecha de la TBP (día 7)']), tbp: num_(r['TBP']), tasa: num_(r['Tasa del préstamo']) };
     }),
     categorias: listaConfig_('Categorías'),
+    reglas: leerTabla_('Reglas', 'Si el comercio contiene').filas.map(function (r) { return { fila: r._fila, patron: texto_(r['Si el comercio contiene']), categoria: texto_(r['Categoría']), sobre: texto_(r['Sobre']) }; }).filter(function (r) { return r.patron; }),
     tiposCuenta: listaConfig_('Tipos de cuenta'),
     tiposMovimiento: listaConfig_('Tipo de movimiento'),
     sobreEspecial: sobresEspeciales_(listaSobres.map(function (s) { return s.nombre; })),
     sobresMov: leerSobresMov_(),
     ajustes: (function () { try { return obtenerAjustes_(); } catch (e) { return null; } })(),
     fondos: leerFondos_(),
+    recurrentes: (function () { try { return leerRecurrentes_(); } catch (e) { return []; } })(),   // v2.14 (#58e)
     viajes: leerViajes_(),
     sobresDesde: PropertiesService.getScriptProperties().getProperty('SOBRES_DESDE'),
     ultimaRevision: PropertiesService.getScriptProperties().getProperty('ULTIMA_REVISION')
@@ -1127,6 +1132,134 @@ function guardarRegla_(patron, categoria, sobre) {
   var existente = t.filas.filter(function (r) { return texto_(r['Si el comercio contiene']).toUpperCase() === p; })[0];
   var fila = existente ? existente._fila : primeraFilaVacia_(t.hoja, t.filaEnc, t.cols['Si el comercio contiene']);
   escribirFila_(t.hoja, fila, t.cols, { 'Si el comercio contiene': p, 'Categoría': categoria || '', 'Sobre': sobre || '' });
+}
+
+// ---------------------------------------------------------------------
+// v2.13.0 (#58) · TODO DESDE LA APP: categorías, reglas y tasa cero
+// ---------------------------------------------------------------------
+/** Escribe una columna entera (desde la fila `desde`); si una lista desplegable rechaza un valor, la pasa a "advertencia" y reintenta. */
+function escribirColumna_(h, desde, col, valores) {
+  if (!valores.length) return;
+  var r = h.getRange(desde, col, valores.length, 1), datos = valores.map(function (v) { return [v]; });
+  try { r.setValues(datos); vaciar_(); }
+  catch (e) { if (!permitirFueraDeLista_(h, desde, col, 1)) throw e; r.setValues(datos); vaciar_(); }
+}
+/** Guarda la lista de categorías (pestaña Config, columna "Categorías"). */
+function guardarCategorias_(lista) {
+  return conBloqueo_(function () {
+    var h = hoja_('Config'), cols = columnas_(h, 4), c = cols['Categorías'];
+    if (!c) throw new Error('No encontré la columna "Categorías" en la pestaña Config.');
+    var limpia = [], vistos = {};
+    (lista || []).forEach(function (x) { x = String(x || '').trim(); if (x && !vistos[x.toLowerCase()]) { vistos[x.toLowerCase()] = 1; limpia.push(x); } });
+    var largo = Math.max(30, limpia.length, h.getLastRow() - 4);
+    var v = []; for (var i = 0; i < largo; i++) v.push(limpia[i] || '');
+    escribirColumna_(h, 5, c, v);
+    return limpia.length;
+  });
+}
+/** Cambia el nombre de una categoría; con `mover`, también en los movimientos y las reglas. */
+function renombrarCategoria_(viejo, nuevo, mover) {
+  viejo = String(viejo || '').trim(); nuevo = String(nuevo || '').trim();
+  if (!viejo || !nuevo) throw new Error('Falta el nombre.');
+  var lista = listaConfig_('Categorías').map(function (x) { return x === viejo ? nuevo : x; });
+  if (lista.indexOf(nuevo) < 0) lista.push(nuevo);
+  guardarCategorias_(lista);
+  var r = { movimientos: 0, reglas: 0 };
+  if (!mover) return r;
+  return conBloqueo_(function () {
+    [['Movimientos', 'Fecha', 'movimientos'], ['Reglas', 'Si el comercio contiene', 'reglas']].forEach(function (x) {
+      var t = leerTabla_(x[0], x[1]), c = t.cols['Categoría']; if (!c || !t.filas.length) return;
+      var ini = t.filaEnc + 1, n = t.hoja.getLastRow() - t.filaEnc; if (n <= 0) return;
+      var vals = t.hoja.getRange(ini, c, n, 1).getValues().map(function (f) { return f[0]; }), cambio = 0;
+      vals = vals.map(function (v) { if (String(v).trim() === viejo) { cambio++; return nuevo; } return v; });
+      if (cambio) escribirColumna_(t.hoja, ini, c, vals);
+      r[x[2]] = cambio;
+    });
+    return r;
+  });
+}
+/** Edita una regla (comercio → categoría / sobre). ctl = texto anterior, para no tocar otra fila. */
+function editarRegla_(fila, regla, ctl) {
+  return conBloqueo_(function () {
+    var t = leerTabla_('Reglas', 'Si el comercio contiene');
+    var ex = t.filas.filter(function (r) { return r._fila === fila; })[0];
+    if (!ex || texto_(ex['Si el comercio contiene']).toUpperCase() !== String(ctl || '').toUpperCase()) throw new Error('La regla cambió en la hoja. Recargá los datos.');
+    var p = String(regla.patron || '').trim().toUpperCase(); if (!p) throw new Error('Falta el texto del comercio.');
+    escribirFila_(t.hoja, fila, t.cols, { 'Si el comercio contiene': p, 'Categoría': regla.categoria || '', 'Sobre': regla.sobre || '' });
+    return true;
+  });
+}
+function eliminarRegla_(fila, ctl) {
+  return conBloqueo_(function () {
+    var t = leerTabla_('Reglas', 'Si el comercio contiene');
+    var ex = t.filas.filter(function (r) { return r._fila === fila; })[0];
+    if (!ex || texto_(ex['Si el comercio contiene']).toUpperCase() !== String(ctl || '').toUpperCase()) throw new Error('La regla cambió en la hoja. Recargá los datos.');
+    t.hoja.deleteRow(fila);
+    return true;
+  });
+}
+/** Busca en Movimientos la compra tasa cero y sus cuotas al corte (TC-<fila>-n). */
+function movsDeTasaCero_(t, fila, antes, z) {
+  var compra = null, cuotas = [], porFecha = null;
+  var dia = function (x) { return x && typeof x.getFullYear === 'function' ? Utilities_fecha_(x) : ''; };
+  var fz = z ? dia(z['Fecha de compra']) : '', mz = z ? num_(z['Monto total']) : null;
+  t.filas.forEach(function (r) {
+    var tipo = texto_(r['Tipo']), aut = texto_(r['Autorización']);
+    if (tipo === 'Cuota tasa cero' && aut.indexOf('TC-' + fila + '-') === 0) { cuotas.push(r); return; }
+    if (tipo !== 'Compra tasa cero' || texto_(r['Cuenta / tarjeta']) !== antes.tarjeta) return;
+    if (!compra && texto_(r['Comercio / descripción']) === antes.descripcion) compra = r;
+    else if (!porFecha && fz && dia(r['Fecha']) === fz && mz !== null && Math.abs(num_(r['Monto']) - mz) < 0.01) porFecha = r;   // la descripción se cambió antes
+  });
+  return { compra: compra || porFecha, cuotas: cuotas };
+}
+function Utilities_fecha_(d) { return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+/**
+ * Edita una compra tasa cero. d = { descripcion, tarjeta, monto, meses, primeraCuota (ISO) }; antes = { descripcion, tarjeta }.
+ * Si cambia la tarjeta o la descripción, arregla también la compra original, los abonos y las cuotas ya cargadas.
+ */
+function editarTasaCero_(fila, d, antes) {
+  return conBloqueo_(function () {
+    var z = leerTabla_('Tasa Cero', 'Descripción'), r = z.filas.filter(function (x) { return x._fila === fila; })[0];
+    if (!r || texto_(r['Descripción']) !== antes.descripcion) throw new Error('La compra cambió en la hoja. Recargá los datos.');
+    var desc = String(d.descripcion || '').trim() || antes.descripcion, tj = d.tarjeta || antes.tarjeta, zAntes = { 'Fecha de compra': r['Fecha de compra'], 'Monto total': r['Monto total'] };
+    escribirFila_(z.hoja, fila, z.cols, { 'Descripción': desc, 'Tarjeta': tj, 'Monto total': Number(d.monto) || num_(r['Monto total']), 'Meses': Number(d.meses) || num_(r['Meses']), 'Primera cuota': d.primeraCuota ? fechaDe_(d.primeraCuota) : r['Primera cuota'] });
+    var res = { compra: 0, abonos: 0, cuotas: 0 };
+    var t = leerTabla_('Movimientos', 'Fecha'), m = movsDeTasaCero_(t, fila, antes, zAntes);
+    if (m.compra) { var cm = { 'Cuenta / tarjeta': tj }; if (Number(d.monto)) cm['Monto'] = Number(d.monto); escribirFila_(t.hoja, m.compra._fila, t.cols, cm); res.compra = 1; }
+    m.cuotas.forEach(function (q) {
+      var com = texto_(q['Comercio / descripción']).replace(antes.descripcion, desc);
+      escribirFila_(t.hoja, q._fila, t.cols, { 'Cuenta / tarjeta': tj, 'Comercio / descripción': com }); res.cuotas++;
+    });
+    if (libro_().getSheetByName('Abonos tasa cero') && (desc !== antes.descripcion || tj !== antes.tarjeta)) {
+      var a = leerTabla_('Abonos tasa cero', 'Fecha');
+      a.filas.forEach(function (x) {
+        if (texto_(x['Compra']) !== antes.descripcion || (texto_(x['Tarjeta']) && texto_(x['Tarjeta']) !== antes.tarjeta)) return;
+        escribirFila_(a.hoja, x._fila, a.cols, { 'Compra': desc, 'Tarjeta': tj }); res.abonos++;
+      });
+    }
+    return res;
+  });
+}
+/** Quita una compra de tasa cero: vuelve a ser un gasto normal de la tarjeta; borra sus abonos y las cuotas cargadas.
+ *  La fila de "Tasa Cero" queda marcada "Quitada" (no se borra, para no mover el número de las otras). */
+function quitarTasaCero_(fila, antes) {
+  return conBloqueo_(function () {
+    asegurarColumnas_('Tasa Cero', ['Estado']);
+    var z = leerTabla_('Tasa Cero', 'Descripción'), r = z.filas.filter(function (x) { return x._fila === fila; })[0];
+    if (!r || texto_(r['Descripción']) !== antes.descripcion) throw new Error('La compra cambió en la hoja. Recargá los datos.');
+    escribirFila_(z.hoja, fila, z.cols, { 'Estado': 'Quitada' });
+    var res = { compra: 0, abonos: 0, cuotas: 0 };
+    var t = leerTabla_('Movimientos', 'Fecha'), m = movsDeTasaCero_(t, fila, antes, r), borrar = [];
+    if (m.compra) { escribirFila_(t.hoja, m.compra._fila, t.cols, { 'Tipo': 'Gasto', 'Sobre': '' }); res.compra = 1; }
+    m.cuotas.forEach(function (q) { borrar.push(q._fila); });
+    borrar.sort(function (a, b) { return b - a; }).forEach(function (f) { t.hoja.deleteRow(f); res.cuotas++; });
+    if (libro_().getSheetByName('Abonos tasa cero')) {
+      var a = leerTabla_('Abonos tasa cero', 'Fecha'), ba = [];
+      a.filas.forEach(function (x) { if (texto_(x['Compra']) === antes.descripcion && (!texto_(x['Tarjeta']) || texto_(x['Tarjeta']) === antes.tarjeta)) ba.push(x._fila); });
+      ba.sort(function (p, q) { return q - p; }).forEach(function (f) { a.hoja.deleteRow(f); res.abonos++; });
+    }
+    return res;
+  });
 }
 
 /** Convierte una compra en compra a tasa cero y crea su fila en la pestaña Tasa Cero. */
@@ -1329,7 +1462,8 @@ function leerFondos_() {
   if (!libro_().getSheetByName('Fondos')) return [];
   return leerTabla_('Fondos', 'Subcuenta').filas.map(function (r) {
     return { fila: r._fila, nombre: texto_(r['Subcuenta']), fondo: texto_(r['Fondo']), moneda: texto_(r['Moneda']) || 'CRC',
-      saldo: num_(r['Saldo']) || 0, fechaSaldo: iso_(r['Fecha del saldo']), meta: num_(r['Meta']), intereses: num_(r['Intereses (último ajuste)']) || 0, notas: texto_(r['Notas']) };
+      saldo: num_(r['Saldo']) || 0, fechaSaldo: iso_(r['Fecha del saldo']), meta: num_(r['Meta']), intereses: num_(r['Intereses (último ajuste)']) || 0, notas: texto_(r['Notas']),
+      archivada: texto_(r['Archivada']) === 'Sí' };   // v2.14 (#58g)
   });
 }
 function leerViajes_() {
@@ -1729,6 +1863,184 @@ function revisarCorreosAhora_() {
   return procesarCorreos();
 }
 
+// =====================================================================
+// v2.14.0 (#61) · AL ABRIR: TODO AL DÍA SOLO
+// =====================================================================
+/** Lo que la app solo LEE: no cambia la marca de los datos. */
+var LECTURAS_ = { obtenerDatos: 1, obtenerAjustes: 1, resumenAvisos: 1, estadoActualizacion: 1, revisarActualizacion: 1, listas: 1, obtenerLista: 1, fotoLista: 1, probarRecordatorio: 1, probarResumenCorreo: 1 };
+/** Marca de "última modificación": cambia cada vez que algo se escribe (app, correos, recurrentes o a mano en la hoja). */
+function marcarCambio_() { try { PropertiesService.getScriptProperties().setProperty('DATOS_VER', String(Date.now())); } catch (e) { console.log('Marca: ' + e); } }
+function marcaDatos_() { return PropertiesService.getScriptProperties().getProperty('DATOS_VER') || '0'; }
+/** Se dispara cuando editás la hoja a mano (activador instalado una sola vez). */
+function alEditarHoja(e) { marcarCambio_(); }
+function asegurarAvisoEdicion_() {
+  var p = PropertiesService.getScriptProperties();
+  if (p.getProperty('TRIG_EDIT') === 'si') return;
+  try {
+    var ya = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'alEditarHoja'; });
+    if (!ya) ScriptApp.newTrigger('alEditarHoja').forSpreadsheet(libro_()).onEdit().create();
+    p.setProperty('TRIG_EDIT', 'si');
+  } catch (e) { console.log('Aviso de edición de la hoja: ' + e); }
+}
+
+/**
+ * Al abrir o volver a la app, en UNA sola llamada: ¿hay PIN? + los datos.
+ * Si la app ya tiene la marca actual, responde "sin cambios" (rápido, sin leer la hoja).
+ */
+function abrirApp_(sesion, marca) {
+  var acc = estadoAcceso();
+  if (acc.pinActivo && !sesionValida_(sesion)) return { acceso: acc, bloqueado: true };
+  asegurarAvisoEdicion_();
+  var p = PropertiesService.getScriptProperties(), actual = marcaDatos_();
+  var r = { acceso: acc, marca: actual, ultimaRevision: p.getProperty('ULTIMA_REVISION') };
+  if (marca && String(marca) === actual) { r.sinCambios = true; r.hoy = new Date().toISOString(); }
+  else r.datos = obtenerDatos_();
+  return r;
+}
+
+/**
+ * Revisión rápida de los correos al abrir (solo si pasaron más de 2 minutos desde la última).
+ * No devuelve datos, solo cuántos movimientos nuevos entraron (sirve aunque la app esté con PIN).
+ */
+function revisarAlAbrir_(forzar) {
+  var p = PropertiesService.getScriptProperties(), ult = Number(p.getProperty('REVISION_APP') || 0);
+  if (!forzar && Date.now() - ult < 2 * 60 * 1000) return { saltada: true, marca: marcaDatos_() };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { ocupado: true, marca: marcaDatos_() };   // ya hay otra revisión corriendo
+  try {
+    var inicio = Date.now();
+    p.setProperty('REVISION_APP', String(inicio));
+    var r = leerCorreos_(true);
+    if (r.compras + r.pagos > 0) { try { tareasDespuesDeLeer_(); } catch (e) { console.log('Después de leer: ' + e); } }
+    p.setProperty('ULTIMA_REVISION', String(inicio - 10 * 60 * 1000));
+    if (r.compras + r.pagos + r.revisar > 0) marcarCambio_();
+    return { compras: r.compras, pagos: r.pagos, revisar: r.revisar, marca: marcaDatos_() };
+  } finally { lock.releaseLock(); }
+}
+
+// =====================================================================
+// v2.14.0 (#58d) · BANCOS QUE SE LEEN (pestaña Config, filas 5 a 14)
+// =====================================================================
+var FILA_BANCO_1_ = 5, FILA_BANCO_N_ = 14;   // la fila 15 es el tipo de cambio
+function correoValido_(c) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(c || '').trim()); }
+function bancosConfig_() {
+  var h = hoja_('Config'), cols = columnas_(h, 4);
+  var cb = cols['Banco'], cc = cols['Correo de notificaciones'], ce = cols['Estado'];
+  if (!cb || !cc || !ce) return [];
+  var n = FILA_BANCO_N_ - FILA_BANCO_1_ + 1, v = h.getRange(FILA_BANCO_1_, 1, n, Math.max(cb, cc, ce)).getValues(), out = [];
+  v.forEach(function (r, i) {
+    var nom = texto_(r[cb - 1]), cor = texto_(r[cc - 1]), est = texto_(r[ce - 1]);
+    if (!nom && !cor) return;
+    var ok = correoValido_(cor) && cor.indexOf('PENDIENTE') < 0;
+    out.push({ fila: FILA_BANCO_1_ + i, nombre: nom, correo: ok ? cor : '', estado: est, activo: est === 'Activo' && ok, pendiente: !ok });
+  });
+  return out;
+}
+/** Agrega o cambia un banco. b = { fila?, nombre, correo, activo } */
+function guardarBanco_(b) {
+  return conBloqueo_(function () {
+    var nom = String(b.nombre || '').trim(), cor = String(b.correo || '').trim();
+    if (!nom) throw new Error('Falta el nombre del banco.');
+    if (!correoValido_(cor)) throw new Error('El correo no parece válido (ej. alertas@banco.com).');
+    var h = hoja_('Config'), cols = columnas_(h, 4), lista = bancosConfig_();
+    if (lista.some(function (x) { return x.correo.toLowerCase() === cor.toLowerCase() && x.fila !== b.fila; })) throw new Error('Ese correo ya está en la lista.');
+    var fila = b.fila;
+    if (fila && (fila < FILA_BANCO_1_ || fila > FILA_BANCO_N_)) throw new Error('Fila de banco no válida.');
+    if (!fila) {
+      var ocupadas = {}; lista.forEach(function (x) { ocupadas[x.fila] = 1; });
+      for (var f = FILA_BANCO_1_; f <= FILA_BANCO_N_; f++) if (!ocupadas[f]) { fila = f; break; }
+      if (!fila) throw new Error('Ya no hay espacio para más bancos (son 10). Quitá uno que no uses.');
+    }
+    escribirFila_(h, fila, cols, { 'Banco': nom, 'Correo de notificaciones': cor, 'Estado': b.activo === false ? 'Inactivo' : 'Activo' });
+    return bancosConfig_();
+  });
+}
+function quitarBanco_(fila, ctl) {
+  return conBloqueo_(function () {
+    var h = hoja_('Config'), cols = columnas_(h, 4), x = bancosConfig_().filter(function (b) { return b.fila === fila; })[0];
+    if (!x) throw new Error('No encontré ese banco (¿se cambió la hoja?). Recargá los datos.');
+    if (ctl && ctl.nombre && ctl.nombre !== x.nombre) throw new Error('La fila cambió en la hoja. Recargá los datos.');
+    escribirFila_(h, fila, cols, { 'Banco': '', 'Correo de notificaciones': '', 'Estado': '' });
+    return bancosConfig_();
+  });
+}
+
+// =====================================================================
+// v2.14.0 (#58e) · RECURRENTES DESDE LA APP
+// =====================================================================
+function leerRecurrentes_() {
+  if (!libro_().getSheetByName('Recurrentes')) return [];
+  return leerTabla_('Recurrentes', 'Descripción').filas.map(function (r) {
+    return { fila: r._fila, descripcion: texto_(r['Descripción']), monto: num_(r['Monto']) || 0, moneda: texto_(r['Moneda']) || 'CRC',
+      cuenta: texto_(r['Tarjeta / cuenta']), dia: num_(r['Día del mes']) || 1, categoria: texto_(r['Categoría']), sobre: texto_(r['Sobre']),
+      activo: texto_(r['Activo']) !== 'No' };
+  });
+}
+/** r = { fila?, descripcion, monto, moneda, cuenta, dia, categoria, sobre, activo } · las nuevas van al final (la fila es parte de su clave). */
+function guardarRecurrente_(r) {
+  return conBloqueo_(function () {
+    var t = leerTabla_('Recurrentes', 'Descripción'), d = String(r.descripcion || '').trim();
+    if (!d) throw new Error('Falta la descripción.');
+    var dia = Math.round(Number(r.dia) || 0); if (dia < 1 || dia > 31) throw new Error('El día del mes va de 1 a 31.');
+    if (!(Number(r.monto) > 0)) throw new Error('Falta el monto.');
+    var fila = r.fila;
+    if (fila) { if (!t.filas.some(function (x) { return x._fila === fila; })) throw new Error('No encontré ese recurrente. Recargá los datos.'); }
+    else fila = Math.max(t.hoja.getLastRow() + 1, t.filaEnc + 1);
+    escribirFila_(t.hoja, fila, t.cols, { 'Descripción': d, 'Monto': Number(r.monto), 'Moneda': r.moneda === 'USD' ? 'USD' : 'CRC', 'Tarjeta / cuenta': r.cuenta || '',
+      'Día del mes': dia, 'Categoría': r.categoria || '', 'Sobre': r.sobre || '', 'Activo': r.activo === false ? 'No' : 'Sí' });
+    return fila;
+  });
+}
+/** Borra un recurrente: la fila queda vacía (no se elimina, para que las claves de los meses anteriores no se corran). */
+function eliminarRecurrente_(fila, ctl) {
+  return conBloqueo_(function () {
+    var t = leerTabla_('Recurrentes', 'Descripción'), x = t.filas.filter(function (r) { return r._fila === fila; })[0];
+    if (!x) throw new Error('No encontré ese recurrente. Recargá los datos.');
+    if (ctl && ctl.descripcion && ctl.descripcion !== texto_(x['Descripción'])) throw new Error('La fila cambió en la hoja. Recargá los datos.');
+    var o = {}; Object.keys(t.cols).forEach(function (k) { o[k] = ''; });
+    escribirFila_(t.hoja, fila, t.cols, o);
+    return true;
+  });
+}
+
+// =====================================================================
+// v2.14.0 (#58f, #58g) · ARCHIVAR SOBRES Y SUBCUENTAS (solo con saldo en 0, eso lo revisa la app)
+// =====================================================================
+function archivarSobre_(fila, si) {
+  return conBloqueo_(function () {
+    asegurarColumnas_('Sobres', ['Archivado']);
+    var t = leerTabla_('Sobres', 'Sobre');
+    if (!t.filas.some(function (r) { return r._fila === fila; })) throw new Error('No encontré ese sobre. Recargá los datos.');
+    var o = { 'Archivado': si ? 'Sí' : '' };
+    if (si) o['Asignado por mes'] = 0;   // archivado: ya no recibe plata en el reparto
+    escribirFila_(t.hoja, fila, t.cols, o);
+    return true;
+  });
+}
+function archivarFondo_(fila, si) {
+  return conBloqueo_(function () {
+    asegurarColumnas_('Fondos', ['Archivada']);
+    var t = leerTabla_('Fondos', 'Subcuenta');
+    if (!t.filas.some(function (r) { return r._fila === fila; })) throw new Error('No encontré esa subcuenta. Recargá los datos.');
+    escribirFila_(t.hoja, fila, t.cols, { 'Archivada': si ? 'Sí' : '' });
+    return true;
+  });
+}
+
+// =====================================================================
+// v2.14.0 (#59) · TIPO DE CAMBIO DE REFERENCIA (Config B15)
+// =====================================================================
+function guardarTipoCambio_(n) {
+  n = Math.round((Number(n) || 0) * 100) / 100;
+  if (n < 100 || n > 2000) throw new Error('El tipo de cambio parece raro (₡' + n + '). Revisalo.');
+  return conBloqueo_(function () {
+    var c = hoja_('Config').getRange(15, 2);   // B15
+    if (c.getFormulas()[0][0]) throw new Error('El tipo de cambio de la hoja es una fórmula; cambialo en la pestaña Config.');
+    c.setValue(n); vaciar_();
+    return n;
+  });
+}
+
 
 // =====================================================================
 // Gmail
@@ -1908,12 +2220,18 @@ function leerCorreos_(guardar) {
     tx.autorizacion = tx.autorizacion || claveAuto_(tx, etiquetaBanco);
     // v2.10.6: tarjetas de la familia (Ajustes → Tarjetas de la familia): se anotan como "Familia ••1234" y solo cuentan en viajes
     if (esFamilia4(tx.ultimos4) && !tx.cuentaNombre) {
+      if (familia[tx.ultimos4].pausada) {   // v2.13.0 (#57): tarjeta de la familia pausada → no se anota ni se pregunta
+        resumen.detalle.push('⏸ [' + etiquetaBanco + '] tarjeta de la familia ••' + tx.ultimos4 + ' (pausada) · ' + (tx.comercio || '') + ' · no se anota');
+        if (guardar && !autorizaciones[tx.autorizacion]) { saltadas['f' + tx.ultimos4] = (saltadas['f' + tx.ultimos4] || 0) + 1; props_().setProperty('AJENAS_SALTADAS', JSON.stringify(saltadas)); }
+        autorizaciones[tx.autorizacion] = true;
+        return;
+      }
       if (/pago de tarjeta/i.test(tx.tipoMov || '')) { resumen.detalle.push('👪 [' + etiquetaBanco + '] pago de la tarjeta de la familia ••' + tx.ultimos4 + ' · no se anota'); return; }
       tx.cuentaNombre = 'Familia ••' + tx.ultimos4; tx.esFamilia = true;
       tx.nota = (tx.nota ? tx.nota + '. ' : '') + 'Tarjeta de la familia (solo viajes)';
     }
     // v2.9.0: tarjetas que no son mías (Ajustes → Cuentas): el correo se marca como leído y no se anota
-    if (tx.ultimos4 && !tx.cuentaNombre && ajenas[tx.ultimos4] && !esMia4(tx.ultimos4)) {
+    if (tx.ultimos4 && !tx.cuentaNombre && ajenas[tx.ultimos4] && !ajenas[tx.ultimos4].off && !esMia4(tx.ultimos4)) {   // v2.13.0: .off = sin ignorar (vuelve a preguntar)
       resumen.ajenas = (resumen.ajenas || 0) + 1;
       resumen.detalle.push('🚫 [' + etiquetaBanco + '] tarjeta ••' + tx.ultimos4 + ' (no es mía) · ' + (tx.comercio || '') + ' · no se anota');
       if (guardar && !autorizaciones[tx.autorizacion]) { saltadas[tx.ultimos4] = (saltadas[tx.ultimos4] || 0) + 1; props_().setProperty('AJENAS_SALTADAS', JSON.stringify(saltadas)); }
@@ -2083,6 +2401,8 @@ function procesarCorreos() {
     var r = leerCorreos_(true);
     // avisos de viaje y columnas de Sobres: solo si entró algo nuevo (así el botón "Correos" responde rápido)
     if (r.compras + r.pagos > 0) { try { tareasDespuesDeLeer_(); } catch (e) { console.log('Después de leer: ' + e); } }
+    if (r.compras + r.pagos + r.revisar > 0) marcarCambio_();   // v2.14
+    PropertiesService.getScriptProperties().setProperty('REVISION_APP', String(inicio));
     // La próxima vez revisa desde 10 min antes (por si un correo llegó tarde; no se duplica)
     PropertiesService.getScriptProperties().setProperty('ULTIMA_REVISION', String(inicio - 10 * 60 * 1000));
     try { devolverEstadosDeCuenta_(); } catch (e) { console.log('Estados de cuenta: ' + e); }
@@ -2141,6 +2461,7 @@ function procesarRecurrentes() {
     ya[clave] = true;
     agregados++;
   });
+  if (agregados) marcarCambio_();   // v2.14
   console.log('Recurrentes agregados: ' + agregados);
 }
 
@@ -2206,7 +2527,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.12.0';
+var VERSION_APP = '2.14.0';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -2230,11 +2551,27 @@ var API = {
   guardarViaje: function (v) { return guardarViaje_(v); },
   eliminarViaje: function (f) { return eliminarViaje_(f); },
   eliminarAbonoTC: function (f, c) { return eliminarAbonoTC_(f, c); },
+  // v2.13.0 (#58): todo desde la app
+  guardarCategorias: function (l) { return guardarCategorias_(l); },
+  renombrarCategoria: function (v, n, mover) { return renombrarCategoria_(v, n, mover); },
+  guardarRegla: function (p, c, s) { return conBloqueo_(function () { guardarRegla_(p, c, s); return true; }); },
+  editarRegla: function (f, r, ctl) { return editarRegla_(f, r, ctl); },
+  eliminarRegla: function (f, ctl) { return eliminarRegla_(f, ctl); },
+  editarTasaCero: function (f, d, antes) { return editarTasaCero_(f, d, antes); },
+  quitarTasaCero: function (f, antes) { return quitarTasaCero_(f, antes); },
   guardarCuenta: function (c) { return guardarCuenta_(c); },
   guardarSobre: function (s) { return guardarSobre_(s); },
   registrarPagoPrestamo: function (p) { return registrarPago_(p); },
   registrarTBP: function (f, t) { return registrarTBP_(f, t); },
   revisarCorreosAhora: function () { return revisarCorreosAhora_(); },
+  // v2.14.0 (#58d–g, #59): más cosas desde la app
+  guardarBanco: function (b) { return guardarBanco_(b); },
+  quitarBanco: function (f, ctl) { return quitarBanco_(f, ctl); },
+  guardarRecurrente: function (r) { return guardarRecurrente_(r); },
+  eliminarRecurrente: function (f, ctl) { return eliminarRecurrente_(f, ctl); },
+  archivarSobre: function (f, si) { return archivarSobre_(f, si); },
+  archivarFondo: function (f, si) { return archivarFondo_(f, si); },
+  guardarTipoCambio: function (n) { return guardarTipoCambio_(n); },
   obtenerAjustes: function () { return obtenerAjustes_(); },
   guardarPIN: function (nuevo, actual) { return guardarPIN_(nuevo, actual); },
   quitarPIN: function (actual) { return quitarPIN_(actual); },
@@ -2279,6 +2616,8 @@ function doPost(e) {
     if (!claveValida_(d.clave)) throw new Error('CLAVE_INVALIDA');
     if (d.accion === 'ping') r = { ok: true, resultado: 'Conectado a ' + libro_().getName() };
     else if (d.accion === 'estadoAcceso') r = { ok: true, resultado: estadoAcceso() };
+    else if (d.accion === 'abrirApp') r = { ok: true, resultado: abrirApp_(d.sesion, (d.args || [])[0]) };            // v2.14 (#61)
+    else if (d.accion === 'revisarAlAbrir') r = { ok: true, resultado: revisarAlAbrir_(!!(d.args || [])[0]) };
     else if (d.accion === 'verificarPIN') r = { ok: true, resultado: verificarPIN((d.args || [])[0]) };
     else if (d.accion === 'activarHuella') r = { ok: true, resultado: activarHuella_((d.args || [])[0], (d.args || [])[1]) };
     else if (d.accion === 'entrarConHuella') r = { ok: true, resultado: entrarConHuella_((d.args || [])[0], (d.args || [])[1]) };
@@ -2312,7 +2651,9 @@ function claveValida_(clave) {
 function api(sesion, nombre, args) {
   if (!API[nombre]) throw new Error('Acción desconocida: ' + nombre);
   if (!sesionValida_(sesion)) throw new Error('PIN_REQUERIDO');
-  return API[nombre].apply(null, args || []);
+  var res = API[nombre].apply(null, args || []);
+  if (!LECTURAS_[nombre]) marcarCambio_();   // v2.14: algo cambió → la próxima apertura trae los datos completos
+  return res;
 }
 
 /** ¿Hay PIN? (no devuelve datos) */
@@ -2430,6 +2771,7 @@ function obtenerAjustes_() {
     urlHoja: libro.getUrl(),
     nombreHoja: libro.getName(),
     bancos: bancosActivos_().map(function (b) { return b.nombre; }),
+    bancosCfg: (function () { try { return bancosConfig_(); } catch (e) { return null; } })(),   // v2.14 (#58d)
     version: VERSION_APP,
     prefs: prefs_(),
     ajenasSaltadas: ajenasSaltadas_(),
@@ -2451,6 +2793,7 @@ function procesarDiario() {
   procesarRecurrentes();
   if (props_().getProperty('RECORDATORIOS') === 'si') enviarRecordatorios_(false);
   try { tareasDespuesDeLeer_(); } catch (e) { console.log(e); }
+  marcarCambio_();   // v2.14: la app trae todo de nuevo la próxima vez que abra
 }
 
 function diasHasta_(fecha) {
@@ -3986,7 +4329,20 @@ var Calc = (function () {
   /** Lo que queda libre al mes: salario − sobres − cuotas tasa cero − préstamo − meta de inversión (sin restar doble lo que ya va por un sobre) */
   function librePresupuesto(d, hoy) {
     var pp = presuPrefs(d), pr = promediosPresupuesto(d, hoy, 3), esp = d.sobreEspecial || {}, res = resumenMes(d, hoy);
-    var salario = pr.salario;
+    // v2.13.0 (#55): con salario semanal/bisemanal, un mes "normal" = pago × 52 ÷ 12 o × 26 ÷ 12 (los meses de 3 pagos no inflan el promedio)
+    var cfg = d.salario || (d.ajustes && d.ajustes.prefs && d.ajustes.prefs.salario) || null;
+    var porMes = cfg && cfg.frecuencia ? ({ semanal: 52 / 12, bisemanal: 26 / 12, quincenal: 2, mensual: 1 })[cfg.frecuencia] : 0;
+    var salario = 0, comoSalario = 'promedio';
+    if (porMes) {
+      var pago = Number(cfg.monto) || 0;
+      if (!pago) {   // sin monto configurado: promedio de cada pago de los últimos 3 meses
+        var tot = 0, n = 0, ini = new Date(hoy.getFullYear(), hoy.getMonth() - 3, 1).getTime();
+        (d.movimientos || []).forEach(function (m) { if (esSalario(m) && m.fecha && new Date(m.fecha).getTime() >= ini) { tot += enCRC(d, m.monto, m.moneda); n++; } });
+        pago = n ? tot / n : 0;
+      }
+      if (pago) { salario = pago * porMes; comoSalario = cfg.frecuencia; }
+    }
+    if (!salario) salario = pr.salario;
     if (!salario) (d.movimientos || []).forEach(function (m) { if (esSalario(m) && enMes(m.fecha, hoy)) salario += enCRC(d, m.monto, m.moneda); });
     var sob = 0, haySobreTC = false, haySobrePr = false, haySobreInv = false;
     (d.sobres || []).forEach(function (s) {
@@ -4002,7 +4358,7 @@ var Calc = (function () {
     var invResta = haySobreInv ? 0 : inv;
     var limites = 0; Object.keys(pp.limites || {}).forEach(function (k) { limites += pp.limites[k] || 0; });
     var libre = salario - sob - tc - prest - invResta;
-    return { salario: salario, sobres: sob, tasaCero: tc, prestamo: prest, inversion: inv, inversionEnSobre: haySobreInv, libre: libre, limites: limites, caben: !salario || limites <= libre + 0.5 };
+    return { salario: salario, comoSalario: comoSalario, sobres: sob, tasaCero: tc, prestamo: prest, inversion: inv, inversionEnSobre: haySobreInv, libre: libre, limites: limites, caben: !salario || limites <= libre + 0.5 };
   }
   function pagosProximos(d, hoy, diasAviso, ventana) {
     diasAviso = diasAviso && diasAviso.length ? diasAviso : [3, 1, 0]; ventana = ventana === undefined ? 7 : ventana;

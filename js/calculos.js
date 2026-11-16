@@ -991,7 +991,20 @@ var Calc = (function () {
   /** Lo que queda libre al mes: salario − sobres − cuotas tasa cero − préstamo − meta de inversión (sin restar doble lo que ya va por un sobre) */
   function librePresupuesto(d, hoy) {
     var pp = presuPrefs(d), pr = promediosPresupuesto(d, hoy, 3), esp = d.sobreEspecial || {}, res = resumenMes(d, hoy);
-    var salario = pr.salario;
+    // v2.13.0 (#55): con salario semanal/bisemanal, un mes "normal" = pago × 52 ÷ 12 o × 26 ÷ 12 (los meses de 3 pagos no inflan el promedio)
+    var cfg = d.salario || (d.ajustes && d.ajustes.prefs && d.ajustes.prefs.salario) || null;
+    var porMes = cfg && cfg.frecuencia ? ({ semanal: 52 / 12, bisemanal: 26 / 12, quincenal: 2, mensual: 1 })[cfg.frecuencia] : 0;
+    var salario = 0, comoSalario = 'promedio';
+    if (porMes) {
+      var pago = Number(cfg.monto) || 0;
+      if (!pago) {   // sin monto configurado: promedio de cada pago de los últimos 3 meses
+        var tot = 0, n = 0, ini = new Date(hoy.getFullYear(), hoy.getMonth() - 3, 1).getTime();
+        (d.movimientos || []).forEach(function (m) { if (esSalario(m) && m.fecha && new Date(m.fecha).getTime() >= ini) { tot += enCRC(d, m.monto, m.moneda); n++; } });
+        pago = n ? tot / n : 0;
+      }
+      if (pago) { salario = pago * porMes; comoSalario = cfg.frecuencia; }
+    }
+    if (!salario) salario = pr.salario;
     if (!salario) (d.movimientos || []).forEach(function (m) { if (esSalario(m) && enMes(m.fecha, hoy)) salario += enCRC(d, m.monto, m.moneda); });
     var sob = 0, haySobreTC = false, haySobrePr = false, haySobreInv = false;
     (d.sobres || []).forEach(function (s) {
@@ -1007,7 +1020,7 @@ var Calc = (function () {
     var invResta = haySobreInv ? 0 : inv;
     var limites = 0; Object.keys(pp.limites || {}).forEach(function (k) { limites += pp.limites[k] || 0; });
     var libre = salario - sob - tc - prest - invResta;
-    return { salario: salario, sobres: sob, tasaCero: tc, prestamo: prest, inversion: inv, inversionEnSobre: haySobreInv, libre: libre, limites: limites, caben: !salario || limites <= libre + 0.5 };
+    return { salario: salario, comoSalario: comoSalario, sobres: sob, tasaCero: tc, prestamo: prest, inversion: inv, inversionEnSobre: haySobreInv, libre: libre, limites: limites, caben: !salario || limites <= libre + 0.5 };
   }
   function pagosProximos(d, hoy, diasAviso, ventana) {
     diasAviso = diasAviso && diasAviso.length ? diasAviso : [3, 1, 0]; ventana = ventana === undefined ? 7 : ventana;
