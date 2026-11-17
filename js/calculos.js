@@ -40,7 +40,7 @@ var Calc = (function () {
   function planTasaCero(t, hoy) {
     var meses = Math.max(1, t.meses || 1);
     var c0 = t.monto / meses;
-    var abonos = (t.abonos || []).filter(function (a) { return a.fecha && a.monto > 0; })
+    var abonos = (t.abonos || []).filter(function (a) { return a.fecha && a.monto > 0 && tipoAbono(a) === 'abono'; })
       .slice().sort(function (a, b) { return new Date(a.fecha) - new Date(b.fecha); });
     var primera = t.primeraCuota ? new Date(t.primeraCuota) : null;
     var saldo = t.monto, cuota = c0, ia = 0, filas = [], hist = [], liquidada = null;
@@ -102,8 +102,73 @@ var Calc = (function () {
   /** Abonos extra de un mes que cuentan como gasto. */
   function abonosEnMes(t, mes) {
     var s = 0;
-    (t.abonos || []).forEach(function (a) { if (a.gasto !== false && enMes(a.fecha, mes)) s += a.monto; });
+    (t.abonos || []).forEach(function (a) { if (tipoAbono(a) === 'abono' && a.gasto !== false && enMes(a.fecha, mes)) s += a.monto; });
     return s;
+  }
+
+  /** v2.15 (#62): 'abono' baja la cuota · 'adelanto' el banco mantiene la cuota (queda a favor) · 'pago' parte de un pago a la cuota. */
+  function tipoAbono(a) { return a && (a.tipo === 'adelanto' || a.tipo === 'pago') ? a.tipo : 'abono'; }
+
+  /**
+   * v2.15 (#62): la cuenta de lo que VOS le pusiste a una compra tasa cero (pagos repartidos + adelantos + abonos).
+   * null si la compra no tiene pagos ni adelantos anotados.
+   * Las cuotas cobradas antes de empezar a llevar la cuenta se toman como pagadas completas.
+   * Las cuotas cobradas después del último pago anotado quedan "por pagar" (todavía no les toca el adelanto).
+   */
+  function cuentaTasaCero(t, hoy) {
+    var lim = soloFecha(hoy);
+    var pagos = [], adel = [];
+    (t.abonos || []).forEach(function (a) {
+      if (!a.fecha || !(a.monto > 0) || soloFecha(new Date(a.fecha)) > lim) return;
+      var k = tipoAbono(a); if (k === 'pago') pagos.push(a); else if (k === 'adelanto') adel.push(a);
+    });
+    if (!pagos.length && !adel.length) return null;
+    var porFecha = function (a, b) { return new Date(a.fecha) - new Date(b.fecha); };
+    pagos.sort(porFecha); adel.sort(porFecha);
+    var e = estadoTasaCero(t, hoy);
+    var filas = e.plan.filas.filter(function (f) { return f.fecha; });
+    // la cuota que paga un pago: la del plan con fecha más cercana (±40 días)
+    var cubre = function (fecha) {
+      var d0 = soloFecha(new Date(fecha)), mejor = null, dm = 41;
+      filas.forEach(function (f) { var d = Math.abs(diasEntre(f.fecha, d0)); if (d < dm) { dm = d; mejor = soloFecha(f.fecha); } });
+      return mejor || d0;
+    };
+    var inicio = null;
+    if (adel.length) inicio = soloFecha(new Date(adel[0].fecha));
+    if (pagos.length) { var ip = cubre(pagos[0].fecha); if (!inicio || ip < inicio) inicio = ip; }
+    var limite = null;
+    pagos.forEach(function (a) { var c = cubre(a.fecha); if (!limite || c > limite) limite = c; });
+    if (!limite) limite = lim;
+    var antes = 0, cobrado = 0, porPagar = 0, nPorPagar = 0, cobradoTotal = 0, nCobradas = 0;
+    filas.forEach(function (f) {
+      var d = soloFecha(f.fecha);
+      if (f.cobrada) { cobradoTotal += f.cuota; nCobradas++; }
+      if (d < inicio) { if (f.cobrada) antes += f.cuota; }
+      else if (d <= limite) cobrado += f.cuota;
+      else if (f.cobrada) { porPagar += f.cuota; nPorPagar++; }
+    });
+    var faltanCuotas = filas.filter(function (f) { return soloFecha(f.fecha) > limite; }).length;
+    var sumP = pagos.reduce(function (s, a) { return s + a.monto; }, 0);
+    var sumA = adel.reduce(function (s, a) { return s + a.monto; }, 0);
+    var usado = Math.min(sumA, Math.max(0, cobrado - sumP));
+    var queda = sumA + Math.max(0, sumP - cobrado) - usado;
+    var sinCubrir = Math.max(0, cobrado - sumP - sumA);
+    var puesto = antes + sumP + sumA + e.abonado;
+    var ultimo = pagos.length ? pagos[pagos.length - 1].monto : 0;
+    var r = {
+      pagos: pagos, adelantos: adel, cobradoTotal: cobradoTotal, nCobradas: nCobradas, antes: antes, pagado: sumP, adelanto: sumA,
+      usado: usado, queda: queda < 0.005 ? 0 : queda, sinCubrir: sinCubrir < 0.005 ? 0 : sinCubrir, porPagar: porPagar, nPorPagar: nPorPagar,
+      abonos: e.abonado, puesto: puesto, falta: Math.max(0, t.monto - puesto), ultimoPago: ultimo, cuota: e.cuota, restantes: faltanCuotas, estado: e
+    };
+    if (r.falta < 0.005) r.falta = 0;
+    // ¿para cuánto alcanza el adelanto si seguís pagando lo mismo?
+    var dif = e.cuota - ultimo;
+    if (r.queda > 0 && ultimo > 0 && dif > 0.005 && faltanCuotas > 0) {
+      r.meses = Math.floor(r.queda / dif + 1e-9);
+      r.alcanza = r.meses >= faltanCuotas;
+      r.sobra = r.alcanza ? r.queda - dif * faltanCuotas : 0;
+    }
+    return r;
   }
 
   // ---------------- Resumen del mes ----------------
@@ -1042,7 +1107,7 @@ var Calc = (function () {
     claveMes: claveMes, enMes: enMes, sumarMeses: sumarMeses, mesesCompletos: mesesCompletos, diasEntre: diasEntre,
     proximaFecha: proximaFecha, estadoTasaCero: estadoTasaCero, cuotaEnMes: cuotaEnMes, resumenMes: resumenMes,
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
-    amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes,
+    amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes, tipoAbono: tipoAbono, cuentaTasaCero: cuentaTasaCero,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
     fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };

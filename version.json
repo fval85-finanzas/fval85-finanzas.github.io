@@ -1,8 +1,8 @@
 {
- "web": "2.14.0",
- "servidor": "2.14.0",
- "sha256": "79d736479fbde3c75bb85589f5142d810cc70d305397db99fbc2e0bbd0c45e69",
- "novedades": "⚡ Al abrir: compras nuevas al instante · 🏦 Bancos, 🔁 recurrentes, 📦 archivar sobres y fondos desde la app · ⚙️ Ajustes ordenado · ✨ destello donde tocás",
+ "web": "2.15.0",
+ "servidor": "2.15.0",
+ "sha256": "8c859bbceab31a2b7d18414566ede529508ca4d2822f1712ee41106bf49bc491",
+ "novedades": "◷ Tasa cero: repartí cada pago de la tarjeta entre tus compras · adelantos que no bajan la cuota · cuánto le has puesto y cuánto te falta",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
