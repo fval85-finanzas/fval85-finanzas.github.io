@@ -975,15 +975,75 @@ var Calc = (function () {
     var dias = Math.round((fin - ini) / 86400000) + 1, dia = Math.max(0, Math.min(dias, Math.round((h - ini) / 86400000) + 1));
     return { modo: nombre, ini: ini, fin: fin, dias: dias, dia: dia, pct: dias ? dia / dias : 1, faltan: Math.max(0, dias - dia), factor: nombre === 'mes' ? 1 : dias / 30.4375 };
   }
+  // ---------------- v2.17 (#66): presupuesto por corte (ej. la tarjeta del súper de la casa, del 25 al 24) ----------------
+  function cortesPrefs(d) { var p = (d && d.cortes) || (d && d.ajustes && d.ajustes.prefs && d.ajustes.prefs.cortes); return Array.isArray(p) ? p.filter(function (c) { return c && c.cuenta && c.on !== false; }) : []; }
+  /** ¿Este movimiento es de la tarjeta de ese presupuesto por corte? */
+  function esDeCorte(cfg, m) {
+    if (!cfg || !m) return false;
+    var k = String(cfg.cuenta || '');
+    var u4 = (k.match(/^familia\s*••?\s*(\d{4})$/i) || [])[1];
+    if (u4) return esFamilia(m) && familia4(m) === u4;
+    return normNom(m.cuenta) === normNom(k);
+  }
+  /** El presupuesto por corte que manda sobre este movimiento (o null) */
+  function corteDe(d, m) { var l = cortesPrefs(d); for (var i = 0; i < l.length; i++) if (esDeCorte(l[i], m)) return l[i]; return null; }
+  function diaDelMes(y, mo, dia) { return new Date(y, mo, Math.min(dia, new Date(y, mo + 1, 0).getDate())); }
+  /** Fechas del corte que contiene `hoy` (atras = cuántos cortes antes). Corta el día `dia`: va del día siguiente al corte anterior hasta el día del corte. */
+  function periodoCorte(dia, hoy, atras) {
+    var h = soloFecha(hoy), y = h.getFullYear(), mo = h.getMonth();
+    var corteEste = diaDelMes(y, mo, dia);
+    if (h > corteEste) mo += 1;            // ya cortó este mes → el corte que corre termina el mes que viene
+    mo -= (atras || 0);
+    var fin = diaDelMes(y, mo, dia), antes = diaDelMes(y, mo - 1, dia);
+    var ini = new Date(antes.getFullYear(), antes.getMonth(), antes.getDate() + 1);
+    var dias = Math.round((fin - ini) / 86400000) + 1;
+    var diaN = atras ? dias : Math.max(1, Math.min(dias, Math.round((h - ini) / 86400000) + 1));
+    return { ini: ini, fin: fin, dias: dias, dia: diaN, faltan: atras ? 0 : dias - diaN };
+  }
+  /** Gastado en un corte: compras (Gasto) de esa tarjeta entre ini y fin. Todo en colones (los $ al tipo de cambio). */
+  function presupuestoCorte(d, cfg, hoy, atras) {
+    var per = periodoCorte(Number(cfg.dia) || 1, hoy, atras), t0 = per.ini.getTime(), t1 = per.fin.getTime() + 86400000;
+    var compras = [], gastado = 0, porDia = [];
+    for (var i = 0; i < per.dias; i++) porDia.push(0);
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha || m.tipo !== 'Gasto' || !esDeCorte(cfg, m)) return;
+      var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
+      var v = enCRC(d, m.monto, m.moneda);
+      gastado += v; compras.push({ mov: m, monto: v });
+      var k = Math.floor((soloFecha(new Date(m.fecha)) - per.ini) / 86400000); if (k >= 0 && k < per.dias) porDia[k] += v;
+    });
+    compras.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+    var monto = Number(cfg.monto) || 0, quedan = monto - gastado, acum = 0;
+    var serie = porDia.slice(0, per.dia).map(function (v) { acum += v; return acum; });
+    var ideal = monto * per.dia / per.dias;
+    return {
+      cfg: cfg, periodo: per, gastado: gastado, monto: monto, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
+      promedio: per.dia ? Math.round(gastado / per.dia) : 0, porDia: Math.floor(per.faltan > 0 ? Math.max(0, quedan) / per.faltan : Math.max(0, quedan)),
+      serie: serie, ideal: ideal, ritmo: Math.round(ideal - gastado),   // > 0: van por debajo del ritmo ideal
+      estado: !monto ? 'bien' : gastado > monto + 0.001 ? 'pasado' : gastado / monto >= 0.8 ? 'alerta' : (gastado / monto > per.dia / per.dias + 0.10 && gastado / monto >= 0.5) ? 'rapido' : 'bien'
+    };
+  }
+  /** Cortes anteriores (1..n) */
+  function historialCorte(d, cfg, hoy, n) {
+    var out = [];
+    for (var a = 1; a <= (n || 6); a++) {
+      var r = presupuestoCorte(d, cfg, hoy, a);
+      out.push({ atras: a, periodo: r.periodo, gastado: r.gastado, monto: r.monto, n: r.n, pct: r.pct });
+    }
+    return out;
+  }
+
   /** ¿Cuenta este movimiento en el presupuesto? Devuelve la categoría ('' = no cuenta) */
   function categoriaPresupuesto(d, m) {
     if (!m || m.tipo !== 'Gasto' || m.para || efectivoPropioViaje(m)) return '';
+    var co = corteDe(d, m);   // v2.17 (#66): la tarjeta con presupuesto por corte va aparte (salvo que diga "contar en mi presupuesto del mes")
+    if (co && !co.enMes) return '';
     var mk = marcaViaje(m);
     if (mk.efectivo) return '';
     if ((d.viajes || []).some(function (v) { return enViaje(v, m); })) return '';   // lo del viaje cuenta solo en el viaje
     if (esFamilia(m)) {
       var x = familiaPrefs(d)[familia4(m)], pr = x && x.presu;
-      if (!pr) return '';
+      if (!pr) return co ? (m.categoria || 'Sin categoría') : '';
       return pr === '*' ? (m.categoria || 'Sin categoría') : pr;
     }
     return m.categoria || 'Sin categoría';
@@ -1109,7 +1169,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes, tipoAbono: tipoAbono, cuentaTasaCero: cuentaTasaCero,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, cortesPrefs: cortesPrefs, esDeCorte: esDeCorte, corteDe: corteDe, periodoCorte: periodoCorte, presupuestoCorte: presupuestoCorte, historialCorte: historialCorte, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

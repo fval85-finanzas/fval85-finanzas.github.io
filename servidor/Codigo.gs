@@ -2242,6 +2242,7 @@ function leerCorreos_(guardar) {
   var mov = leerTabla_('Movimientos', 'Fecha');
   var autorizaciones = {};
   mov.filas.forEach(function (r) { var a = texto_(r['Autorización']); if (a) autorizaciones[a] = true; });
+  var unidas = {};   // v2.17 (#67): filas manuales ya unidas en esta vuelta
   var cuentas = leerTabla_('Cuentas', 'Nombre (único)').filas;
   var reglas = leerTabla_('Reglas', 'Si el comercio contiene').filas;
   var procesado = guardar ? etiqueta_(ETIQUETA_PROCESADO) : null;
@@ -2286,6 +2287,21 @@ function leerCorreos_(guardar) {
     autorizaciones[tx.autorizacion] = true;
     var fila = completarCompra_(tx, cuentas, reglas);
     if (tx.esFamilia) { fila['Sobre'] = ''; resumen.familia = (resumen.familia || 0) + 1; }
+    // v2.17 (#67): si ya la anotaste a mano (no llegaba el correo), se une con la tuya en vez de anotarla dos veces
+    var manual = buscarManualIgual_(mov, fila, unidas);
+    if (manual) {
+      unidas[manual._fila] = true; resumen.unidas = (resumen.unidas || 0) + 1;
+      resumen.detalle.push('🔗 [' + etiquetaBanco + '] ' + fila['Comercio / descripción'] + ' · ' + fila['Monto'] + ' ' + fila['Moneda'] + ' · ya estaba anotada a mano (fila ' + manual._fila + ') · se une');
+      if (guardar) {
+        var cambios = { 'Autorización': fila['Autorización'], 'Origen': 'Correo', 'Fecha': fila['Fecha'] };
+        if (!texto_(manual['Comercio / descripción'])) cambios['Comercio / descripción'] = fila['Comercio / descripción'];
+        if (!texto_(manual['Lugar']) && fila['Lugar']) cambios['Lugar'] = fila['Lugar'];
+        if (!texto_(manual['Categoría']) && fila['Categoría']) cambios['Categoría'] = fila['Categoría'];
+        cambios['Nota'] = (texto_(manual['Nota']) ? texto_(manual['Nota']) + '. ' : '') + 'Unida con el correo del banco (' + (fila['Comercio / descripción'] || '') + ')';
+        escribirFila_(mov.hoja, manual._fila, mov.cols, cambios);
+      }
+      return;
+    }
     resumen.compras++;
     resumen.detalle.push('🧾 [' + etiquetaBanco + '] ' + fila['Tipo'] + ' · ' + fila['Comercio / descripción'] + ' · ' +
       fila['Monto'] + ' ' + fila['Moneda'] + ' · ' + (fila['Cuenta / tarjeta'] || 'sin cuenta') + ' · ' + (fila['Categoría'] || 'sin categoría'));
@@ -2445,14 +2461,14 @@ function procesarCorreos() {
     var r = leerCorreos_(true);
     // avisos de viaje y columnas de Sobres: solo si entró algo nuevo (así el botón "Correos" responde rápido)
     if (r.compras + r.pagos > 0) { try { tareasDespuesDeLeer_(); } catch (e) { console.log('Después de leer: ' + e); } }
-    if (r.compras + r.pagos + r.revisar > 0) marcarCambio_();   // v2.14
+    if (r.compras + r.pagos + r.revisar + (r.unidas || 0) > 0) marcarCambio_();   // v2.14 · v2.17: también si se unió una manual
     PropertiesService.getScriptProperties().setProperty('REVISION_APP', String(inicio));
     // La próxima vez revisa desde 10 min antes (por si un correo llegó tarde; no se duplica)
     PropertiesService.getScriptProperties().setProperty('ULTIMA_REVISION', String(inicio - 10 * 60 * 1000));
     try { devolverEstadosDeCuenta_(); } catch (e) { console.log('Estados de cuenta: ' + e); }
     try { limpiarBandejaVieja_(); } catch (e) { console.log('Bandeja: ' + e); }
     var msg = 'Movimientos nuevos: ' + r.compras + ' · Pagos del préstamo: ' + r.pagos +
-              ' · Repetidos ignorados: ' + r.duplicados + ' · Para revisar: ' + r.revisar;
+              ' · Repetidos ignorados: ' + r.duplicados + (r.unidas ? ' · Unidas con las anotadas a mano: ' + r.unidas : '') + ' · Para revisar: ' + r.revisar;
     console.log(msg);
     return msg;
   } finally {
@@ -2561,6 +2577,25 @@ function limpiarBandejaVieja_() {
 }
 
 
+/**
+ * v2.17 (#67): compra anotada a mano que es la misma del correo: misma cuenta, tipo, moneda y monto,
+ * del mismo día o con un día de diferencia, sin autorización (la del correo todavía no la tenía). La más cercana en fecha.
+ */
+function buscarManualIgual_(mov, fila, unidas) {
+  var dia = function (d) { d = d && d.getFullYear ? d : new Date(d); return isNaN(d) ? null : Math.round(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000); };
+  var d0 = dia(fila['Fecha']), cta = texto_(fila['Cuenta / tarjeta']).toLowerCase(), mejor = null, dm = 9;
+  if (d0 === null || !(Number(fila['Monto']) > 0)) return null;
+  mov.filas.forEach(function (r) {
+    if (unidas[r._fila] || texto_(r['Origen']) !== 'Manual' || texto_(r['Autorización'])) return;
+    if (texto_(r['Tipo']) !== texto_(fila['Tipo']) || texto_(r['Cuenta / tarjeta']).toLowerCase() !== cta) return;
+    if ((texto_(r['Moneda']) || 'CRC') !== (fila['Moneda'] || 'CRC') || Math.abs((num_(r['Monto']) || 0) - Number(fila['Monto'])) > 0.5) return;
+    var d = dia(r['Fecha']); if (d === null) return;
+    var dd = Math.abs(d - d0); if (dd <= 1 && dd < dm) { dm = dd; mejor = r; }
+  });
+  return mejor;
+}
+
+
 // =====================================================================
 // Ajustes
 // =====================================================================
@@ -2571,7 +2606,7 @@ function limpiarBandejaVieja_() {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.15.0';
+var VERSION_APP = '2.17.0';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -4358,15 +4393,75 @@ var Calc = (function () {
     var dias = Math.round((fin - ini) / 86400000) + 1, dia = Math.max(0, Math.min(dias, Math.round((h - ini) / 86400000) + 1));
     return { modo: nombre, ini: ini, fin: fin, dias: dias, dia: dia, pct: dias ? dia / dias : 1, faltan: Math.max(0, dias - dia), factor: nombre === 'mes' ? 1 : dias / 30.4375 };
   }
+  // ---------------- v2.17 (#66): presupuesto por corte (ej. la tarjeta del súper de la casa, del 25 al 24) ----------------
+  function cortesPrefs(d) { var p = (d && d.cortes) || (d && d.ajustes && d.ajustes.prefs && d.ajustes.prefs.cortes); return Array.isArray(p) ? p.filter(function (c) { return c && c.cuenta && c.on !== false; }) : []; }
+  /** ¿Este movimiento es de la tarjeta de ese presupuesto por corte? */
+  function esDeCorte(cfg, m) {
+    if (!cfg || !m) return false;
+    var k = String(cfg.cuenta || '');
+    var u4 = (k.match(/^familia\s*••?\s*(\d{4})$/i) || [])[1];
+    if (u4) return esFamilia(m) && familia4(m) === u4;
+    return normNom(m.cuenta) === normNom(k);
+  }
+  /** El presupuesto por corte que manda sobre este movimiento (o null) */
+  function corteDe(d, m) { var l = cortesPrefs(d); for (var i = 0; i < l.length; i++) if (esDeCorte(l[i], m)) return l[i]; return null; }
+  function diaDelMes(y, mo, dia) { return new Date(y, mo, Math.min(dia, new Date(y, mo + 1, 0).getDate())); }
+  /** Fechas del corte que contiene `hoy` (atras = cuántos cortes antes). Corta el día `dia`: va del día siguiente al corte anterior hasta el día del corte. */
+  function periodoCorte(dia, hoy, atras) {
+    var h = soloFecha(hoy), y = h.getFullYear(), mo = h.getMonth();
+    var corteEste = diaDelMes(y, mo, dia);
+    if (h > corteEste) mo += 1;            // ya cortó este mes → el corte que corre termina el mes que viene
+    mo -= (atras || 0);
+    var fin = diaDelMes(y, mo, dia), antes = diaDelMes(y, mo - 1, dia);
+    var ini = new Date(antes.getFullYear(), antes.getMonth(), antes.getDate() + 1);
+    var dias = Math.round((fin - ini) / 86400000) + 1;
+    var diaN = atras ? dias : Math.max(1, Math.min(dias, Math.round((h - ini) / 86400000) + 1));
+    return { ini: ini, fin: fin, dias: dias, dia: diaN, faltan: atras ? 0 : dias - diaN };
+  }
+  /** Gastado en un corte: compras (Gasto) de esa tarjeta entre ini y fin. Todo en colones (los $ al tipo de cambio). */
+  function presupuestoCorte(d, cfg, hoy, atras) {
+    var per = periodoCorte(Number(cfg.dia) || 1, hoy, atras), t0 = per.ini.getTime(), t1 = per.fin.getTime() + 86400000;
+    var compras = [], gastado = 0, porDia = [];
+    for (var i = 0; i < per.dias; i++) porDia.push(0);
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha || m.tipo !== 'Gasto' || !esDeCorte(cfg, m)) return;
+      var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
+      var v = enCRC(d, m.monto, m.moneda);
+      gastado += v; compras.push({ mov: m, monto: v });
+      var k = Math.floor((soloFecha(new Date(m.fecha)) - per.ini) / 86400000); if (k >= 0 && k < per.dias) porDia[k] += v;
+    });
+    compras.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
+    var monto = Number(cfg.monto) || 0, quedan = monto - gastado, acum = 0;
+    var serie = porDia.slice(0, per.dia).map(function (v) { acum += v; return acum; });
+    var ideal = monto * per.dia / per.dias;
+    return {
+      cfg: cfg, periodo: per, gastado: gastado, monto: monto, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
+      promedio: per.dia ? Math.round(gastado / per.dia) : 0, porDia: Math.floor(per.faltan > 0 ? Math.max(0, quedan) / per.faltan : Math.max(0, quedan)),
+      serie: serie, ideal: ideal, ritmo: Math.round(ideal - gastado),   // > 0: van por debajo del ritmo ideal
+      estado: !monto ? 'bien' : gastado > monto + 0.001 ? 'pasado' : gastado / monto >= 0.8 ? 'alerta' : (gastado / monto > per.dia / per.dias + 0.10 && gastado / monto >= 0.5) ? 'rapido' : 'bien'
+    };
+  }
+  /** Cortes anteriores (1..n) */
+  function historialCorte(d, cfg, hoy, n) {
+    var out = [];
+    for (var a = 1; a <= (n || 6); a++) {
+      var r = presupuestoCorte(d, cfg, hoy, a);
+      out.push({ atras: a, periodo: r.periodo, gastado: r.gastado, monto: r.monto, n: r.n, pct: r.pct });
+    }
+    return out;
+  }
+
   /** ¿Cuenta este movimiento en el presupuesto? Devuelve la categoría ('' = no cuenta) */
   function categoriaPresupuesto(d, m) {
     if (!m || m.tipo !== 'Gasto' || m.para || efectivoPropioViaje(m)) return '';
+    var co = corteDe(d, m);   // v2.17 (#66): la tarjeta con presupuesto por corte va aparte (salvo que diga "contar en mi presupuesto del mes")
+    if (co && !co.enMes) return '';
     var mk = marcaViaje(m);
     if (mk.efectivo) return '';
     if ((d.viajes || []).some(function (v) { return enViaje(v, m); })) return '';   // lo del viaje cuenta solo en el viaje
     if (esFamilia(m)) {
       var x = familiaPrefs(d)[familia4(m)], pr = x && x.presu;
-      if (!pr) return '';
+      if (!pr) return co ? (m.categoria || 'Sin categoría') : '';
       return pr === '*' ? (m.categoria || 'Sin categoría') : pr;
     }
     return m.categoria || 'Sin categoría';
@@ -4492,7 +4587,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes, tipoAbono: tipoAbono, cuentaTasaCero: cuentaTasaCero,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, cortesPrefs: cortesPrefs, esDeCorte: esDeCorte, corteDe: corteDe, periodoCorte: periodoCorte, presupuestoCorte: presupuestoCorte, historialCorte: historialCorte, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

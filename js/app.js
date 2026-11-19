@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.16.0';
+  var VERSION_WEB = '2.17.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -3456,7 +3456,7 @@ var App = (function () {
   function presu() { return PREFS().presupuesto || {}; }
   function formatoNumero(n) { var x = String(Math.round(n * 100) / 100).split('.'); return x[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (x[1] ? ',' + x[1] : ''); }
   var PR_VERDE = '#3DD68C', PR_ROJO = '#FF7B7B', PR_NARANJA = '#FF8A3D', PR_AZUL = '#5B8DEF';
-  function DP() { return Object.assign({}, D, { presupuesto: presu(), familia: familia(), salario: salCfg() }); }
+  function DP() { return Object.assign({}, D, { presupuesto: presu(), familia: familia(), salario: salCfg(), cortes: PREFS().cortes || [] }); }
   function presuCalc(atras) { return C.presupuesto(DP(), hoy, { salario: salCfg(), atras: atras || 0 }); }
   function guardarPresu(parcial, desc) { guardarPrefs({ presupuesto: Object.assign({}, presu(), parcial) }, desc || 'Presupuesto'); }
   function catsPresupuesto() { return (D.categorias || []).filter(function (c) { return !/^(salario|otros ingresos|viajes)$/i.test(c); }); }
@@ -3473,8 +3473,9 @@ var App = (function () {
   function pPresupuesto() {
     var p = presuCalc(), per = p.periodo, modo = presu().modo || 'mes';
     var h = cabSimple('Presupuesto', esc(nombrePeriodo(per)), null, botonNuevo('Límites', 'App.formPresupuesto()'));
+    var hc = bloqueCortes();
     if (!p.hayLimites && !p.hayMetas) {
-      $('p-presupuesto').innerHTML = h + '<div class="vacio-lindo"><div class="dibujo">📊</div><b>Poné un límite a tus gastos</b>' +
+      $('p-presupuesto').innerHTML = h + hc + '<div class="vacio-lindo"><div class="dibujo">📊</div><b>Poné un límite a tus gastos</b>' +
         '<span>Elegís cuánto gastar por categoría (súper, restaurantes, gasolina…) y cuánto invertir. La app suma sola cada compra, pagues con tarjeta, cuenta o efectivo, y te avisa al 80% y si te pasás.</span>' +
         '<button class="btn" onclick="App.formPresupuesto()">Poner límites</button></div>';
       return;
@@ -3500,8 +3501,10 @@ var App = (function () {
       }).join('') + '</div>';
     }
     if (p.sin.monto > 0.004) h += '<button class="caja pr-sin" onclick="App.formPresupuesto()"><div class="fila"><span>Sin presupuesto (otras categorías)</span><b>' + din(p.sin.monto, 'CRC') + '</b></div><span class="suave chico">' + esc(p.sin.cats.slice(0, 4).map(function (c) { return c.cat; }).join(', ')) + (p.sin.cats.length > 4 ? '…' : '') + ' · tocá para ponerles límite</span></button>';
+    h += hc;
     var ant = presuCalc(1);
     h += '<div class="dos" style="padding:0 16px;margin-top:4px"><button class="btn sec" onclick="App.formPresupuesto()">✏️ Límites y metas</button><button class="btn sec" onclick="App.cierrePresupuesto()">📋 Cierre de ' + esc(ant.periodo.modo === 'mes' ? nombreMes(ant.periodo.ini).replace(/ \d{4}$/, '').toLowerCase() : 'el período anterior') + '</button></div>';
+    if (!cortesCfg().length) h += '<button class="caja pr-sin" onclick="App.formCortes()"><div class="fila"><span>🛒 ¿Una tarjeta que se maneja por corte?</span><span class="flecha">›</span></div><span class="suave chico">Ej. el súper de la casa del 25 al 24: llevala aparte con su propio presupuesto.</span></button>';
     h += '<div class="suave chico" style="padding:10px 18px">Cuenta todo lo que gastás por categoría. No cuentan los viajes, lo comprado para otras personas ni los pagos de tarjeta. Los dólares se pasan a colones al tipo de cambio.</div>';
     $('p-presupuesto').innerHTML = h;
   }
@@ -3605,7 +3608,133 @@ var App = (function () {
   }
   function presuSubir(cat, n) { var l = Object.assign({}, presu().limites || {}); l[cat] = n; guardarPresu({ limites: l }, 'Límite de ' + cat); hecho('📊 ' + cat + ': límite ' + C.dinero(n, 'CRC') + ' al mes'); }
   /** Aviso en la app al 80% y al pasarse (una vez por nivel y período) */
+  // ---------------- v2.17 (#66) · presupuesto por corte ----------------
+  function cortesCfg() { var l = PREFS().cortes; return Array.isArray(l) ? l : []; }
+  function nombreCuentaCorte(k) { return C.esFamilia({ cuenta: k }) ? etiquetaFamilia(k) : (etiquetaCuenta(k) || k); }
+  function fechaSinAnio(dt) { return fechaCorta(dt.toISOString()).replace(/ \d{4}$/, ''); }
+  function textoPeriodoCorte(per) { return fechaSinAnio(per.ini) + ' – ' + fechaSinAnio(per.fin); }
+  function colorCorte(r) { return r.estado === 'pasado' ? PR_ROJO : r.estado === 'alerta' || r.estado === 'rapido' ? PR_NARANJA : PR_VERDE; }
+  function bloqueCortes() {
+    var d = DP(), l = cortesCfg(), h = '';
+    l.forEach(function (cfg, i) {
+      if (cfg.on === false || !cfg.cuenta) return;
+      var r = C.presupuestoCorte(d, cfg, hoy), per = r.periodo, col = colorCorte(r);
+      h += '<button class="caja tocable" style="gap:4px;text-align:left;border:1.5px solid ' + col + '66" onclick="App.verCorte(' + i + ')">' +
+        '<div class="fila"><span style="display:flex;gap:10px;align-items:center;min-width:0"><span style="font-size:22px">🛒</span><span style="min-width:0"><b style="font-size:16px">' + esc(cfg.nombre || 'Presupuesto por corte') + '</b>' +
+        '<span class="suave chico" style="display:block">Corte ' + esc(textoPeriodoCorte(per)) + ' · ' + (per.faltan ? 'faltan <b style="color:var(--texto)">' + per.faltan + ' día' + (per.faltan === 1 ? '' : 's') + '</b>' : '<b style="color:var(--texto)">hoy corta</b>') + '</span></span></span><span class="flecha">›</span></div>' +
+        '<div class="fila chico" style="margin-top:6px"><span class="suave">Gastado</span><span class="suave">' + (r.quedan < 0 ? 'Se pasaron' : 'Queda') + '</span></div>' +
+        '<div class="fila"><b style="font-size:20px">' + din(r.gastado, 'CRC') + '</b><b style="font-size:20px;color:' + col + '">' + din(Math.abs(r.quedan), 'CRC') + '</b></div>' +
+        barraPresu(r.pct, col, per.dia / per.dias) +
+        (r.quedan > 0 && per.faltan > 0 ? '<div class="chico" style="margin-top:4px;background:var(--fondo);border-radius:10px;padding:8px 10px">Pueden gastar <b>' + din(r.porDia, 'CRC') + ' por día</b> hasta el ' + per.fin.getDate() + ' para no pasarse.</div>' : '') + '</button>';
+    });
+    return h ? '<div class="suave chico fuerte" style="padding:12px 18px 4px;letter-spacing:.5px">APARTE · POR CORTE</div>' + h : '';
+  }
+  /** Ritmo del corte: lo gastado (acumulado) contra la línea ideal */
+  function svgRitmo(r) {
+    var W = 300, H = 70, n = r.periodo.dias, max = Math.max(r.monto, r.gastado, 1);
+    var x = function (i) { return (i / Math.max(1, n - 1)) * W; }, y = function (v) { return H - 2 - (v / max) * (H - 6); };
+    var pts = r.serie.map(function (v, i) { return x(i).toFixed(1) + ',' + y(v).toFixed(1); }).join(' ');
+    var u = r.serie.length - 1, col = r.ritmo >= 0 ? PR_VERDE : PR_NARANJA;
+    return '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="display:block;margin-top:6px"><line x1="0" y1="' + y(0) + '" x2="' + W + '" y2="' + y(r.monto) + '" stroke="#5a5f68" stroke-dasharray="4 4" stroke-width="1.5"/>' +
+      (u >= 0 ? '<polyline fill="none" stroke="var(--acento)" stroke-width="2.5" points="' + pts + '"/><circle cx="' + x(u).toFixed(1) + '" cy="' + y(r.serie[u]).toFixed(1) + '" r="4" fill="var(--acento)"/>' : '') + '</svg>' +
+      '<div class="suave" style="font-size:11px;display:flex;justify-content:space-between"><span>' + esc(fechaSinAnio(r.periodo.ini)) + '</span><span>- - ideal</span><span>' + esc(fechaSinAnio(r.periodo.fin)) + '</span></div>' +
+      '<div class="chico" style="margin-top:6px">Van <b style="color:' + col + '">' + din(Math.abs(r.ritmo), 'CRC') + (r.ritmo >= 0 ? ' por debajo' : ' por encima') + '</b> del ritmo ideal.</div>';
+  }
+  function verCorte(i, atras) {
+    var cfg = cortesCfg()[i]; if (!cfg) return;
+    atras = atras || 0;
+    var d = DP(), r = C.presupuestoCorte(d, cfg, hoy, atras), per = r.periodo, col = colorCorte(r);
+    var ln = function (a, b, st) { return '<div class="fila" style="font-size:14px"><span' + (st ? ' style="' + st + '"' : '') + '>' + a + '</span><b' + (st ? ' style="' + st + '"' : '') + '>' + b + '</b></div>'; };
+    var nav = '<div class="chips" style="margin:6px 0 4px">' + chipRev('‹ Anterior', 'App.verCorte(' + i + ',' + (atras + 1) + ')', false) + (atras ? chipRev('Siguiente ›', 'App.verCorte(' + i + ',' + (atras - 1) + ')', false) : '') + chipRev(esc(textoPeriodoCorte(per)), '', true) + '</div>';
+    var h = '<div class="suave chico">Presupuesto por corte · ' + esc(nombreCuentaCorte(cfg.cuenta)) + '</div><h2>🛒 ' + esc(cfg.nombre || 'Presupuesto por corte') + '</h2>' + nav +
+      '<div class="caja" style="gap:2px;border:1.5px solid ' + col + '"><div class="fila" style="align-items:flex-end"><div><div class="suave chico">Gastado</div><b style="font-size:24px">' + din(r.gastado, 'CRC') + '</b></div>' +
+      '<div style="text-align:right"><div class="suave chico">de ' + din(r.monto, 'CRC') + '</div><b style="font-size:24px;color:' + col + '">' + (r.quedan < 0 ? '−' : '') + din(Math.abs(r.quedan), 'CRC') + '</b></div></div>' +
+      barraPresu(r.pct, col, atras ? null : per.dia / per.dias) +
+      (atras ? ln(r.quedan >= 0 ? 'Sobraron' : 'Se pasaron', din(Math.abs(r.quedan), 'CRC'), 'color:' + col) : ln('Días del corte', per.dia + ' de ' + per.dias)) +
+      ln('Promedio por día', din(r.promedio, 'CRC')) +
+      (!atras && per.faltan > 0 && r.quedan > 0 ? ln('Para no pasarse', din(r.porDia, 'CRC') + ' por día', 'color:' + PR_VERDE) : '') +
+      ln('Compras', String(r.n)) + '</div>';
+    if (!atras && r.monto > 0) h += '<div class="caja" style="gap:2px;margin-top:10px"><div class="suave chico fuerte">RITMO DEL CORTE</div>' + svgRitmo(r) + '</div>';
+    h += '<div class="caja sinpad" style="margin-top:10px"><div class="fila" style="padding:10px 14px 2px"><span class="suave chico fuerte">COMPRAS DEL CORTE · ' + r.n + '</span>' + (atras ? '' : '<button class="chip" onclick="App.cerrar();App.formRapido(\'Gasto\',\'' + q(cfg.cuenta) + '\')">＋ Compra</button>') + '</div>' +
+      (r.compras.length ? r.compras.slice(0, 40).map(function (x) { var m = x.mov; return '<button class="pr-mov" onclick="App.cerrar();App.formMovimiento(' + m.fila + ')"><span><b>' + esc(nombreBonito(m.comercio) || 'Compra') + '</b><span class="suave chico">' + esc(fechaSinAnio(new Date(m.fecha)) + (m.categoria ? ' · ' + m.categoria : '') + (m.origen === 'Manual' ? ' · a mano' : '')) + '</span></span><b>' + din(m.monto, m.moneda) + '</b></button>'; }).join('') : '<div class="suave chico" style="padding:10px 14px">Sin compras en este corte.</div>') + '</div>';
+    var hist = C.historialCorte(d, cfg, hoy, 6), conDatos = hist.filter(function (x) { return x.n > 0; });
+    while (hist.length && !hist[hist.length - 1].n) hist.pop();   // los cortes de antes de que hubiera compras no se muestran
+    if (!atras && conDatos.length) {
+      var prom = conDatos.reduce(function (a, x) { return a + x.gastado; }, 0) / conDatos.length, dif = hist[0].n ? r.gastado - hist[0].gastado : null;
+      h += '<div class="caja" style="gap:2px;margin-top:10px"><div class="suave chico fuerte">CORTES ANTERIORES</div>' +
+        '<div class="fila chico"><span class="suave">Promedio por corte</span><b>' + din(Math.round(prom), 'CRC') + '</b></div>' +
+        hist.map(function (x) {
+          var c2 = x.monto && x.gastado > x.monto + 0.001 ? PR_ROJO : PR_VERDE;
+          return '<button class="pr-mov" style="display:block;text-align:left;padding:8px 0" onclick="App.verCorte(' + i + ',' + x.atras + ')"><div class="fila"><b>' + esc(textoPeriodoCorte(x.periodo)) + '</b><b style="color:' + c2 + '">' + din(x.gastado, 'CRC') + '</b></div>' +
+            (x.monto ? barraPresu(x.pct, c2) + '<div class="suave chico">' + (x.gastado > x.monto + 0.001 ? 'Se pasaron ' + din(x.gastado - x.monto, 'CRC') : 'Sobraron ' + din(x.monto - x.gastado, 'CRC')) + ' · ' + x.n + ' compra' + (x.n === 1 ? '' : 's') + '</div>' : '') + '</button>';
+        }).join('') + '</div>';
+      if (dif !== null) h += '<div class="suave chico" style="text-align:center;margin-top:6px">' + (dif <= 0 ? 'Llevan ' + din(-dif, 'CRC') + ' menos que en todo el corte anterior.' : 'Ya gastaron ' + din(dif, 'CRC') + ' más que en todo el corte anterior.') + '</div>';
+    }
+    h += '<div class="acciones"><button class="btn sec" onclick="App.formCorte(' + i + ')">⚙ Ajustar</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>';
+    abrir(h);
+  }
+  function formCortes() {
+    var l = cortesCfg();
+    abrir('<h2>🛒 Presupuesto por corte</h2><div class="suave">Para una tarjeta que se maneja por corte (ej. el súper de la casa, del 25 al 24). Va aparte de tu presupuesto del mes.</div>' +
+      '<div class="caja sinpad" style="margin-top:10px">' + (l.length ? l.map(function (c, i) {
+        return '<button class="item" onclick="App.formCorte(' + i + ')"><span class="ico">🛒</span><span class="cuerpo"><span class="nombre" style="display:block">' + esc(c.nombre || 'Presupuesto por corte') + (c.on === false ? ' · pausado' : '') + '</span><span class="det" style="display:block">' + esc(nombreCuentaCorte(c.cuenta) + ' · corta el ' + c.dia) + '</span></span><span class="monto"><b>' + din(c.monto || 0, 'CRC') + '</b></span></button>';
+      }).join('') : '<div class="suave chico" style="padding:12px 14px">Todavía no tenés ninguno.</div>') + '</div>' +
+      '<div class="acciones"><button class="btn" onclick="App.formCorte(-1)">＋ Nuevo</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
+  }
+  function formCorte(i) {
+    var c = i >= 0 ? cortesCfg()[i] : null;
+    var tarjetas = D.cuentas.filter(function (x) { return x.activa && /tarjeta/i.test(x.tipo || ''); }).map(function (x) { return [x.nombre, etiquetaCuenta(x.nombre) || x.nombre, x.diaCorte || '']; })
+      .concat(Object.keys(familia()).map(function (k) { return ['Familia ••' + k, etiquetaFamilia('Familia ••' + k), familia()[k].diaCorte || '']; }));
+    var sel = c ? c.cuenta : (tarjetas.filter(function (t) { return C.esFamilia({ cuenta: t[0] }); })[0] || tarjetas[0] || [''])[0];
+    var diaDe = function (k) { var t = tarjetas.filter(function (x) { return x[0] === k; })[0]; return t && t[2] ? t[2] : ''; };
+    abrir('<h2>🛒 ' + (c ? esc(c.nombre || 'Presupuesto por corte') : 'Presupuesto por corte') + '</h2><div class="suave">Las compras de esta tarjeta se cuentan del día después del corte hasta el día del corte. Cada corte nuevo empieza en cero.</div>' +
+      (c ? '<div class="fila" style="margin-top:10px"><b>Llevar presupuesto por corte</b>' + interruptor('co-on', c.on !== false, '', 'Activo') + '</div>' : '') +
+      '<label class="campo"><span>Tarjeta</span><select id="co-cta" onchange="App.corteCuenta()">' + tarjetas.map(function (t) { return '<option value="' + esc(t[0]) + '" data-dia="' + esc(String(t[2])) + '"' + (t[0] === sel ? ' selected' : '') + '>' + esc(t[1]) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="campo"><span>Nombre</span><input id="co-nom" value="' + esc(c ? c.nombre : 'Súper de la casa') + '"></label>' +
+      '<div class="dos-campos"><label class="campo compacto"><span>Monto por corte (₡)</span><input id="co-monto" data-dinero inputmode="decimal" value="' + (c && c.monto ? formatoNumero(c.monto) : '') + '" placeholder="300.000"></label>' +
+      '<label class="campo compacto" style="max-width:120px"><span>Corta el día</span><input id="co-dia" inputmode="numeric" maxlength="2" oninput="App.corteNota()" value="' + esc(String(c ? c.dia : diaDe(sel) || '')) + '" placeholder="24"></label></div>' +
+      '<div class="suave chico" id="co-nota"></div>' +
+      '<label class="check"><input type="checkbox" id="co-mes"' + (c && c.enMes ? ' checked' : '') + '> Contar estas compras en mi presupuesto del mes</label>' +
+      '<label class="check"><input type="checkbox" id="co-av"' + (!c || c.aviso !== false ? ' checked' : '') + '> Avisar al llegar al 80% y si se pasan</label>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarCorte(' + i + ')">Guardar</button>' + (c ? '<button class="btn peligro" onclick="App.quitarCorte(' + i + ')">Quitar</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+    corteNota();
+  }
+  function corteNota() {
+    var d = parseInt(val('co-dia'), 10), n = $('co-nota'); if (!n) return;
+    if (!(d >= 1 && d <= 31)) { n.textContent = 'Poné el día en que corta la tarjeta.'; return; }
+    var per = C.periodoCorte(d, hoy, 0);
+    n.textContent = 'Corte que corre: ' + textoPeriodoCorte(per) + '. El siguiente empieza el ' + fechaSinAnio(new Date(per.fin.getFullYear(), per.fin.getMonth(), per.fin.getDate() + 1)) + '.';
+  }
+  function corteCuenta() { var o = $('co-cta').selectedOptions[0]; if (o && o.dataset.dia) $('co-dia').value = o.dataset.dia; corteNota(); }
+  function guardarCorte(i) {
+    var dia = parseInt(val('co-dia'), 10), monto = C.leerNumero(val('co-monto')), cta = val('co-cta'), nom = val('co-nom').trim() || 'Presupuesto por corte';
+    if (!cta) return toast('Elegí la tarjeta.');
+    if (!(dia >= 1 && dia <= 31)) return toast('Poné el día en que corta la tarjeta (1 a 31).');
+    if (!(monto > 0)) return toast('Escribí el monto por corte.');
+    var l = cortesCfg().slice(), c = { cuenta: cta, nombre: nom, monto: monto, dia: dia, enMes: $('co-mes').checked, aviso: $('co-av').checked, on: $('co-on') ? $('co-on').checked : true };
+    if (l.some(function (x, k) { return k !== i && x.cuenta === cta; })) return toast('Esa tarjeta ya tiene presupuesto por corte.');
+    if (i >= 0) l[i] = c; else l.push(c);
+    guardarPrefs({ cortes: l }, 'Presupuesto por corte: ' + nom);
+    hecho('🛒 ' + nom + ': ' + C.dinero(monto, 'CRC') + ' por corte');
+  }
+  function quitarCorte(i) {
+    var l = cortesCfg().slice(), c = l[i]; if (!c) return;
+    if (!confirm('¿Quitar el presupuesto por corte "' + (c.nombre || '') + '"? Las compras no se borran; vuelven a contar como antes.')) return;
+    l.splice(i, 1); guardarPrefs({ cortes: l }, 'Quitar presupuesto por corte'); hecho('Presupuesto por corte quitado');
+  }
+  function avisosCortes() {
+    if (!D || avCfg().tipos.presupuesto === false) return;
+    var d = DP(), ya = leerJSONSeguro('mf-corte-av') || {}, msgs = [];
+    cortesCfg().forEach(function (cfg) {
+      if (cfg.on === false || cfg.aviso === false || !(cfg.monto > 0)) return;
+      var r = C.presupuestoCorte(d, cfg, hoy), k = cfg.cuenta + '@' + r.periodo.ini.toISOString().slice(0, 10), niv = r.pct > 1.0001 ? 100 : r.pct >= 0.8 ? 80 : 0;
+      if (niv && (ya[k] || 0) < niv) { ya[k] = niv; msgs.push((cfg.nombre || 'Súper') + (niv === 100 ? ': se pasaron por ' + C.dinero(-r.quedan, 'CRC') : ' al ' + Math.round(r.pct * 100) + '% · quedan ' + C.dinero(r.quedan, 'CRC') + ' para ' + r.periodo.faltan + ' día' + (r.periodo.faltan === 1 ? '' : 's'))); }
+    });
+    guardar('mf-corte-av', JSON.stringify(ya));
+    if (msgs.length) setTimeout(function () { toast('🛒 ' + msgs.join(' · '), 5000); }, 3200);
+  }
   function avisosPresupuesto() {
+    avisosCortes();
     if (!D || avCfg().tipos.presupuesto === false) return;
     var p = presuCalc(); if (!p.hayLimites) return;
     var ya = leerJSONSeguro('mf-presu-av') || {}, clave = p.periodo.ini.toISOString().slice(0, 10), msgs = [];
@@ -4065,10 +4194,14 @@ var App = (function () {
     var r = out.join(' ').trim();
     return r.length > 28 ? r.slice(0, 27).trim() + '…' : (r || String(n || ''));
   }
-  function formRapido(tipo) {
-    var ultCuenta = guardado('mf-rap-cuenta', '');
-    if (ultCuenta && !cuentaPorNombre(ultCuenta)) ultCuenta = '';
-    rap = { tipo: tipo || 'Gasto', monto: '', moneda: ultCuenta ? (cuentaPorNombre(ultCuenta).moneda || 'CRC') : 'CRC', cuenta: ultCuenta, comercio: '', categoria: '', sobre: '', frec: -1 };
+  /** v2.17 (#67): tarjetas de la familia activas como cuentas para anotar a mano ("Familia ••1234") */
+  function cuentasFamilia() { var o = familia(); return Object.keys(o).filter(function (k) { return !o[k].pausada; }).map(function (k) { return 'Familia ••' + k; }); }
+  function cuentaValida(n) { return !!n && (!!cuentaPorNombre(n) || cuentasFamilia().indexOf(n) >= 0); }
+  function etiquetaFamilia(k) { var x = infoFamilia(k); return '👪 ' + x.persona + ' · ' + x.nombre + ' ••' + x.u4; }
+  function formRapido(tipo, cuentaFija) {
+    var ultCuenta = cuentaFija || guardado('mf-rap-cuenta', '');
+    if (ultCuenta && !cuentaValida(ultCuenta)) ultCuenta = '';
+    rap = { tipo: tipo || 'Gasto', monto: '', moneda: ultCuenta && cuentaPorNombre(ultCuenta) ? (cuentaPorNombre(ultCuenta).moneda || 'CRC') : 'CRC', cuenta: ultCuenta, comercio: '', categoria: '', sobre: '', frec: -1 };
     pintarRapido();
   }
   function montoRapido() { return C.leerNumero(rap.monto.replace(',', '.').replace(/^\./, '0.')) || 0; }
@@ -4088,7 +4221,8 @@ var App = (function () {
       }).join('') + (sinServidorSobres() ? '' : '<button class="chip" onclick="App.formMover()">Mover</button>') + '<button class="chip" onclick="App.formAcciones()">Otros ⋯</button></div>' +
       '<button class="rap-pegar" onclick="App.rapPegar()">📋 <span>Pegar mensaje del banco</span></button>' +
       '<div class="rap-fila"><button class="chip" onclick="App.rapMoneda()" aria-label="Cambiar moneda">₡ ⇄ $</button>' +
-      '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, 'Sin cuenta (efectivo)') + '</select></div>' +
+      '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, 'Sin cuenta (efectivo)') +
+        (rap.tipo === 'Gasto' ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') + '</select></div>' +
       '<div class="rap-monto" id="rp-monto">' + textoMontoRapido() + '<i></i></div>' +
       (fr.length ? '<div class="chips rap-frec">' + fr.map(function (f, i) {
         return '<button class="chip' + (rap.frec === i ? ' on' : '') + '" onclick="App.rapFrecuente(' + i + ')">' + (f.categoria ? iconoMov({ tipo: rap.tipo, categoria: f.categoria })[0] : '•') + ' ' + esc(nombreSug(f.nombre)) + '</button>';
@@ -4113,12 +4247,12 @@ var App = (function () {
   }
   function rapTipo(t) { rap.tipo = t; rap.frec = -1; rap.comercio = rap.categoria = rap.sobre = ''; pintarRapido(); }
   function rapMoneda() { rap.moneda = rap.moneda === 'USD' ? 'CRC' : 'USD'; pintarRapido(); }
-  function rapCuenta(v) { rap.cuenta = v; var c = cuentaPorNombre(v); if (c && !rap.monto) rap.moneda = c.moneda || rap.moneda; pintarRapido(); }
+  function rapCuenta(v) { rap.cuenta = v; var c = cuentaPorNombre(v); if (c && !rap.monto) rap.moneda = c.moneda || rap.moneda; if (C.esFamilia({ cuenta: v })) rap.sobre = ''; pintarRapido(); }
   function rapFrecuente(i) {
     var f = frecuentes(rap.tipo)[i]; if (!f) return;
     if (rap.frec === i) { rap.frec = -1; rap.comercio = rap.categoria = rap.sobre = ''; return pintarRapido(); }
     rap.frec = i; rap.comercio = f.comercio; rap.categoria = f.categoria; rap.sobre = f.sobre;
-    if (f.cuenta && cuentaPorNombre(f.cuenta)) rap.cuenta = f.cuenta;
+    if (f.cuenta && cuentaValida(f.cuenta)) rap.cuenta = f.cuenta;
     rap.moneda = f.moneda;
     if (!rap.monto) rap.monto = String(Math.round(f.monto * 100) / 100).replace('.', ',');
     pintarRapido();
@@ -4130,7 +4264,8 @@ var App = (function () {
     var monto = montoRapido();
     if (!(monto > 0)) return toast('Escribí el monto.');
     var m = { fila: null, control: null, fecha: new Date().toISOString(), monto: monto, moneda: rap.moneda, tipo: rap.tipo, comercio: rap.comercio || '', lugar: '',
-      cuenta: rap.cuenta, categoria: rap.categoria, sobre: rap.sobre, nota: '', origen: 'Manual', autorizacion: '', recordarRegla: false };
+      cuenta: rap.cuenta, categoria: rap.categoria, sobre: C.esFamilia({ cuenta: rap.cuenta }) ? '' : rap.sobre, nota: '', origen: 'Manual', autorizacion: '', recordarRegla: false };
+    if (C.esFamilia(m)) m.nota = 'Tarjeta de la familia · anotada a mano';
     guardar('mf-rap-cuenta', rap.cuenta || '');
     encolar('guardarMovimiento', [m], 'Nuevo: ' + (nombreBonito(m.comercio) || m.categoria || m.tipo) + ' · ' + txt(monto, m.moneda));
     hecho('✅ ' + (m.tipo === 'Ingreso' ? 'Ingreso' : 'Gasto') + ' de ' + txt(monto, m.moneda) + ' guardado');
@@ -4416,6 +4551,7 @@ var App = (function () {
     h += grupo('cu', '🏦', '#5B8DEF', 'Cuentas y tarjetas', resumenActivas(),
       opcion('tarjeta', 'Mis tarjetas y cuentas', resumenActivas() + (cuentasAhorro().length ? ' · de cuál pagás tarjetas, préstamo y fondos' : ''), '<span class="flecha">›</span>', 'App.formCuentasLista()') +
         opcion('tarjeta', 'Tarjetas de la familia', Object.keys(familia()).length ? personasFamilia().map(function (p) { var ks = Object.keys(familia()).filter(function (k) { return (familia()[k].persona || 'Familia') === p; }), pa = ks.filter(function (k) { return familia()[k].pausada; }).length; return p + ' (' + (ks.length - pa) + ' activa' + (ks.length - pa === 1 ? '' : 's') + (pa ? ' · ' + pa + ' pausada' + (pa === 1 ? '' : 's') : '') + ')'; }).join(', ') : 'Ninguna · esposa, hijos… (viajes y presupuesto)', '<span class="flecha">›</span>', 'App.formFamilia()') +
+        opcion('calendario', 'Presupuesto por corte', cortesCfg().length ? cortesCfg().map(function (c) { return c.nombre + ' · ' + C.dinero(c.monto || 0, 'CRC') + ' · corta el ' + c.dia; }).join(' · ') : 'Ej. la tarjeta del súper de la casa, del 25 al 24', '<span class="flecha">›</span>', 'App.formCortes()') +
         opcion('tarjeta', 'Tarjetas que no son mías', Object.keys(ajenas()).length ? (function () { var ks = Object.keys(ajenas()), off = ks.filter(function (k) { return ajenas()[k].off; }).length; return (ks.length - off) + ' ignorada' + (ks.length - off === 1 ? '' : 's') + (off ? ' · ' + off + ' sin ignorar' : ''); })() : 'Ninguna · la app no anota sus correos', '<span class="flecha">›</span>', 'App.formAjenas()'));
     h += grupo('mv', '🏷', '#F5B82E', 'Movimientos', (D.categorias || []).length + ' categorías · ' + (D.reglas || []).length + ' reglas',
       opcion('hoja', 'Categorías', (D.categorias || []).length + ' · agregar, renombrar o quitar', '<span class="flecha">›</span>', 'App.formCategorias()') +
@@ -7854,6 +7990,7 @@ var App = (function () {
     formActualizarFondo: formActualizarFondo, vistaFondo: vistaFondo, guardarActualizarFondo: guardarActualizarFondo,
     verViaje: verViaje, formViaje: formViaje, guardarViaje: guardarViaje, borrarViaje: borrarViaje, formLimiteViaje: formLimiteViaje,
     guardarLimiteViaje: guardarLimiteViaje, formCompraViaje: formCompraViaje, marcarViaje: marcarViaje, formAgregarViaje: formAgregarViaje,
+    verCorte: verCorte, formCortes: formCortes, formCorte: formCorte, corteCuenta: corteCuenta, corteNota: corteNota, guardarCorte: guardarCorte, quitarCorte: quitarCorte,
     verTC: verTC, formAbonoTC: formAbonoTC, abonoCompra: abonoCompra, abonoVista: abonoVista, abonoTipo: abonoTipo, repartoMov: repartoMov, repOn: repOn, repSuma: repSuma,
     guardarAbonoTC: guardarAbonoTC, borrarAbonoTC: borrarAbonoTC,
     tcFiltro: function (f) { tcFiltro = f; tcVerTodo = false; pintar(); }, tcVerTodo: function () { tcVerTodo = true; pintar(); }

@@ -1,8 +1,8 @@
 {
- "web": "2.16.0",
- "servidor": "2.15.0",
- "sha256": "8c859bbceab31a2b7d18414566ede529508ca4d2822f1712ee41106bf49bc491",
- "novedades": "🧹 La calculadora flotante ya no estorba en las ventanas · la ventana de + no se corre · sugerencias con nombres cortos · sacar de un sobre empieza en cero",
+ "web": "2.17.0",
+ "servidor": "2.17.0",
+ "sha256": "65d18a06e4619199841772ca7865f68da856ac4259d09f738d1ff7068cee13c6",
+ "novedades": "🛒 Presupuesto por corte (súper de la casa, del 25 al 24) · anotá a mano compras de la tarjeta de la casa y se unen solas con el correo",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
