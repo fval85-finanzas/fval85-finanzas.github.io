@@ -1056,7 +1056,7 @@ body.calc-abierta #calc-btn { display: none; }
 .btn-calc svg { width: 21px; height: 21px; }
 #calc-btn { display: none !important; color: var(--acento); }
 #calc-btn svg { width: 22px; height: 22px; }
-body:not(:has(.pantalla.activa .btn-calc)) #calc-btn, body:has(#velo.abierto) #calc-btn { display: flex !important; align-items: center; justify-content: center; }
+body:not(:has(.pantalla.activa .btn-calc)):not(:has(.velo.abierto)):not(:has(.elegir-velo.abierto)) #calc-btn { display: flex !important; align-items: center; justify-content: center; }
 body.calc-abierta #calc-btn { display: none !important; }
 #calc-panel .calc-tit { display: inline-flex; align-items: center; gap: 6px; }
 #calc-panel .calc-tit svg { width: 17px; height: 17px; color: var(--acento); }
@@ -1086,3 +1086,10 @@ body.datos-viejos .hero .grande, body.datos-viejos .hero .medio, body.datos-viej
 .aviso-nuevas .an-x { background: none; border: 0; color: inherit; opacity: .5; font-size: 14px; padding: 8px 4px; cursor: pointer; }
 .et-nueva { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; background: var(--acento); color: #111; border-radius: 5px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
 .item.mov.mov-nueva { background: color-mix(in srgb, var(--acento) 9%, transparent); }
+
+/* v2.16 (#64): la calculadora flotante se esconde mientras hay una ventana abierta (regla de arriba) */
+/* v2.16 (#65): la ventana no se corre de lado; solo se desliza la fila de sugerencias */
+.panel { overflow-x: hidden; overscroll-behavior-x: none; }
+.panel .chips { max-width: 100%; min-width: 0; }
+.rap .chips.rap-frec { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.rap-frec .chip { flex-shrink: 0; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; }

@@ -1,8 +1,8 @@
 {
- "web": "2.15.0",
+ "web": "2.16.0",
  "servidor": "2.15.0",
  "sha256": "8c859bbceab31a2b7d18414566ede529508ca4d2822f1712ee41106bf49bc491",
- "novedades": "◷ Tasa cero: repartí cada pago de la tarjeta entre tus compras · adelantos que no bajan la cuota · cuánto le has puesto y cuánto te falta",
+ "novedades": "🧹 La calculadora flotante ya no estorba en las ventanas · la ventana de + no se corre · sugerencias con nombres cortos · sacar de un sobre empieza en cero",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

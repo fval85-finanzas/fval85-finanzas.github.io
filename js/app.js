@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.15.0';
+  var VERSION_WEB = '2.16.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -4052,6 +4052,19 @@ var App = (function () {
     if (sal && sal.monto) { var ks = orden.filter(function (k) { return /^salario/.test(k); })[0]; if (ks) grupos[ks].n += 999; else { grupos.__sal = { nombre: '💰 Salario', comercio: 'Salario', categoria: '', sobre: '', cuenta: sal.cuenta || '', moneda: sal.moneda || 'CRC', monto: sal.monto, n: 999 }; orden.unshift('__sal'); } }
     return orden.map(function (k) { return grupos[k]; }).sort(function (x, y) { return y.n - x.n; }).slice(0, 8);
   }
+  /** v2.16 (#65): nombre corto para las sugerencias: sin PENDING, .COM, país, INC… (ej. "IVA · UBR* PENDING.UBER.COM SAN FRANCISCO Estados Unidos de" → "IVA · Uber San Francisco") */
+  function nombreSug(n) {
+    var s = String(n || '').replace(/\bPENDING\b\.?/gi, ' ').replace(/\.?\b(COM|NET)\b/gi, ' ').replace(/[*_]/g, ' ')
+      .replace(/\b(Estados Unidos( de( Am[eé]rica)?)?|United States|Costa Rica|USA|CRI|INC|LLC|LTDA|S\.A)\b\.?/gi, ' ')
+      .replace(/\bWWW\b\.?/gi, ' ').replace(/\bUBR\b/gi, 'UBER').replace(/\s+de\s*$/i, '');
+    var vistos = {}, out = [];
+    s.split(/[\s.]+/).forEach(function (w) {
+      if (!w) return; var k = w.toLowerCase(); if (vistos[k] && w !== '·') return; vistos[k] = 1;
+      out.push(w.length >= 3 && !/^(IVA|BCR|BAC|BNCR|KFC|ICE|INS|CCSS|SINPE)$/.test(w) && w === w.toUpperCase() && /[A-ZÁÉÍÓÚÑ]/.test(w) ? w.charAt(0) + w.slice(1).toLowerCase() : w);
+    });
+    var r = out.join(' ').trim();
+    return r.length > 28 ? r.slice(0, 27).trim() + '…' : (r || String(n || ''));
+  }
   function formRapido(tipo) {
     var ultCuenta = guardado('mf-rap-cuenta', '');
     if (ultCuenta && !cuentaPorNombre(ultCuenta)) ultCuenta = '';
@@ -4078,7 +4091,7 @@ var App = (function () {
       '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, 'Sin cuenta (efectivo)') + '</select></div>' +
       '<div class="rap-monto" id="rp-monto">' + textoMontoRapido() + '<i></i></div>' +
       (fr.length ? '<div class="chips rap-frec">' + fr.map(function (f, i) {
-        return '<button class="chip' + (rap.frec === i ? ' on' : '') + '" onclick="App.rapFrecuente(' + i + ')">' + (f.categoria ? iconoMov({ tipo: rap.tipo, categoria: f.categoria })[0] : '•') + ' ' + esc(f.nombre) + '</button>';
+        return '<button class="chip' + (rap.frec === i ? ' on' : '') + '" onclick="App.rapFrecuente(' + i + ')">' + (f.categoria ? iconoMov({ tipo: rap.tipo, categoria: f.categoria })[0] : '•') + ' ' + esc(nombreSug(f.nombre)) + '</button>';
       }).join('') + '</div>' : '<div class="suave chico">Cuando registres algunos, aquí te salen los frecuentes para llenarlos de un toque.</div>') +
       '<button class="rap-resumen" onclick="App.rapDetalles()"><span class="ico-cat" style="width:30px;height:30px;font-size:14px;background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span><span class="li-t">' + resumen + '</span><span class="enlace">Cambiar ›</span></button>' +
       '<div class="teclado">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', '⌫'].map(function (k) {
@@ -7630,7 +7643,7 @@ var App = (function () {
   var SM = null;
   function formSacarMeter(dir, op, para) {
     var s = sobreInfo(SOB.nombre); if (!s) return;
-    var montoPrev = $('sm-monto') ? val('sm-monto') : '';
+    var montoPrev = (op || para !== undefined) && $('sm-monto') ? val('sm-monto') : '';   // v2.16 (#63): al abrir de nuevo empieza en cero
     if (!SM || SM.dir !== dir) SM = { dir: dir, op: dir < 0 ? 'disponible' : 'disponible', para: '' };
     if (op) SM.op = op; if (para !== undefined) SM.para = para;
     var mon = s.moneda === 'USD' ? 'USD' : 'CRC', sb = SB();
