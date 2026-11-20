@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.17.0';
+  var VERSION_WEB = '2.17.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -3278,7 +3278,9 @@ var App = (function () {
       '<label class="campo"><span>Comercio o descripción</span><input id="f-comercio" value="' + esc(m.comercio) + '" placeholder="Ej. Automercado"></label>' +
       '<label class="campo"><span>Lugar</span><input id="f-lugar" value="' + esc(m.lugar) + '" placeholder="Opcional"></label>' +
       '<label class="campo"><span>Fecha y hora</span><input id="f-fecha" type="datetime-local" value="' + localInput(m.fecha, true) + '"></label>' +
-      '<label class="campo"><span>Tarjeta o cuenta</span><select id="f-cuenta" onchange="App.monedaDeCuenta();App.repartoMov()">' + opciones(cuentas, m.cuenta, '— Ninguna —') + '</select></label>' +
+      '<label class="campo"><span>Tarjeta o cuenta</span><select id="f-cuenta" onchange="App.monedaDeCuenta();App.repartoMov()">' + opciones(cuentas, m.cuenta, sinCuentaTexto()) +
+        // v2.17.1: las tarjetas de la familia también se pueden elegir aquí (antes se perdían al tocar "Cambiar ›" en el "+")
+        cuentasFamilia().concat(C.esFamilia(m) && cuentasFamilia().indexOf(m.cuenta) < 0 ? [m.cuenta] : []).map(function (k) { return '<option value="' + esc(k) + '"' + (k === m.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') + '</select></label>' +
       '<div id="f-reparto"></div>' +
       '<label class="campo"><span>Categoría</span><select id="f-categoria">' + opciones(D.categorias, m.categoria, '— Sin categoría —') + '</select></label>' +
       '<label class="campo"><span>Sobre</span><select id="f-sobre">' + opciones(sobres, m.sobre, '— Ninguno —') + '</select></label>' +
@@ -3360,7 +3362,7 @@ var App = (function () {
       fila: fila || null, control: orig ? { monto: orig.monto } : null,
       fecha: fecha, monto: monto, moneda: val('f-moneda'), tipo: val('f-tipo'),
       comercio: val('f-comercio').trim(), lugar: val('f-lugar').trim(), cuenta: val('f-cuenta'),
-      categoria: val('f-categoria'), sobre: val('f-sobre'), nota: val('f-nota').trim(),
+      categoria: val('f-categoria'), sobre: C.esFamilia({ cuenta: val('f-cuenta') }) ? '' : val('f-sobre'), nota: val('f-nota').trim(),
       origen: orig ? orig.origen : 'Manual', autorizacion: orig ? orig.autorizacion : '',
       recordarRegla: $('f-regla').checked
     };
@@ -4195,6 +4197,8 @@ var App = (function () {
     return r.length > 28 ? r.slice(0, 27).trim() + '…' : (r || String(n || ''));
   }
   /** v2.17 (#67): tarjetas de la familia activas como cuentas para anotar a mano ("Familia ••1234") */
+  /** v2.17.1 (#68): lo que pasa con un movimiento sin cuenta, dicho claro (se toma de la cuenta principal) */
+  function sinCuentaTexto() { var p = ORIG().principal; return p ? 'Sin cuenta · sale de ' + p : 'Sin cuenta'; }
   function cuentasFamilia() { var o = familia(); return Object.keys(o).filter(function (k) { return !o[k].pausada; }).map(function (k) { return 'Familia ••' + k; }); }
   function cuentaValida(n) { return !!n && (!!cuentaPorNombre(n) || cuentasFamilia().indexOf(n) >= 0); }
   function etiquetaFamilia(k) { var x = infoFamilia(k); return '👪 ' + x.persona + ' · ' + x.nombre + ' ••' + x.u4; }
@@ -4221,7 +4225,7 @@ var App = (function () {
       }).join('') + (sinServidorSobres() ? '' : '<button class="chip" onclick="App.formMover()">Mover</button>') + '<button class="chip" onclick="App.formAcciones()">Otros ⋯</button></div>' +
       '<button class="rap-pegar" onclick="App.rapPegar()">📋 <span>Pegar mensaje del banco</span></button>' +
       '<div class="rap-fila"><button class="chip" onclick="App.rapMoneda()" aria-label="Cambiar moneda">₡ ⇄ $</button>' +
-      '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, 'Sin cuenta (efectivo)') +
+      '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, sinCuentaTexto()) +
         (rap.tipo === 'Gasto' ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') + '</select></div>' +
       '<div class="rap-monto" id="rp-monto">' + textoMontoRapido() + '<i></i></div>' +
       (fr.length ? '<div class="chips rap-frec">' + fr.map(function (f, i) {
