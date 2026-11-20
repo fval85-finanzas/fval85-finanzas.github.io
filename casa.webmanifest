@@ -1,0 +1,17 @@
+{
+  "id": "casa",
+  "name": "Súper de la casa",
+  "short_name": "Súper",
+  "description": "Presupuesto del súper por corte",
+  "lang": "es",
+  "start_url": "casa.html",
+  "scope": "./casa",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121417",
+  "theme_color": "#121417",
+  "icons": [
+    { "src": "icons/casa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/casa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

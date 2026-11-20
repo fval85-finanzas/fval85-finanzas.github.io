@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que abra rápido y avisa cuando hay una versión nueva.
 // Al publicar cambios, subí el número de VERSION (y el de VERSION_WEB en js/app.js).
-const VERSION = '2.17.1';
+const VERSION = '2.18.0';
 const CACHE = 'misfinanzas-' + VERSION;
 const ARCHIVOS = [
   './', './index.html', './manifest.webmanifest', './css/estilos.css', './js/calculos.js', './js/tiendas.js', './js/pdf.js', './js/app.js', './js/lector.js', './js/ocr-worker.js', './js/vendor/pdf-lib.min.js',
@@ -54,7 +54,7 @@ self.addEventListener('fetch', (e) => {
   }
   const url = new URL(req.url);
   if (url.origin !== location.origin) return; // Google (datos y fuentes): directo a la red
-  if (/\/(version\.json|servidor\/)/.test(url.pathname) || /lista\.html$|lista\.js$/.test(url.pathname)) return; // v2.5: siempre lo más nuevo
+  if (/\/(version\.json|servidor\/)/.test(url.pathname) || /lista\.html$|lista\.js$|casa\.html$|casa\.js$|casa-sw\.js$|casa\.webmanifest$/.test(url.pathname)) return; // v2.5: siempre lo más nuevo
   e.respondWith((async () => {
     const c = await caches.open(CACHE);
     const hit = await c.match(req, { ignoreSearch: true });

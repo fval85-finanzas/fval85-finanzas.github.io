@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121417">
+  <meta name="robots" content="noindex">
+  <title>Súper de la casa</title>
+  <link rel="manifest" href="casa.webmanifest">
+  <link rel="icon" href="icons/casa-192.png">
+  <link rel="apple-touch-icon" href="icons/casa-192.png">
+  <style>
+    :root { --fondo: #121417; --tarjeta: #1C1F24; --tarjeta2: #24272c; --texto: #ECEEF0; --suave: #9AA1AB; --borde: #2A2E35; --verde: #3DD68C; --acento: #F5B82E; --naranja: #FF8A3D; --rojo: #FF7B7B; }
+    @media (prefers-color-scheme: light) { :root { --fondo: #F4F1EA; --tarjeta: #FFFFFF; --tarjeta2: #EEEAE2; --texto: #1B1B1B; --suave: #6B6B6B; --borde: #E2DDD3; --verde: #1F8F55; --acento: #C8862B; --naranja: #C25A12; --rojo: #C0392B; } }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, button, input { touch-action: manipulation; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--fondo); color: var(--texto); padding: calc(14px + env(safe-area-inset-top)) 16px calc(30px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; overflow-x: hidden; }
+    .suave { color: var(--suave); } .chico { font-size: 13px; } .verde { color: var(--verde); } .naranja { color: var(--naranja); } .rojo { color: var(--rojo); }
+    .cab { text-align: center; margin: 6px 0 12px; } .cab .ic { font-size: 34px; } .cab h1 { font-size: 22px; font-weight: 800; }
+    .caja { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 18px; padding: 14px; margin-top: 10px; }
+    .fila { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .grande { font-size: 25px; font-weight: 800; }
+    .barra { height: 10px; border-radius: 5px; background: var(--tarjeta2); overflow: hidden; margin: 10px 0 4px; position: relative; } .barra i { display: block; height: 100%; border-radius: 5px; }
+    .barra b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--texto); opacity: .5; }
+    .tip { margin-top: 10px; font-size: 14px; border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--acento) 12%, transparent); }
+    .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .btn { display: block; width: 100%; border: 0; border-radius: 14px; padding: 14px; font: inherit; font-weight: 800; font-size: 15.5px; cursor: pointer; background: var(--acento); color: #111; }
+    .btn.sec { background: transparent; border: 1.5px solid var(--borde); color: var(--texto); }
+    .btn.peligro { background: transparent; border: 1.5px solid var(--rojo); color: var(--rojo); }
+    .btn:disabled { opacity: .5; }
+    .sec-t { font-size: 12px; font-weight: 800; letter-spacing: .5px; color: var(--suave); margin: 18px 4px 4px; }
+    .mov { display: flex; gap: 10px; align-items: center; width: 100%; padding: 10px 2px; border: 0; border-bottom: 1px solid var(--borde); background: none; color: var(--texto); font: inherit; text-align: left; }
+    .mov:last-child { border-bottom: 0; }
+    .mov .ico { width: 36px; height: 36px; border-radius: 11px; background: var(--tarjeta2); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+    .mov .t { flex: 1; min-width: 0; } .mov .t b { display: block; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mov .t span { font-size: 12px; color: var(--suave); }
+    .mov .m { text-align: right; font-weight: 800; white-space: nowrap; } .mov .m span { display: block; font-size: 11px; font-weight: 600; }
+    .mov.est { border: 1px dashed var(--naranja); border-radius: 12px; padding: 8px; margin: 4px 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chip { border: 1.5px solid var(--borde); background: none; color: var(--texto); border-radius: 999px; padding: 8px 13px; font: inherit; font-size: 14px; }
+    .chip.on { background: var(--acento); border-color: var(--acento); color: #111; font-weight: 700; }
+    label.campo { display: block; margin-top: 12px; font-size: 13px; color: var(--suave); }
+    label.campo input { display: block; width: 100%; height: 48px; border-radius: 12px; border: 1px solid var(--borde); background: var(--tarjeta); color: var(--texto); padding: 0 12px; font: inherit; font-size: 16px; margin-top: 5px; }
+    input.monto { text-align: center; font-size: 34px !important; font-weight: 800; height: 64px !important; }
+    .velo { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: flex-end; justify-content: center; z-index: 10; }
+    .velo.ver { display: flex; }
+    .panel { background: var(--fondo); width: 100%; max-width: 560px; max-height: 94vh; overflow-y: auto; overflow-x: hidden; border-radius: 22px 22px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+    .panel h2 { font-size: 20px; }
+    .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #000d; color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; }
+    .toast.ver { opacity: 1; }
+    .vivo { font-size: 12px; text-align: center; color: var(--suave); margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div id="app"><div class="suave" style="text-align:center;margin-top:40vh">Abriendo…</div></div>
+  <div class="velo" id="velo" onclick="if (event.target === this) K.cerrar()"><div class="panel" id="panel"></div></div>
+  <div class="toast" id="toast"></div>
+  <script src="js/calculos.js"></script>
+  <script src="js/casa.js"></script>
+</body>
+</html>

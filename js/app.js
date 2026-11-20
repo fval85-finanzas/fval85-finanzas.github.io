@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.17.1';
+  var VERSION_WEB = '2.18.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -3655,10 +3655,17 @@ var App = (function () {
       (atras ? ln(r.quedan >= 0 ? 'Sobraron' : 'Se pasaron', din(Math.abs(r.quedan), 'CRC'), 'color:' + col) : ln('Días del corte', per.dia + ' de ' + per.dias)) +
       ln('Promedio por día', din(r.promedio, 'CRC')) +
       (!atras && per.faltan > 0 && r.quedan > 0 ? ln('Para no pasarse', din(r.porDia, 'CRC') + ' por día', 'color:' + PR_VERDE) : '') +
-      ln('Compras', String(r.n)) + '</div>';
+      (r.devoluciones > 0.004 || r.estimado > 0.004 ? ln('Compras', din(r.brutas, 'CRC')) : '') +
+      (r.devoluciones > 0.004 ? ln('Devoluciones', '−' + din(r.devoluciones, 'CRC'), 'color:' + PR_VERDE) : '') +
+      (r.estimado > 0.004 ? ln('Incluye por confirmar', '≈ ' + din(r.estimado, 'CRC'), 'color:' + PR_NARANJA) : '') +
+      ln('Movimientos', String(r.n)) + '</div>';
     if (!atras && r.monto > 0) h += '<div class="caja" style="gap:2px;margin-top:10px"><div class="suave chico fuerte">RITMO DEL CORTE</div>' + svgRitmo(r) + '</div>';
     h += '<div class="caja sinpad" style="margin-top:10px"><div class="fila" style="padding:10px 14px 2px"><span class="suave chico fuerte">COMPRAS DEL CORTE · ' + r.n + '</span>' + (atras ? '' : '<button class="chip" onclick="App.cerrar();App.formRapido(\'Gasto\',\'' + q(cfg.cuenta) + '\')">＋ Compra</button>') + '</div>' +
-      (r.compras.length ? r.compras.slice(0, 40).map(function (x) { var m = x.mov; return '<button class="pr-mov" onclick="App.cerrar();App.formMovimiento(' + m.fila + ')"><span><b>' + esc(nombreBonito(m.comercio) || 'Compra') + '</b><span class="suave chico">' + esc(fechaSinAnio(new Date(m.fecha)) + (m.categoria ? ' · ' + m.categoria : '') + (m.origen === 'Manual' ? ' · a mano' : '')) + '</span></span><b>' + din(m.monto, m.moneda) + '</b></button>'; }).join('') : '<div class="suave chico" style="padding:10px 14px">Sin compras en este corte.</div>') + '</div>';
+      (r.compras.length ? r.compras.slice(0, 40).map(function (x) {
+        var m = x.mov, est = porConfirmar(m);
+        return '<button class="pr-mov"' + (est ? ' style="border:1px dashed ' + PR_NARANJA + ';border-radius:10px"' : '') + ' onclick="App.cerrar();App.formMovimiento(' + m.fila + ')"><span><b>' + esc((nombreBonito(m.comercio) || 'Compra') + (x.devolucion ? ' · devolución' : '')) + '</b><span class="suave chico">' + esc(fechaSinAnio(new Date(m.fecha)) + (m.categoria ? ' · ' + m.categoria : '') + ' · ' + quienAnoto(m)) + '</span></span>' +
+          '<span style="text-align:right"><b' + (x.devolucion ? ' style="color:' + PR_VERDE + '"' : '') + '>' + (x.devolucion ? '−' : est ? '≈ ' : '') + din(m.monto, m.moneda) + '</b>' + (est ? '<span class="chico" style="display:block;color:' + PR_NARANJA + '">por confirmar</span>' : '') + '</span></button>';
+      }).join('') : '<div class="suave chico" style="padding:10px 14px">Sin compras en este corte.</div>') + '</div>';
     var hist = C.historialCorte(d, cfg, hoy, 6), conDatos = hist.filter(function (x) { return x.n > 0; });
     while (hist.length && !hist[hist.length - 1].n) hist.pop();   // los cortes de antes de que hubiera compras no se muestran
     if (!atras && conDatos.length) {
@@ -3672,8 +3679,51 @@ var App = (function () {
         }).join('') + '</div>';
       if (dif !== null) h += '<div class="suave chico" style="text-align:center;margin-top:6px">' + (dif <= 0 ? 'Llevan ' + din(-dif, 'CRC') + ' menos que en todo el corte anterior.' : 'Ya gastaron ' + din(dif, 'CRC') + ' más que en todo el corte anterior.') + '</div>';
     }
-    h += '<div class="acciones"><button class="btn sec" onclick="App.formCorte(' + i + ')">⚙ Ajustar</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>';
+    h += '<div class="acciones"><button class="btn sec" onclick="App.formCasa(' + i + ')">📲 App para ' + esc(C.esFamilia({ cuenta: cfg.cuenta }) ? infoFamilia(cfg.cuenta).persona : 'la casa') + '</button><button class="btn sec" onclick="App.formCorte(' + i + ')">⚙ Ajustar</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>';
     abrir(h);
+  }
+  // ---------------- v2.18 · App de la casa: un link para que otra persona vea y anote SOLO este presupuesto por corte
+  var CASA = { i: -1, e: null };
+  function linkCasa(e) { return location.href.split(/[?#]/)[0].replace(/[^/]*$/, '') + 'casa.html#s=' + encodeURIComponent(e.implementacion) + '&k=' + encodeURIComponent(e.token); }
+  function haceIso(iso) { if (!iso) return 'todavía no'; var s2 = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); return s2 < 120 ? 'hace un momento' : s2 < 3600 ? 'hace ' + Math.round(s2 / 60) + ' min' : s2 < 86400 ? 'hace ' + Math.round(s2 / 3600) + ' h' : fechaCorta(iso); }
+  function formCasa(i) {
+    var cfg = cortesCfg()[i]; if (!cfg) return;
+    CASA.i = i;
+    abrir('<h2>📲 App para ' + esc(C.esFamilia({ cuenta: cfg.cuenta }) ? infoFamilia(cfg.cuenta).persona : 'la casa') + '</h2><div class="suave">Revisando…</div>');
+    srv('casaEstado', [cfg.cuenta], function (e) { CASA.e = e; pintarCasa(); }, null, function () { cerrar(); });
+  }
+  function pintarCasa() {
+    var cfg = cortesCfg()[CASA.i], e = CASA.e || {}; if (!cfg) return;
+    var per = C.esFamilia({ cuenta: cfg.cuenta }) ? infoFamilia(cfg.cuenta).persona : '';
+    var h = '<h2>📲 App para ' + esc(e.persona || per || 'la casa') + '</h2><div class="suave">Una app aparte con su propio ícono, solo con <b>' + esc(cfg.nombre || 'el súper') + '</b>: gastado, lo que queda, por día, las compras y los cortes anteriores. A su teléfono <b>no llega nada más</b>: ni tus cuentas, ni sobres, ni tu presupuesto.</div>';
+    if (!e.activo) {
+      h += '<label class="campo"><span>¿Para quién es?</span><input id="cs-per" value="' + esc(per) + '" placeholder="Nombre"></label>' +
+        '<div class="acciones"><button class="btn" onclick="App.casaCrear(this)">Crear el link</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>';
+      return abrir(h);
+    }
+    var link = linkCasa(e), msg = '🛒 ' + (cfg.nombre || 'Súper de la casa') + ': abrí este link y, en Chrome, tocá ⋮ → «Agregar a la pantalla principal» para tenerla como app. ' + link;
+    h += '<div class="caja" style="margin-top:10px;gap:4px"><div class="fila"><b>🔗 Link activo</b><span class="suave chico">entró ' + esc(haceIso(e.ultima)) + '</span></div>' +
+      '<div style="font-family:monospace;font-size:12px;background:var(--fondo);border-radius:8px;padding:8px;word-break:break-all">' + esc(link.replace(/k=.*/, 'k=••••••••')) + '</div>' +
+      '<div class="dos" style="margin-top:6px"><a class="btn" style="background:#25D366;color:#111;text-align:center;text-decoration:none" href="https://wa.me/?text=' + encodeURIComponent(msg) + '" target="_blank" rel="noopener">WhatsApp</a><button class="btn sec" onclick="App.casaCopiar()">Copiar</button></div></div>' +
+      '<div class="caja" style="margin-top:10px;gap:2px"><div class="suave chico fuerte">QUÉ PUEDE HACER</div>' +
+      '<div class="fila"><span>👀 Ver el súper</span><b class="verde">siempre</b></div>' +
+      '<div class="fila"><span>➕ Anotar compras y devoluciones</span>' + interruptor('cs-anotar', e.anotar, 'App.casaPermiso(\'anotar\',this.checked)', 'Anotar') + '</div>' +
+      '<div class="fila"><span>✏️ Corregir o borrar lo que anotó</span>' + interruptor('cs-corregir', e.corregir, 'App.casaPermiso(\'corregir\',this.checked)', 'Corregir') + '</div></div>' +
+      '<div class="suave chico" style="margin-top:8px">Lo que anota entra a la tarjeta de la casa con la nota «app de la casa». Si después llega el correo del banco con el mismo monto, se une sola.</div>' +
+      '<div class="acciones"><button class="btn sec" onclick="App.casaNuevo(this)">⟲ Link nuevo</button><button class="btn peligro" onclick="App.casaApagar(this)">Apagar el link</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>';
+    abrir(h);
+  }
+  function casaCrear(b) { var cfg = cortesCfg()[CASA.i]; srv('casaLink', [cfg.cuenta, { persona: val('cs-per').trim() }], function (e) { CASA.e = e; pintarCasa(); toast('🔗 Link listo: mandáselo por WhatsApp'); }, b); }
+  function casaNuevo(b) { if (!confirm('¿Hacer un link nuevo? El anterior deja de funcionar y hay que mandarle el nuevo.')) return; var cfg = cortesCfg()[CASA.i]; srv('casaLink', [cfg.cuenta, { nuevo: true }], function (e) { CASA.e = e; pintarCasa(); toast('⟲ Link nuevo: el anterior ya no sirve'); }, b); }
+  function casaApagar(b) { if (!confirm('¿Apagar el link? La app de ella deja de funcionar al instante.')) return; var cfg = cortesCfg()[CASA.i]; srv('casaApagar', [cfg.cuenta], function () { CASA.e = { activo: false }; pintarCasa(); toast('Link apagado'); }, b); }
+  function casaPermiso(k, v) { var cfg = cortesCfg()[CASA.i], p = {}; p[k] = !!v; srv('casaPermisos', [cfg.cuenta, p], function (e) { CASA.e = e; toast(v ? 'Listo: puede ' + (k === 'anotar' ? 'anotar' : 'corregir') : 'Listo: ya no puede ' + (k === 'anotar' ? 'anotar' : 'corregir')); }); }
+  function casaCopiar() { var t = linkCasa(CASA.e); if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { toast('📋 Link copiado'); }, function () { toast('No se pudo copiar'); }); }
+  /** v2.18: quién anotó un movimiento: el correo del banco, vos, o ella desde la app de la casa */
+  function quienAnoto(m) {
+    var x = String(m.nota || '').match(/app de la casa(?: · ([^·]+))?/i);
+    if (x) return 'anotó ' + (x[1] ? x[1].trim() : 'ella');
+    if (/^IVA-/.test(m.autorizacion || '') && porConfirmar(m)) return 'estimado';
+    return m.origen === 'Correo' ? 'correo' : m.origen === 'Manual' ? 'a mano' : (m.origen || '').toLowerCase();
   }
   function formCortes() {
     var l = cortesCfg();
@@ -4217,20 +4267,24 @@ var App = (function () {
     var fr = frecuentes(rap.tipo);
     var cuentas = D.cuentas.filter(function (c) { return c.activa; }).map(function (c) { return c.nombre; });
     var ic = iconoMov({ tipo: rap.tipo, categoria: rap.categoria || (rap.tipo === 'Gasto' ? '' : 'x') });
-    var resumen = rap.tipo === 'Gasto' && !rap.categoria ? '<span class="naranja">Sin categoría</span>' : esc(rap.categoria || rap.tipo);
+    var devF = C.esFamilia({ cuenta: rap.cuenta }) && rap.tipo === 'Ingreso';
+    if (devF) fr = [];   // v2.18: en una devolución de la tarjeta de la casa no sirven los ingresos frecuentes (salario, SINPE…)
+    var resumen = rap.tipo === 'Gasto' && !rap.categoria ? '<span class="naranja">Sin categoría</span>' : esc(devF ? '↩ Devolución' : rap.categoria || rap.tipo);
     resumen = (rap.comercio ? '<b>' + esc(nombreBonito(rap.comercio)) + '</b> · ' : '') + resumen + (rap.sobre ? ' · ✉ ' + esc(rap.sobre) : '') + ' · hoy';
+    var fam = C.esFamilia({ cuenta: rap.cuenta }), dev = fam && rap.tipo === 'Ingreso';
     abrir('<div class="rap">' +
-      '<div class="chips rap-tipos">' + [['Gasto', 'Gasto'], ['Ingreso', 'Ingreso']].map(function (t) {
+      '<div class="chips rap-tipos">' + (fam ? [['Gasto', 'Compra'], ['Ingreso', '↩ Devolución']] : [['Gasto', 'Gasto'], ['Ingreso', 'Ingreso']]).map(function (t) {   // v2.18: con la tarjeta de la familia, "Ingreso" es una devolución / crédito
         return '<button class="chip' + (rap.tipo === t[0] ? ' on' : '') + '" onclick="App.rapTipo(\'' + t[0] + '\')">' + t[1] + '</button>';
       }).join('') + (sinServidorSobres() ? '' : '<button class="chip" onclick="App.formMover()">Mover</button>') + '<button class="chip" onclick="App.formAcciones()">Otros ⋯</button></div>' +
       '<button class="rap-pegar" onclick="App.rapPegar()">📋 <span>Pegar mensaje del banco</span></button>' +
       '<div class="rap-fila"><button class="chip" onclick="App.rapMoneda()" aria-label="Cambiar moneda">₡ ⇄ $</button>' +
       '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, sinCuentaTexto()) +
-        (rap.tipo === 'Gasto' ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') + '</select></div>' +
-      '<div class="rap-monto" id="rp-monto">' + textoMontoRapido() + '<i></i></div>' +
+        (rap.tipo === 'Gasto' || fam ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') + '</select></div>' +
+      '<div class="rap-monto" id="rp-monto"' + (dev ? ' style="color:var(--positivo)"' : '') + '>' + textoMontoRapido() + '<i></i></div>' +
+      (fam ? '<div id="rp-corte">' + textoCorteRapido() + '</div>' : '') +
       (fr.length ? '<div class="chips rap-frec">' + fr.map(function (f, i) {
         return '<button class="chip' + (rap.frec === i ? ' on' : '') + '" onclick="App.rapFrecuente(' + i + ')">' + (f.categoria ? iconoMov({ tipo: rap.tipo, categoria: f.categoria })[0] : '•') + ' ' + esc(nombreSug(f.nombre)) + '</button>';
-      }).join('') + '</div>' : '<div class="suave chico">Cuando registres algunos, aquí te salen los frecuentes para llenarlos de un toque.</div>') +
+      }).join('') + '</div>' : devF ? '' : '<div class="suave chico">Cuando registres algunos, aquí te salen los frecuentes para llenarlos de un toque.</div>') +
       '<button class="rap-resumen" onclick="App.rapDetalles()"><span class="ico-cat" style="width:30px;height:30px;font-size:14px;background:color-mix(in srgb, ' + ic[1] + ' 18%, transparent);color:' + ic[1] + '">' + ic[0] + '</span><span class="li-t">' + resumen + '</span><span class="enlace">Cambiar ›</span></button>' +
       '<div class="teclado">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', '⌫'].map(function (k) {
         return '<button onclick="App.rapTecla(\'' + k + '\')"' + (k === '⌫' ? ' aria-label="Borrar"' : '') + '>' + k + '</button>';
@@ -4247,9 +4301,17 @@ var App = (function () {
       s = s === '0' ? k : s + k;
     }
     rap.monto = s;
-    var e = $('rp-monto'); if (e) e.innerHTML = textoMontoRapido() + '<i></i>';
+    var e = $('rp-monto'); if (e) e.innerHTML = textoMontoRapido() + '<i></i>'; var ec = $('rp-corte'); if (ec) ec.innerHTML = textoCorteRapido();
   }
   function rapTipo(t) { rap.tipo = t; rap.frec = -1; rap.comercio = rap.categoria = rap.sobre = ''; pintarRapido(); }
+  /** v2.18: con la tarjeta de la familia, cómo queda el presupuesto por corte con este monto */
+  function textoCorteRapido() {
+    var co = C.corteDe(DP(), { cuenta: rap.cuenta }); if (!co || co.on === false) return '';
+    var r = C.presupuestoCorte(DP(), co, hoy), v = montoRapido() || 0, dev = rap.tipo === 'Ingreso';
+    if (!v) return '<div class="suave chico" style="text-align:center">' + (dev ? 'Se resta' : 'Se suma') + ' a ' + esc(co.nombre || 'Súper') + ' · quedan ' + din(r.quedan, 'CRC') + '</div>';
+    var q2 = r.quedan + (dev ? v : -v);
+    return '<div class="chico" style="margin:4px 0;background:color-mix(in srgb, ' + (dev ? 'var(--positivo)' : 'var(--acento)') + ' 12%, transparent);border-radius:10px;padding:7px 10px">' + (dev ? 'Se resta de lo gastado en ' : 'Entra a ') + '<b>' + esc(co.nombre || 'Súper') + '</b>: quedan <b' + (q2 < 0 ? ' class="rojo"' : '') + '>' + din(q2, 'CRC') + '</b> en vez de ' + din(r.quedan, 'CRC') + '.</div>';
+  }
   function rapMoneda() { rap.moneda = rap.moneda === 'USD' ? 'CRC' : 'USD'; pintarRapido(); }
   function rapCuenta(v) { rap.cuenta = v; var c = cuentaPorNombre(v); if (c && !rap.monto) rap.moneda = c.moneda || rap.moneda; if (C.esFamilia({ cuenta: v })) rap.sobre = ''; pintarRapido(); }
   function rapFrecuente(i) {
@@ -4269,7 +4331,8 @@ var App = (function () {
     if (!(monto > 0)) return toast('Escribí el monto.');
     var m = { fila: null, control: null, fecha: new Date().toISOString(), monto: monto, moneda: rap.moneda, tipo: rap.tipo, comercio: rap.comercio || '', lugar: '',
       cuenta: rap.cuenta, categoria: rap.categoria, sobre: C.esFamilia({ cuenta: rap.cuenta }) ? '' : rap.sobre, nota: '', origen: 'Manual', autorizacion: '', recordarRegla: false };
-    if (C.esFamilia(m)) m.nota = 'Tarjeta de la familia · anotada a mano';
+    if (C.esFamilia(m)) m.nota = m.tipo === 'Ingreso' ? 'Devolución / crédito · anotada a mano' : 'Tarjeta de la familia · anotada a mano';
+    if (C.esFamilia(m) && m.tipo === 'Ingreso' && !m.comercio) m.comercio = 'Devolución';
     guardar('mf-rap-cuenta', rap.cuenta || '');
     encolar('guardarMovimiento', [m], 'Nuevo: ' + (nombreBonito(m.comercio) || m.categoria || m.tipo) + ' · ' + txt(monto, m.moneda));
     hecho('✅ ' + (m.tipo === 'Ingreso' ? 'Ingreso' : 'Gasto') + ' de ' + txt(monto, m.moneda) + ' guardado');
@@ -7272,6 +7335,8 @@ var App = (function () {
     }
     if (m.para) return '🤝 Para ' + m.para + ' (Me deben)';
     if (m.tipo === 'Cuota tasa cero') return '◷ Cuota tasa cero cargada al corte · no pide sobre';
+    var coF = C.esFamilia(m) && C.corteDe(DP(), m);
+    if (coF && coF.on !== false) return '🛒 ' + (coF.nombre || 'Presupuesto por corte') + (m.tipo === 'Ingreso' ? ' · devolución: se resta del corte' : ' · cuenta en el corte');
     if (C.esFamilia(m)) return '👪 Tarjeta de ' + infoFamilia(m.cuenta).persona + ' · solo cuenta en viajes';
     if (C.esCompraTarjeta(D, m)) return 'Suma a la deuda de ' + etiquetaCuenta(m.cuenta) + (m.categoria ? ' · ' + m.categoria : '');
     if (C.esSacarMeter(m)) return (m.tipo === C.TIPO_SACAR ? '📤 Sale del sobre ' : '📥 Entra al sobre ') + nomSobre(m.sobre) + (m.tipo === C.TIPO_SACAR ? ' → disponible' : ' ← disponible');
@@ -7384,7 +7449,7 @@ var App = (function () {
         } else if (a.tipo === 'repetido') {
           return htmlRepetido(a.a, m, true);
         } else if (a.tipo === 'iva') {
-          cuerpo = '<div class="rev-q">Llegó en dólares' + (/cobro original/i.test(m.nota || '') ? ' (lo pasé a colones)' : '') + '. ¿El banco le cobra el IVA aparte?</div><div class="chips">' +
+          cuerpo = '<div class="rev-q">' + (esCobroDolares(m) ? 'Llegó en dólares' + (/cobro original/i.test(m.nota || '') ? ' (lo pasé a colones)' : '') + '. ' : 'Es un servicio del exterior. ') + '¿El banco le cobra el IVA aparte?</div><div class="chips">' +
             chipRev('🧾 Sí, IVA 13% aparte', 'App.rvIVA(' + f + ',1)', false) + chipRev('No', 'App.rvIVA(' + f + ',0)', false) + '</div><div class="suave chico">Se recuerda para «' + esc(nombreBonito(m.comercio)) + '».</div>';
         } else if (a.tipo === 'direccion') {
           cuerpo = '<div class="rev-q">¿Esta plata entró o salió de ' + esc(m.cuenta || 'la cuenta') + '?</div><div class="chips">' +
@@ -7500,6 +7565,9 @@ var App = (function () {
   var IVA_TASA = 0.13;
   function claveIVA(m) { return C.normNom(m.comercio || '').replace(/[^a-z0-9 ]/g, '').split(' ').slice(0, 2).join(' '); }
   function esCobroDolares(m) { return m.tipo === 'Gasto' && (/cobro original \$/i.test(m.nota || '') || (m.moneda === 'USD' && C.esTarjeta(D, m.cuenta))); }
+  /** v2.18: servicios digitales del exterior: el banco suele cobrar el IVA aparte aunque el cobro llegue en colones (ej. Google One en la tarjeta de la casa) */
+  var SERVICIO_DIGITAL = /google|netflix|spotify|apple\.com|itunes|icloud|disney|hbo|\bmax\b|prime video|amazon prime|youtube|microsoft|xbox|playstation|openai|chatgpt|dropbox|adobe|canva|crunchyroll|paramount|deezer|duolingo|anthropic|claude\.ai/i;
+  function esCobroConIVA(m) { return esCobroDolares(m) || (m.tipo === 'Gasto' && SERVICIO_DIGITAL.test(m.comercio || '') && (C.esTarjeta(D, m.cuenta) || C.esFamilia(m))); }
   function ivaPrefs() { return PREFS().iva || {}; }
   function esIVA(m) { return /^IVA · /.test(m.comercio || ''); }
   function porConfirmar(m) { return /monto estimado|IVA estimado/i.test(m.nota || ''); }
@@ -7507,7 +7575,7 @@ var App = (function () {
   function preguntasIVA() {
     var p = ivaPrefs(), lim = hoy.getTime() - DIAS_REV * 86400000, vistas = {};
     return D.movimientos.filter(function (m) {
-      if (m.fila <= 0 || !m.fecha || new Date(m.fecha).getTime() < lim || !esCobroDolares(m) || esIVA(m)) return false;
+      if (m.fila <= 0 || !m.fecha || new Date(m.fecha).getTime() < lim || !esCobroConIVA(m) || esIVA(m)) return false;
       var k = claveIVA(m); if (!k || p[k] !== undefined || vistas[k]) return false;
       vistas[k] = 1; return true;
     });
@@ -7519,14 +7587,14 @@ var App = (function () {
     ya.forEach(function (k) { hechos[k] = 1; });   // si borrás un IVA, no se vuelve a crear
     D.movimientos.forEach(function (m) { if (/^IVA-/.test(m.autorizacion || '')) hechos[m.autorizacion] = 1; });
     D.movimientos.forEach(function (m) {
-      if (m.fila <= 0 || !m.fecha || new Date(m.fecha).getTime() < lim || !esCobroDolares(m) || esIVA(m) || p[claveIVA(m)] !== true) return;
+      if (m.fila <= 0 || !m.fecha || new Date(m.fecha).getTime() < lim || !esCobroConIVA(m) || esIVA(m) || p[claveIVA(m)] !== true) return;
       var aut = 'IVA-' + (m.autorizacion || m.fila);
       if (hechos[aut]) return;
       hechos[aut] = 1; n++; ya.push(aut);
       var sb = sinServidorSobres() ? [] : (SB().porMov[m.fila] || []).filter(function (x) { return x.sobre; });
       var monto = Math.round(m.monto * IVA_TASA * 100) / 100;
       encolar('guardarMovimiento', [{ fila: null, control: null, fecha: new Date(new Date(m.fecha).getTime() + 60000).toISOString(), monto: monto, moneda: m.moneda, tipo: 'Gasto',
-        comercio: 'IVA · ' + (nombreBonito(m.comercio) || 'cobro'), lugar: '', cuenta: m.cuenta, categoria: m.categoria || '', sobre: (sb[0] && sb[0].sobre) || m.sobre || '',
+        comercio: 'IVA · ' + (nombreSug(nombreBonito(m.comercio)) || 'cobro'), lugar: '', cuenta: m.cuenta, categoria: m.categoria || '', sobre: C.esFamilia(m) ? '' : (sb[0] && sb[0].sobre) || m.sobre || '',
         nota: 'IVA estimado (13%) · se confirma cuando el banco lo aplique', origen: 'Manual', autorizacion: aut, recordarRegla: false }], 'IVA · ' + (m.comercio || 'cobro') + ' · ' + txt(monto, m.moneda));
     });
     if (n) guardar('mf-iva-hechos', JSON.stringify(ya.slice(-300)));
@@ -7570,7 +7638,7 @@ var App = (function () {
     abrir('<h2>🧾 Cobros con IVA aparte</h2><div class="suave">Servicios del exterior (Netflix, Disney+…) a los que el banco les cobra el IVA en un movimiento aparte. La app anota el IVA estimado sola y vos lo confirmás.</div>' +
       (ks.length ? '<div class="caja sinpad" style="margin-top:10px">' + ks.map(function (k) {
         return '<div class="fila-rep" style="padding:10px 14px"><span>' + esc(k) + '</span><span class="chips" style="flex-wrap:nowrap">' + chipRev('Sí', 'App.ivaCambiar(\'' + q(k) + '\',1)', p[k]) + chipRev('No', 'App.ivaCambiar(\'' + q(k) + '\',0)', !p[k]) + '</span></div>';
-      }).join('') + '</div>' : '<div class="caja vacio" style="margin-top:10px">Todavía no hay. La app te pregunta la primera vez que llega un cobro en dólares.</div>') +
+      }).join('') + '</div>' : '<div class="caja vacio" style="margin-top:10px">Todavía no hay. La app te pregunta la primera vez que llega un cobro en dólares o de un servicio del exterior (Google, Netflix…).</div>') +
       '<div class="acciones"><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>');
   }
   function ivaCambiar(k, si) { var o = Object.assign({}, ivaPrefs()); o[k] = !!si; guardarPrefs({ iva: o }, 'IVA aparte: ' + k); formIVA(); }
@@ -7994,6 +8062,7 @@ var App = (function () {
     formActualizarFondo: formActualizarFondo, vistaFondo: vistaFondo, guardarActualizarFondo: guardarActualizarFondo,
     verViaje: verViaje, formViaje: formViaje, guardarViaje: guardarViaje, borrarViaje: borrarViaje, formLimiteViaje: formLimiteViaje,
     guardarLimiteViaje: guardarLimiteViaje, formCompraViaje: formCompraViaje, marcarViaje: marcarViaje, formAgregarViaje: formAgregarViaje,
+    formCasa: formCasa, casaCrear: casaCrear, casaNuevo: casaNuevo, casaApagar: casaApagar, casaPermiso: casaPermiso, casaCopiar: casaCopiar,
     verCorte: verCorte, formCortes: formCortes, formCorte: formCorte, corteCuenta: corteCuenta, corteNota: corteNota, guardarCorte: guardarCorte, quitarCorte: quitarCorte,
     verTC: verTC, formAbonoTC: formAbonoTC, abonoCompra: abonoCompra, abonoVista: abonoVista, abonoTipo: abonoTipo, repartoMov: repartoMov, repOn: repOn, repSuma: repSuma,
     guardarAbonoTC: guardarAbonoTC, borrarAbonoTC: borrarAbonoTC,

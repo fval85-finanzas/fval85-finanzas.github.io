@@ -1911,7 +1911,7 @@ function revisarCorreosAhora_() {
 // v2.14.0 (#61) · AL ABRIR: TODO AL DÍA SOLO
 // =====================================================================
 /** Lo que la app solo LEE: no cambia la marca de los datos. */
-var LECTURAS_ = { obtenerDatos: 1, obtenerAjustes: 1, resumenAvisos: 1, estadoActualizacion: 1, revisarActualizacion: 1, listas: 1, obtenerLista: 1, fotoLista: 1, probarRecordatorio: 1, probarResumenCorreo: 1 };
+var LECTURAS_ = { obtenerDatos: 1, casaEstado: 1, obtenerAjustes: 1, resumenAvisos: 1, estadoActualizacion: 1, revisarActualizacion: 1, listas: 1, obtenerLista: 1, fotoLista: 1, probarRecordatorio: 1, probarResumenCorreo: 1 };
 /** Marca de "última modificación": cambia cada vez que algo se escribe (app, correos, recurrentes o a mano en la hoja). */
 function marcarCambio_() { try { PropertiesService.getScriptProperties().setProperty('DATOS_VER', String(Date.now())); } catch (e) { console.log('Marca: ' + e); } }
 function marcaDatos_() { return PropertiesService.getScriptProperties().getProperty('DATOS_VER') || '0'; }
@@ -2288,6 +2288,17 @@ function leerCorreos_(guardar) {
     var fila = completarCompra_(tx, cuentas, reglas);
     if (tx.esFamilia) { fila['Sobre'] = ''; resumen.familia = (resumen.familia || 0) + 1; }
     // v2.17 (#67): si ya la anotaste a mano (no llegaba el correo), se une con la tuya en vez de anotarla dos veces
+    // v2.18: el cobro real del IVA de un servicio (Google One, Netflix…) confirma el IVA que la app anotó estimado
+    var est = buscarIVAEstimado_(mov, fila, unidas);
+    if (est) {
+      unidas[est._fila] = true; resumen.unidas = (resumen.unidas || 0) + 1;
+      resumen.detalle.push('🧾 [' + etiquetaBanco + '] ' + fila['Comercio / descripción'] + ' · ' + fila['Monto'] + ' ' + fila['Moneda'] + ' · confirma el IVA estimado (fila ' + est._fila + ')');
+      if (guardar) escribirFila_(mov.hoja, est._fila, mov.cols, {
+        'Monto': Number(fila['Monto']), 'Autorización': fila['Autorización'], 'Origen': 'Correo', 'Fecha': fila['Fecha'],
+        'Nota': 'IVA confirmado con el correo del banco (estimado ' + (num_(est['Monto']) || 0) + ')'
+      });
+      return;
+    }
     var manual = buscarManualIgual_(mov, fila, unidas);
     if (manual) {
       unidas[manual._fila] = true; resumen.unidas = (resumen.unidas || 0) + 1;
@@ -2595,6 +2606,26 @@ function buscarManualIgual_(mov, fila, unidas) {
   return mejor;
 }
 
+/**
+ * v2.18: ¿este cobro del correo es el IVA de un servicio que la app ya anotó como "IVA estimado"?
+ * Misma tarjeta y moneda, el texto del cobro habla de IVA o impuesto, de 2 días antes a 20 días después del estimado,
+ * y el monto se parece (±25 % o ₡300). El más cercano en monto.
+ */
+function buscarIVAEstimado_(mov, fila, unidas) {
+  if (texto_(fila['Tipo']) !== 'Gasto' || !/\biva\b|i\.v\.a|impuesto|valor agregado/i.test(String(fila['Comercio / descripción'] || '') + ' ' + String(fila['Nota'] || ''))) return null;
+  var f0 = new Date(fila['Fecha']).getTime(), cta = texto_(fila['Cuenta / tarjeta']).toLowerCase(), v0 = Number(fila['Monto']) || 0, mejor = null, dm = Infinity;
+  mov.filas.forEach(function (r) {
+    if (unidas[r._fila] || !/^IVA-/.test(texto_(r['Autorización'])) || !/IVA estimado/i.test(texto_(r['Nota']))) return;
+    if (texto_(r['Cuenta / tarjeta']).toLowerCase() !== cta || (texto_(r['Moneda']) || 'CRC') !== (fila['Moneda'] || 'CRC')) return;
+    var fr = new Date(r['Fecha'] && r['Fecha'].getTime ? r['Fecha'].getTime() : r['Fecha']).getTime(), dias = (f0 - fr) / 86400000;
+    if (isNaN(dias) || dias < -2 || dias > 20) return;
+    var v = num_(r['Monto']) || 0, d = Math.abs(v - v0);
+    if (d > Math.max(300, v * 0.25)) return;
+    if (d < dm) { dm = d; mejor = r; }
+  });
+  return mejor;
+}
+
 
 // =====================================================================
 // Ajustes
@@ -2606,7 +2637,7 @@ function buscarManualIgual_(mov, fila, unidas) {
  * activado, api() no responde nada sin una sesión válida.
  */
 
-var VERSION_APP = '2.17.0';
+var VERSION_APP = '2.18.0';
 var MINUTOS_SESION = 12 * 60;      // una sesión con PIN dura hasta 12 horas
 var INTENTOS_MAX = 5;               // después de 5 intentos fallidos, espera 5 minutos
 
@@ -2674,6 +2705,10 @@ var API = {
   cambiarLista: function (id, op, quien) { return cambiarLista_(id, op, quien, false); },
   eliminarLista: function (id) { return eliminarLista_(id); },
   linkLista: function (id, nuevo) { return linkLista_(id, nuevo); },
+  casaEstado: function (cuenta) { return casaEstado_(cuenta); },
+  casaLink: function (cuenta, opc) { return casaLink_(cuenta, opc); },
+  casaPermisos: function (cuenta, p) { return casaPermisos_(cuenta, p); },
+  casaApagar: function (cuenta) { return casaApagar_(cuenta); },
   quitarLinkLista: function (id) { return quitarLinkLista_(id); },
   subirFotoLista: function (id, datos) { return guardarFoto_(id, datos); },
   fotoLista: function (id) { return leerFoto_(id); }
@@ -2688,6 +2723,8 @@ function doPost(e) {
   try {
     var d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     // v2.5: quien abre el link de una lista solo puede tocar esa lista; el aviso del teléfono solo pide el resumen
+    // v2.18: la app de la casa solo ve y anota el presupuesto por corte de su tarjeta
+    if (d.casa) return ContentService.createTextOutput(JSON.stringify((function () { try { return { ok: true, resultado: apiCasa_(d.casa, d.accion, d.args) }; } catch (e4) { return { ok: false, error: String(e4 && e4.message ? e4.message : e4) }; } })())).setMimeType(ContentService.MimeType.JSON);
     if (d.lista) return ContentService.createTextOutput(JSON.stringify((function () { try { return { ok: true, resultado: apiListaLink_(d.lista, d.accion, d.args) }; } catch (e3) { return { ok: false, error: String(e3 && e3.message ? e3.message : e3) }; } })())).setMimeType(ContentService.MimeType.JSON);
     if (d.avisos) {
       if (!llaveAvisosValida_(d.avisos)) throw new Error('LLAVE_AVISOS');
@@ -3412,6 +3449,111 @@ function apiListaLink_(token, accion, args) {
   throw new Error('Acción no permitida.');
 }
 
+// =====================================================================
+// v2.18 · App de la casa: un link privado para que otra persona vea (y anote) SOLO el presupuesto por corte
+// de una tarjeta (ej. el súper de la casa). Nada más de la app sale por aquí.
+// Se guarda en la propiedad CASA: { "<cuenta>": { token, persona, anotar, corregir, creado, ultima } }
+// =====================================================================
+function casaTodo_() { try { return JSON.parse(props_().getProperty('CASA') || '{}'); } catch (e) { return {}; } }
+function casaGuardarTodo_(o) { props_().setProperty('CASA', JSON.stringify(o)); }
+function casaCorte_(cuenta) {
+  var l = (prefs_().cortes || []).filter(function (c) { return c && c.cuenta === cuenta && c.on !== false; });
+  return l[0] || null;
+}
+function casaEstado_(cuenta) {
+  var x = casaTodo_()[cuenta];
+  if (!x || !x.token) return { activo: false };
+  return { activo: true, token: x.token, persona: x.persona || '', anotar: x.anotar !== false, corregir: x.corregir !== false, creado: x.creado || '', ultima: x.ultima || '', implementacion: idImplementacion_() };
+}
+/** Crea el link (o uno nuevo: el anterior deja de servir) */
+function casaLink_(cuenta, opc) {
+  opc = opc || {};
+  if (!casaCorte_(cuenta)) throw new Error('Primero activá el presupuesto por corte de esa tarjeta.');
+  return conBloqueo_(function () {
+    var o = casaTodo_(), x = o[cuenta] || { anotar: true, corregir: true };
+    if (!x.token || opc.nuevo) { x.token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().slice(0, 8); x.creado = new Date().toISOString(); x.ultima = ''; }
+    if (opc.persona !== undefined) x.persona = String(opc.persona || '').trim().slice(0, 30);
+    o[cuenta] = x; casaGuardarTodo_(o);
+    return casaEstado_(cuenta);
+  });
+}
+function casaPermisos_(cuenta, p) {
+  return conBloqueo_(function () {
+    var o = casaTodo_(), x = o[cuenta]; if (!x) throw new Error('No hay link para esa tarjeta.');
+    if (p && p.anotar !== undefined) x.anotar = !!p.anotar;
+    if (p && p.corregir !== undefined) x.corregir = !!p.corregir;
+    if (p && p.persona !== undefined) x.persona = String(p.persona || '').trim().slice(0, 30);
+    o[cuenta] = x; casaGuardarTodo_(o);
+    return casaEstado_(cuenta);
+  });
+}
+function casaApagar_(cuenta) { return conBloqueo_(function () { var o = casaTodo_(); delete o[cuenta]; casaGuardarTodo_(o); return true; }); }
+
+/** Entrada para quien abre el link de la casa (sin la clave de la app). */
+function apiCasa_(token, accion, args) {
+  var cache = CacheService.getScriptCache(), fallos = Number(cache.get('casa_fallos') || 0);
+  if (fallos >= 30) throw new Error('Demasiados intentos. Esperá unos minutos.');
+  var o = casaTodo_(), cuenta = null;
+  Object.keys(o).forEach(function (k) { if (token && String(token).length >= 20 && o[k].token === token) cuenta = k; });
+  if (!cuenta) { cache.put('casa_fallos', String(fallos + 1), 600); throw new Error('Este link ya no sirve. Pedí uno nuevo.'); }
+  var x = o[cuenta], cfg = casaCorte_(cuenta);
+  if (!cfg) throw new Error('El presupuesto del súper está apagado por ahora.');
+  args = args || [];
+  // última vez que entró (como mucho una escritura cada 10 minutos)
+  if (!x.ultima || Date.now() - new Date(x.ultima).getTime() > 600000) { try { var o2 = casaTodo_(); if (o2[cuenta]) { o2[cuenta].ultima = new Date().toISOString(); casaGuardarTodo_(o2); } } catch (e) { console.log(e); } }
+  var persona = x.persona || 'ella';
+  var esDeLaCuenta = function (r) { return texto_(r['Cuenta / tarjeta']).toLowerCase() === cuenta.toLowerCase(); };
+  var filaPropia = function (fila) {
+    var t = leerTabla_('Movimientos', 'Fecha'), r = t.filas.filter(function (z) { return z._fila === Number(fila); })[0];
+    if (!r || !esDeLaCuenta(r) || !/app de la casa/i.test(texto_(r['Nota']))) throw new Error('Solo podés cambiar lo que anotaste vos desde esta app.');
+    return r;
+  };
+  if (accion === 'ver') {
+    var marca = marcaDatos_();
+    if (args[0] && String(args[0]) === String(marca)) return { sinCambios: true, marca: marca };
+    var desde = Calc.periodoCorte(Number(cfg.dia) || 1, new Date(), 6).ini;
+    var movs = leerTabla_('Movimientos', 'Fecha').filas.filter(function (r) {
+      var tp = texto_(r['Tipo']);
+      return (tp === 'Gasto' || tp === 'Ingreso') && esDeLaCuenta(r) && r['Fecha'] && new Date(r['Fecha']) >= desde;
+    }).map(function (r) {
+      return { fila: r._fila, fecha: iso_(r['Fecha']), comercio: texto_(r['Comercio / descripción']), monto: num_(r['Monto']) || 0, moneda: texto_(r['Moneda']) || 'CRC',
+        tipo: texto_(r['Tipo']), cuenta: cuenta, categoria: texto_(r['Categoría']), origen: texto_(r['Origen']), nota: texto_(r['Nota']), autorizacion: /^IVA-/.test(texto_(r['Autorización'])) ? 'IVA-' : '' };
+    });
+    return {
+      marca: marca, cfg: { nombre: cfg.nombre || 'Súper de la casa', monto: Number(cfg.monto) || 0, dia: Number(cfg.dia) || 1, cuenta: cuenta },
+      persona: persona, anotar: x.anotar !== false, corregir: x.corregir !== false,
+      tipoCambio: num_(hoja_('Config').getRange(15, 2).getValue()) || 0, movimientos: movs
+    };
+  }
+  if (accion === 'guardar') {
+    var m = args[0] || {};
+    if (x.anotar === false) throw new Error('Esta app solo deja ver.');
+    var monto = Number(m.monto), tipo = m.tipo === 'Ingreso' ? 'Ingreso' : 'Gasto';
+    if (!(monto > 0) || monto > 10000000) throw new Error('Monto no válido.');
+    var mov = {
+      fecha: m.fecha || new Date().toISOString(), monto: Math.round(monto * 100) / 100, moneda: m.moneda === 'USD' ? 'USD' : 'CRC', tipo: tipo,
+      comercio: String(m.comercio || '').trim().slice(0, 80) || (tipo === 'Ingreso' ? 'Devolución' : 'Compra'), lugar: '', cuenta: cuenta,
+      categoria: tipo === 'Gasto' ? String(m.categoria || 'Supermercado').slice(0, 40) : '', sobre: '', origen: 'Manual', autorizacion: '',
+      nota: (tipo === 'Ingreso' ? 'Devolución / crédito · ' : '') + 'app de la casa · ' + persona
+    };
+    if (m.fila) {
+      if (x.corregir === false) throw new Error('Esta app no deja corregir.');
+      var r0 = filaPropia(m.fila); mov.fila = r0._fila; mov.control = { monto: num_(r0['Monto']) };
+    }
+    var fila = guardarMovimiento_(mov);
+    marcarCambio_();
+    return { fila: fila };
+  }
+  if (accion === 'borrar') {
+    if (x.corregir === false) throw new Error('Esta app no deja borrar.');
+    var r1 = filaPropia(args[0]);
+    eliminarMovimiento_(r1._fila, { monto: num_(r1['Monto']) });
+    marcarCambio_();
+    return true;
+  }
+  throw new Error('Acción no permitida.');
+}
+
 
 // =====================================================================
 // Calculos (copiado de web/js/calculos.js)
@@ -3599,7 +3741,7 @@ var Calc = (function () {
       if (!enMes(m.fecha, mes)) return;
       r.movimientos.push(m);
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
-      if (m.tipo === 'Ingreso') { if (!esCobro(m)) r.ingresos[mon] += m.monto; return; }
+      if (m.tipo === 'Ingreso') { if (!esCobro(m) && !esFamilia(m)) r.ingresos[mon] += m.monto; return; }   // v2.18: una devolución en la tarjeta de la familia no es ingreso tuyo
       if (m.tipo !== 'Gasto' || m.para || esFamilia(m) || efectivoPropioViaje(m)) return;     // v2.10.6: tarjetas de la familia solo cuentan en viajes · v2.2: lo comprado para otra persona no es gasto mío
       r.gastos[mon] += m.monto;
       if (!m.categoria) r.porRevisar++;
@@ -4036,7 +4178,7 @@ var Calc = (function () {
     });
     var sugerencias = [];
     (d.movimientos || []).forEach(function (ing) {
-      if (ing.tipo !== 'Ingreso' || ing.cobro || ing.fila < 0) return;
+      if (ing.tipo !== 'Ingreso' || ing.cobro || ing.fila < 0 || esFamilia(ing)) return;
       var f = new Date(ing.fecha), txt = ((ing.comercio || '') + ' ' + (ing.nota || '')).toLowerCase();
       Object.keys(personas).forEach(function (k) {
         var p = personas[k], previas = p.movs.filter(function (m) { return m.moneda === ing.moneda && new Date(m.fecha) <= f && (f - new Date(m.fecha)) < 150 * 86400000; });
@@ -4421,13 +4563,15 @@ var Calc = (function () {
   /** Gastado en un corte: compras (Gasto) de esa tarjeta entre ini y fin. Todo en colones (los $ al tipo de cambio). */
   function presupuestoCorte(d, cfg, hoy, atras) {
     var per = periodoCorte(Number(cfg.dia) || 1, hoy, atras), t0 = per.ini.getTime(), t1 = per.fin.getTime() + 86400000;
-    var compras = [], gastado = 0, porDia = [];
+    var compras = [], gastado = 0, porDia = [], brutas = 0, devol = 0, estimado = 0;
     for (var i = 0; i < per.dias; i++) porDia.push(0);
     (d.movimientos || []).forEach(function (m) {
-      if (!m.fecha || m.tipo !== 'Gasto' || !esDeCorte(cfg, m)) return;
+      if (!m.fecha || (m.tipo !== 'Gasto' && m.tipo !== 'Ingreso') || !esDeCorte(cfg, m)) return;   // v2.18: Ingreso = devolución / crédito (resta)
       var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
-      var v = enCRC(d, m.monto, m.moneda);
-      gastado += v; compras.push({ mov: m, monto: v });
+      var v = enCRC(d, m.monto, m.moneda) * (m.tipo === 'Ingreso' ? -1 : 1);
+      if (v < 0) devol -= v; else brutas += v;
+      if (/monto estimado|IVA estimado/i.test(m.nota || '')) estimado += v;
+      gastado += v; compras.push({ mov: m, monto: v, devolucion: v < 0 });
       var k = Math.floor((soloFecha(new Date(m.fecha)) - per.ini) / 86400000); if (k >= 0 && k < per.dias) porDia[k] += v;
     });
     compras.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
@@ -4435,7 +4579,7 @@ var Calc = (function () {
     var serie = porDia.slice(0, per.dia).map(function (v) { acum += v; return acum; });
     var ideal = monto * per.dia / per.dias;
     return {
-      cfg: cfg, periodo: per, gastado: gastado, monto: monto, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
+      cfg: cfg, periodo: per, gastado: gastado, monto: monto, brutas: brutas, devoluciones: devol, estimado: estimado, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
       promedio: per.dia ? Math.round(gastado / per.dia) : 0, porDia: Math.floor(per.faltan > 0 ? Math.max(0, quedan) / per.faltan : Math.max(0, quedan)),
       serie: serie, ideal: ideal, ritmo: Math.round(ideal - gastado),   // > 0: van por debajo del ritmo ideal
       estado: !monto ? 'bien' : gastado > monto + 0.001 ? 'pasado' : gastado / monto >= 0.8 ? 'alerta' : (gastado / monto > per.dia / per.dias + 0.10 && gastado / monto >= 0.5) ? 'rapido' : 'bien'

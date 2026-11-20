@@ -181,7 +181,7 @@ var Calc = (function () {
       if (!enMes(m.fecha, mes)) return;
       r.movimientos.push(m);
       var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
-      if (m.tipo === 'Ingreso') { if (!esCobro(m)) r.ingresos[mon] += m.monto; return; }
+      if (m.tipo === 'Ingreso') { if (!esCobro(m) && !esFamilia(m)) r.ingresos[mon] += m.monto; return; }   // v2.18: una devolución en la tarjeta de la familia no es ingreso tuyo
       if (m.tipo !== 'Gasto' || m.para || esFamilia(m) || efectivoPropioViaje(m)) return;     // v2.10.6: tarjetas de la familia solo cuentan en viajes · v2.2: lo comprado para otra persona no es gasto mío
       r.gastos[mon] += m.monto;
       if (!m.categoria) r.porRevisar++;
@@ -618,7 +618,7 @@ var Calc = (function () {
     });
     var sugerencias = [];
     (d.movimientos || []).forEach(function (ing) {
-      if (ing.tipo !== 'Ingreso' || ing.cobro || ing.fila < 0) return;
+      if (ing.tipo !== 'Ingreso' || ing.cobro || ing.fila < 0 || esFamilia(ing)) return;
       var f = new Date(ing.fecha), txt = ((ing.comercio || '') + ' ' + (ing.nota || '')).toLowerCase();
       Object.keys(personas).forEach(function (k) {
         var p = personas[k], previas = p.movs.filter(function (m) { return m.moneda === ing.moneda && new Date(m.fecha) <= f && (f - new Date(m.fecha)) < 150 * 86400000; });
@@ -1003,13 +1003,15 @@ var Calc = (function () {
   /** Gastado en un corte: compras (Gasto) de esa tarjeta entre ini y fin. Todo en colones (los $ al tipo de cambio). */
   function presupuestoCorte(d, cfg, hoy, atras) {
     var per = periodoCorte(Number(cfg.dia) || 1, hoy, atras), t0 = per.ini.getTime(), t1 = per.fin.getTime() + 86400000;
-    var compras = [], gastado = 0, porDia = [];
+    var compras = [], gastado = 0, porDia = [], brutas = 0, devol = 0, estimado = 0;
     for (var i = 0; i < per.dias; i++) porDia.push(0);
     (d.movimientos || []).forEach(function (m) {
-      if (!m.fecha || m.tipo !== 'Gasto' || !esDeCorte(cfg, m)) return;
+      if (!m.fecha || (m.tipo !== 'Gasto' && m.tipo !== 'Ingreso') || !esDeCorte(cfg, m)) return;   // v2.18: Ingreso = devolución / crédito (resta)
       var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
-      var v = enCRC(d, m.monto, m.moneda);
-      gastado += v; compras.push({ mov: m, monto: v });
+      var v = enCRC(d, m.monto, m.moneda) * (m.tipo === 'Ingreso' ? -1 : 1);
+      if (v < 0) devol -= v; else brutas += v;
+      if (/monto estimado|IVA estimado/i.test(m.nota || '')) estimado += v;
+      gastado += v; compras.push({ mov: m, monto: v, devolucion: v < 0 });
       var k = Math.floor((soloFecha(new Date(m.fecha)) - per.ini) / 86400000); if (k >= 0 && k < per.dias) porDia[k] += v;
     });
     compras.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
@@ -1017,7 +1019,7 @@ var Calc = (function () {
     var serie = porDia.slice(0, per.dia).map(function (v) { acum += v; return acum; });
     var ideal = monto * per.dia / per.dias;
     return {
-      cfg: cfg, periodo: per, gastado: gastado, monto: monto, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
+      cfg: cfg, periodo: per, gastado: gastado, monto: monto, brutas: brutas, devoluciones: devol, estimado: estimado, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
       promedio: per.dia ? Math.round(gastado / per.dia) : 0, porDia: Math.floor(per.faltan > 0 ? Math.max(0, quedan) / per.faltan : Math.max(0, quedan)),
       serie: serie, ideal: ideal, ritmo: Math.round(ideal - gastado),   // > 0: van por debajo del ritmo ideal
       estado: !monto ? 'bien' : gastado > monto + 0.001 ? 'pasado' : gastado / monto >= 0.8 ? 'alerta' : (gastado / monto > per.dia / per.dias + 0.10 && gastado / monto >= 0.5) ? 'rapido' : 'bien'

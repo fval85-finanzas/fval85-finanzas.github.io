@@ -1,8 +1,8 @@
 {
- "web": "2.17.1",
- "servidor": "2.17.0",
- "sha256": "65d18a06e4619199841772ca7865f68da856ac4259d09f738d1ff7068cee13c6",
- "novedades": "🛠️ Arreglo: al tocar «Cambiar ›» en el + ya no se pierde la tarjeta de la familia · «Sin cuenta» dice de qué cuenta sale",
+ "web": "2.18.0",
+ "servidor": "2.18.0",
+ "sha256": "76e315acbc0872cf01b75a6c6b44d3a47f4fd13607944c167d975f89fc7b1c5a",
+ "novedades": "🛒 App del súper para ella (link privado) · ↩ devoluciones en la tarjeta de la casa · IVA de Google One por confirmar",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},
