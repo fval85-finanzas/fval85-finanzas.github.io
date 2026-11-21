@@ -1,8 +1,8 @@
 {
- "web": "2.18.0",
- "servidor": "2.18.0",
- "sha256": "76e315acbc0872cf01b75a6c6b44d3a47f4fd13607944c167d975f89fc7b1c5a",
- "novedades": "🛒 App del súper para ella (link privado) · ↩ devoluciones en la tarjeta de la casa · IVA de Google One por confirmar",
+ "web": "2.19.0",
+ "servidor": "2.19.0",
+ "sha256": "e8d15b10ddf67075d1eefeaf27f69b7dc4901629b20cfa8c8cde747f96c0a871",
+ "novedades": "↪ Compras en flotante al cierre del corte · 🧮 calculadora siempre arriba (sin botón flotante) · pegar el número de la calculadora en el +",
  "manifiesto": {
   "timeZone": "America/Costa_Rica",
   "dependencies": {},

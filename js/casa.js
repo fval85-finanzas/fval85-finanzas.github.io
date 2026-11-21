@@ -30,7 +30,7 @@ var K = (function () {
   function cerrar() { $('velo').classList.remove('ver'); $('panel').innerHTML = ''; form = null; }
 
   // ---------------- datos y cálculos (los mismos de la app principal)
-  function dd() { return { movimientos: (D && D.movimientos) || [], tipoCambio: (D && D.tipoCambio) || 0, cortes: [D.cfg] }; }
+  function dd() { return { movimientos: (D && D.movimientos) || [], tipoCambio: (D && D.tipoCambio) || 0, cortes: [D.cfg], flotante: (D && D.flotante) || {} }; }
   function calc(a) { return C.presupuestoCorte(dd(), D.cfg, new Date(), a || 0); }
   function porConfirmar(m) { return /monto estimado|IVA estimado/i.test(m.nota || ''); }
   function mia(m) { return /app de la casa/i.test(m.nota || ''); }
@@ -46,7 +46,7 @@ var K = (function () {
   function itemMov(x) {
     var m = x.mov, est = porConfirmar(m), dev = x.devolucion, puede = D.corregir && mia(m) && m.fila > 0;
     return '<button class="mov' + (est ? ' est' : '') + '"' + (puede ? ' onclick="K.formAnotar(' + m.fila + ')"' : ' onclick="K.verMov(' + m.fila + ')"') + '><span class="ico">' + icono(m) + '</span>' +
-      '<span class="t"><b>' + esc(nombre(m.comercio) || 'Compra') + (dev ? ' · devolución' : '') + '</b><span>' + esc(fCorta(m.fecha) + ' · ' + quien(m)) + '</span></span>' +
+      '<span class="t"><b>' + esc(nombre(m.comercio) || 'Compra') + (dev ? ' · devolución' : '') + '</b><span>' + (x.flotante ? '<i class="flot">↪ flotante</i> ' : '') + esc(fCorta(m.fecha) + ' · ' + quien(m)) + '</span></span>' +
       '<span class="m' + (dev ? ' verde' : '') + '">' + (dev ? '−' : est ? '≈ ' : '') + din(m.monto, m.moneda) + (est ? '<span class="naranja">por confirmar</span>' : puede ? '<span class="suave">✏️</span>' : '') + '</span></button>';
   }
 
@@ -64,6 +64,12 @@ var K = (function () {
       (!atras && r.quedan > 0 && per.faltan > 0 ? '<div class="tip">Pueden gastar <b>' + din0(r.porDia) + ' por día</b> hasta el ' + per.fin.getDate() + '.</div>' : '') +
       (!atras && r.quedan < 0 ? '<div class="tip" style="background:color-mix(in srgb, var(--rojo) 14%, transparent)">Se pasaron por <b>' + din0(-r.quedan) + '</b> en este corte.</div>' : '') + '</div>';
     if (!atras && D.anotar) html += '<div class="dos"><button class="btn" onclick="K.formAnotar(0,\'Gasto\')">＋ Compra</button><button class="btn sec" onclick="K.formAnotar(0,\'Ingreso\')">↩ Devolución</button></div>';
+    if (!atras) {   // v2.19 (#70): compras de los últimos días que el banco cobra en el corte siguiente
+      var sig = C.presupuestoCorte(dd(), cfg, new Date(), -1);
+      if (sig.n) html += '<div class="caja flot-caja"><div class="fila"><b>↪ ' + sig.n + ' compra' + (sig.n === 1 ? '' : 's') + ' en flotante</b><b>' + din0(sig.gastado) + '</b></div>' +
+        '<div class="suave chico">El banco las cobra en el corte siguiente (' + fCorta(sig.periodo.ini) + ' – ' + fCorta(sig.periodo.fin) + '): ya cuentan ahí, no en este.</div>' +
+        sig.compras.map(itemMov).join('') + '</div>';
+    }
     html += '<div class="sec-t">' + (atras ? 'COMPRAS DE ESE CORTE' : 'COMPRAS DEL CORTE') + ' · ' + r.n + '</div>' +
       '<div class="caja" style="padding:4px 12px">' + (r.compras.length ? r.compras.map(itemMov).join('') : '<div class="suave chico" style="padding:10px 0">Todavía no hay compras en este corte.</div>') + '</div>';
     if (!atras) {

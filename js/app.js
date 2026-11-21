@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.18.0';
+  var VERSION_WEB = '2.19.0';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -1948,6 +1948,7 @@ var App = (function () {
             '<div style="border-top:1px solid var(--linea);margin:2px 0"></div>' + linea('Deuda hoy', dosMon(dt))
             : '<div class="aviso-tasa" style="margin:0 0 4px">Este saldo no se mueve solo. Tocá <b>↻ Actualizar saldo</b> y poné lo que debés hoy: desde ahí la app suma las compras y resta los pagos.</div>') +
           (c.limiteCRC ? linea('Disponible', din(c.limiteCRC - Math.max(0, dt.CRC), 'CRC'), 'verde-pos') : '') +
+          bloqueFlotTarjeta(c, linea, dosMon) +   // v2.19 (#70)
           linea('Compras del mes', din(g.CRC, 'CRC') + (g.USD ? ' + ' + din(g.USD, 'USD') : '')) +
           (g.cuotasTC.CRC || g.cuotasTC.USD ? linea('Cuotas tasa cero del mes', din(g.cuotasTC.CRC, 'CRC') + (g.cuotasTC.USD ? ' + ' + din(g.cuotasTC.USD, 'USD') : '')) : '') +
 
@@ -3251,7 +3252,7 @@ var App = (function () {
   }
 
   // ------------------------------------------------------------ PANELES (formularios)
-  function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); if (CALC.abierta) setTimeout(pintarCalc, 50); }
+  function abrir(html) { $('panel').innerHTML = '<div class="asa"></div>' + html; $('velo').classList.add('abierto'); formatearMontos(); calcMini($('panel')); if (CALC.abierta) setTimeout(pintarCalc, 50); }
   function cerrar() { $('velo').classList.remove('abierto'); }
   function val(id) { var e = $(id); return e ? e.value : ''; }
   function listo(msg) {
@@ -3278,6 +3279,7 @@ var App = (function () {
       '<label class="campo"><span>Comercio o descripción</span><input id="f-comercio" value="' + esc(m.comercio) + '" placeholder="Ej. Automercado"></label>' +
       '<label class="campo"><span>Lugar</span><input id="f-lugar" value="' + esc(m.lugar) + '" placeholder="Opcional"></label>' +
       '<label class="campo"><span>Fecha y hora</span><input id="f-fecha" type="datetime-local" value="' + localInput(m.fecha, true) + '"></label>' +
+      (function () { var cc = fila ? corteMov(m) : null; return cc ? '<button class="op-corte" style="margin-top:2px" onclick="App.formCorteMov(' + fila + ')"><span style="flex:1"><span class="suave chico" style="display:block">Cuenta en el corte de</span><b>' + mesCorte(cc.fin) + '</b> ' + (cc.flotante ? TAG_FLOT : '') + '</span><span class="enlace">Cambiar ›</span></button>' : ''; })() +   // v2.19 (#70)
       '<label class="campo"><span>Tarjeta o cuenta</span><select id="f-cuenta" onchange="App.monedaDeCuenta();App.repartoMov()">' + opciones(cuentas, m.cuenta, sinCuentaTexto()) +
         // v2.17.1: las tarjetas de la familia también se pueden elegir aquí (antes se perdían al tocar "Cambiar ›" en el "+")
         cuentasFamilia().concat(C.esFamilia(m) && cuentasFamilia().indexOf(m.cuenta) < 0 ? [m.cuenta] : []).map(function (k) { return '<option value="' + esc(k) + '"' + (k === m.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') + '</select></label>' +
@@ -3428,6 +3430,7 @@ var App = (function () {
       '<label class="campo"><span>Notas</span><input id="c-notas" value="' + esc(c.notas) + '"></label>' +
       (fila ? '<label class="check"><input type="checkbox" id="c-activa"' + (c.activa ? ' checked' : '') + '> Cuenta activa</label>' : '') +
       (fila && C.esAhorro(c) ? chipsOrigen(c.nombre) : '') +   // v2.14 (#59): antes "Cuentas de dónde salen los pagos"
+      (fila && /tarjeta/i.test(c.tipo || '') && c.diaCorte ? '<button class="op-corte" onclick="App.formFlotante(\'' + q(c.nombre) + '\')"><span style="flex:1"><b>↪ Días en flotante: ' + C.diasFlotante(DP(), c.nombre) + '</b><span class="suave chico" style="display:block">Compras de los últimos días antes del corte que el banco cobra en el siguiente</span></span><span class="enlace">Cambiar ›</span></button>' : '') +
       '<div class="suave chico" style="margin-top:10px">Con los últimos 4 dígitos, las compras que lleguen por correo se asignan solas a esta tarjeta. Si es un banco nuevo, agregalo en Ajustes → Bancos que se leen.</div>' +
       '<div class="acciones"><button class="btn" id="c-ok" onclick="App.guardarCta(' + (fila || 0) + (movFila ? ',' + movFila : '') + ')">' + (movFila ? 'Agregar y anotar la compra' : 'Guardar') + '</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
   }
@@ -3458,7 +3461,7 @@ var App = (function () {
   function presu() { return PREFS().presupuesto || {}; }
   function formatoNumero(n) { var x = String(Math.round(n * 100) / 100).split('.'); return x[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (x[1] ? ',' + x[1] : ''); }
   var PR_VERDE = '#3DD68C', PR_ROJO = '#FF7B7B', PR_NARANJA = '#FF8A3D', PR_AZUL = '#5B8DEF';
-  function DP() { return Object.assign({}, D, { presupuesto: presu(), familia: familia(), salario: salCfg(), cortes: PREFS().cortes || [] }); }
+  function DP() { return Object.assign({}, D, { presupuesto: presu(), familia: familia(), salario: salCfg(), cortes: PREFS().cortes || [], flotante: PREFS().flotante || {} }); }
   function presuCalc(atras) { return C.presupuesto(DP(), hoy, { salario: salCfg(), atras: atras || 0 }); }
   function guardarPresu(parcial, desc) { guardarPrefs({ presupuesto: Object.assign({}, presu(), parcial) }, desc || 'Presupuesto'); }
   function catsPresupuesto() { return (D.categorias || []).filter(function (c) { return !/^(salario|otros ingresos|viajes)$/i.test(c); }); }
@@ -3627,6 +3630,7 @@ var App = (function () {
         '<div class="fila chico" style="margin-top:6px"><span class="suave">Gastado</span><span class="suave">' + (r.quedan < 0 ? 'Se pasaron' : 'Queda') + '</span></div>' +
         '<div class="fila"><b style="font-size:20px">' + din(r.gastado, 'CRC') + '</b><b style="font-size:20px;color:' + col + '">' + din(Math.abs(r.quedan), 'CRC') + '</b></div>' +
         barraPresu(r.pct, col, per.dia / per.dias) +
+        (function () { var sg = C.presupuestoCorte(d, cfg, hoy, -1); return sg.n ? '<div class="chico" style="margin-top:4px"><i class="flot">↪ ' + sg.n + ' en flotante</i> <span class="suave">' + din(sg.gastado, 'CRC') + ' ya cuentan en el corte que empieza el ' + esc(fechaSinAnio(sg.periodo.ini)) + '</span></div>' : ''; })() +
         (r.quedan > 0 && per.faltan > 0 ? '<div class="chico" style="margin-top:4px;background:var(--fondo);border-radius:10px;padding:8px 10px">Pueden gastar <b>' + din(r.porDia, 'CRC') + ' por día</b> hasta el ' + per.fin.getDate() + ' para no pasarse.</div>' : '') + '</button>';
     });
     return h ? '<div class="suave chico fuerte" style="padding:12px 18px 4px;letter-spacing:.5px">APARTE · POR CORTE</div>' + h : '';
@@ -3660,10 +3664,16 @@ var App = (function () {
       (r.estimado > 0.004 ? ln('Incluye por confirmar', '≈ ' + din(r.estimado, 'CRC'), 'color:' + PR_NARANJA) : '') +
       ln('Movimientos', String(r.n)) + '</div>';
     if (!atras && r.monto > 0) h += '<div class="caja" style="gap:2px;margin-top:10px"><div class="suave chico fuerte">RITMO DEL CORTE</div>' + svgRitmo(r) + '</div>';
+    if (!atras) {   // v2.19 (#70): las de los últimos días ya cuentan en el corte siguiente
+      var sg = C.presupuestoCorte(d, cfg, hoy, -1);
+      if (sg.n) h += '<div class="flot-caja" style="margin-top:10px"><div class="fila"><span class="flot-t">↪ ' + sg.n + ' compra' + (sg.n === 1 ? '' : 's') + ' en flotante · corte que empieza el ' + esc(fechaSinAnio(sg.periodo.ini)) + '</span><b class="flot-t">' + din(sg.gastado, 'CRC') + '</b></div>' +
+        sg.compras.map(function (x) { var m = x.mov; return '<button class="flot-fila" onclick="App.formCorteMov(' + m.fila + ')"><span><b>' + esc(nombreBonito(m.comercio) || 'Compra') + '</b><span class="suave chico" style="display:block">' + esc(fechaSinAnio(new Date(m.fecha))) + '</span></span><b>' + (x.devolucion ? '−' : '') + din(m.monto, m.moneda) + '</b></button>'; }).join('') +
+        '<div class="suave chico">El banco las cobra en el corte siguiente: no cuentan en este. Tocá una para cambiarla.</div></div>';
+    }
     h += '<div class="caja sinpad" style="margin-top:10px"><div class="fila" style="padding:10px 14px 2px"><span class="suave chico fuerte">COMPRAS DEL CORTE · ' + r.n + '</span>' + (atras ? '' : '<button class="chip" onclick="App.cerrar();App.formRapido(\'Gasto\',\'' + q(cfg.cuenta) + '\')">＋ Compra</button>') + '</div>' +
       (r.compras.length ? r.compras.slice(0, 40).map(function (x) {
         var m = x.mov, est = porConfirmar(m);
-        return '<button class="pr-mov"' + (est ? ' style="border:1px dashed ' + PR_NARANJA + ';border-radius:10px"' : '') + ' onclick="App.cerrar();App.formMovimiento(' + m.fila + ')"><span><b>' + esc((nombreBonito(m.comercio) || 'Compra') + (x.devolucion ? ' · devolución' : '')) + '</b><span class="suave chico">' + esc(fechaSinAnio(new Date(m.fecha)) + (m.categoria ? ' · ' + m.categoria : '') + ' · ' + quienAnoto(m)) + '</span></span>' +
+        return '<button class="pr-mov"' + (est ? ' style="border:1px dashed ' + PR_NARANJA + ';border-radius:10px"' : '') + ' onclick="App.cerrar();App.formMovimiento(' + m.fila + ')"><span><b>' + esc((nombreBonito(m.comercio) || 'Compra') + (x.devolucion ? ' · devolución' : '')) + '</b><span class="suave chico">' + (x.flotante ? TAG_FLOT + ' ' : '') + esc(fechaSinAnio(new Date(m.fecha)) + (m.categoria ? ' · ' + m.categoria : '') + ' · ' + quienAnoto(m)) + '</span></span>' +
           '<span style="text-align:right"><b' + (x.devolucion ? ' style="color:' + PR_VERDE + '"' : '') + '>' + (x.devolucion ? '−' : est ? '≈ ' : '') + din(m.monto, m.moneda) + '</b>' + (est ? '<span class="chico" style="display:block;color:' + PR_NARANJA + '">por confirmar</span>' : '') + '</span></button>';
       }).join('') : '<div class="suave chico" style="padding:10px 14px">Sin compras en este corte.</div>') + '</div>';
     var hist = C.historialCorte(d, cfg, hoy, 6), conDatos = hist.filter(function (x) { return x.n > 0; });
@@ -3681,6 +3691,134 @@ var App = (function () {
     }
     h += '<div class="acciones"><button class="btn sec" onclick="App.formCasa(' + i + ')">📲 App para ' + esc(C.esFamilia({ cuenta: cfg.cuenta }) ? infoFamilia(cfg.cuenta).persona : 'la casa') + '</button><button class="btn sec" onclick="App.formCorte(' + i + ')">⚙ Ajustar</button><button class="btn sec" onclick="App.cerrar()">Cerrar</button></div>';
     abrir(h);
+  }
+
+  // ---------------- v2.19 (#70) · Compras en flotante al cierre del corte
+  // La fecha de compra no cambia: solo el corte en que cuenta (Por pagar, avisos, súper de la casa). Deuda y disponible la cuentan ya.
+  function flotPrefs() { return PREFS().flotante || {}; }
+  /** Día de corte de una cuenta: el de la tarjeta o el de su presupuesto por corte (tarjetas de la familia) */
+  function diaCorteDe(cuenta) {
+    if (!cuenta) return 0;
+    var c = cuentaPorNombre(cuenta); if (c && c.diaCorte) return Number(c.diaCorte);
+    var k = cortesCfg().filter(function (x) { return x && x.cuenta === cuenta && x.on !== false; })[0]; if (k && k.dia) return Number(k.dia);
+    var u4 = (String(cuenta).match(/(\d{4})\s*$/) || [])[1], f = u4 && familia()[u4]; return f && f.diaCorte ? Number(f.diaCorte) : 0;
+  }
+  function corteMov(m) {
+    if (!m || !m.fecha || !m.cuenta || (m.tipo !== 'Gasto' && m.tipo !== 'Ingreso')) return null;
+    var c = cuentaPorNombre(m.cuenta); if (c && !/tarjeta/i.test(c.tipo || '')) return null;
+    var dia = diaCorteDe(m.cuenta); return dia ? C.corteCompra(DP(), m.cuenta, dia, m) : null;
+  }
+  function mesCorte(fin) { return MESES_C[fin.getMonth()]; }
+  function rangoCorteTxt(fin, dia) { var a = new Date(fin.getFullYear(), fin.getMonth() - 1, Math.min(dia, new Date(fin.getFullYear(), fin.getMonth(), 0).getDate()) + 1); return fechaSinAnio(a) + ' – ' + fechaSinAnio(fin); }
+  var TAG_FLOT = '<i class="flot">↪ flotante</i>';
+  /** Guarda en qué corte cuenta una compra ('n' = el de su fecha, 's' = el siguiente). Varias a la vez con una lista de filas. */
+  function flotElegir(filas, cual, volver) {
+    filas = [].concat(filas);
+    var fz = Object.assign({}, flotPrefs().forzar || {}), n = 0, lim = C.isoDia(new Date(hoy.getFullYear(), hoy.getMonth() - 8, 1));
+    Object.keys(fz).forEach(function (k) { if (String(fz[k]) < lim) delete fz[k]; });   // limpia lo viejo
+    filas.forEach(function (f) {
+      var m = D.movimientos.filter(function (x) { return x.fila === f; })[0], cc = corteMov(m); if (!cc) return;
+      fz[C.claveFlot(m)] = C.isoDia(cual === 'n' ? cc.natural : cc.siguiente); n++;
+    });
+    if (!n) return;
+    guardarPrefs({ flotante: Object.assign({}, flotPrefs(), { forzar: fz }) }, 'Corte de ' + n + ' compra' + (n === 1 ? '' : 's'));
+    toast(cual === 'n' ? '✓ Cuenta en el corte de su fecha' : '↪ Va en el corte siguiente', 1800);
+    if (volver === 'rev') { pintar(); return; }
+    if (volver === 'mov') { formCorteMov(filas[0]); pintar(); return; }
+    cerrar(); pintar();
+  }
+  /** ¿En qué corte la cobra el banco? (tocar una compra en flotante o "Corte" en el movimiento) */
+  function formCorteMov(fila) {
+    var m = D.movimientos.filter(function (x) { return x.fila === fila; })[0], cc = corteMov(m);
+    if (!cc) return formMovimiento(fila);
+    var dia = diaCorteDe(m.cuenta), pago = (cuentaPorNombre(m.cuenta) || {}).diaPago;
+    var vence = function (fin) { if (!pago) return ''; var v = new Date(fin.getFullYear(), fin.getMonth() + (pago <= fin.getDate() ? 1 : 0), pago); return ' · se paga el ' + fechaSinAnio(v); };
+    var op = function (fin, cual, on, tag) {
+      return '<button class="op-corte' + (on ? ' on' : '') + '" onclick="App.flotElegir(' + fila + ',\'' + cual + '\',\'mov\')"><span class="rd"></span><span style="flex:1"><b>Corte de ' + mesCorte(fin) + '</b> ' + (tag ? TAG_FLOT : '') +
+        '<span class="suave chico" style="display:block">' + esc(rangoCorteTxt(fin, dia) + vence(fin)) + '</span></span></button>';
+    };
+    var falta = Math.round((cc.natural - new Date(new Date(m.fecha).getFullYear(), new Date(m.fecha).getMonth(), new Date(m.fecha).getDate())) / 86400000);
+    abrir('<div class="fila" style="align-items:flex-start"><div><h2 style="margin:0">' + esc(nombreBonito(m.comercio) || 'Compra') + '</h2><div class="suave">Compra del ' + esc(DIAS_L[new Date(m.fecha).getDay()] + ' ' + fechaSinAnio(new Date(m.fecha)) + (hora(m.fecha) ? ' · ' + hora(m.fecha) : '')) + ' · ' + esc(etiquetaCuenta(m.cuenta) || m.cuenta) + '</div></div><b style="font-size:20px;white-space:nowrap">' + din(m.monto, m.moneda) + '</b></div>' +
+      '<div class="suave chico fuerte" style="margin-top:14px;letter-spacing:.5px">¿EN QUÉ CORTE LA COBRA EL BANCO?</div>' +
+      op(cc.natural, 'n', !cc.flotante, false) + op(cc.siguiente, 's', cc.flotante, true) +
+      '<div class="suave chico" style="margin-top:10px">' + (cc.forzado ? 'Lo elegiste vos.' : cc.auto ? 'La app la pasó sola porque fue ' + (falta === 0 ? 'el mismo día del corte' : falta + ' día' + (falta === 1 ? '' : 's') + ' antes del corte') + ' (días en flotante: ' + cc.dias + ').' : 'Va en el corte de su fecha.') +
+      ' La fecha de compra no cambia: presupuesto del mes y viajes siguen igual.</div>' +
+      '<div class="acciones"><button class="btn sec" onclick="App.formMovimiento(' + fila + ')">Ver movimiento</button><button class="btn" onclick="App.cerrar()">Listo</button></div>');
+  }
+  /** Bloque azul dentro de la tarjeta abierta: Por pagar del estado que cierra + compras en flotante */
+  function bloqueFlotTarjeta(c, linea, dosMon) {
+    if (!c.diaCorte) return '';
+    var d = DP(), pp = C.porPagarTarjeta(d, c, hoy), fl = C.flotantesTarjeta(d, c.nombre, c.diaCorte, hoy), h = '';
+    var corteHoy = pp.corte && pp.corte.toDateString() === hoy.toDateString();
+    if (pp.corte) h += '<div class="suave chico fuerte" style="margin-top:6px">' + (corteHoy ? 'ESTADO DE CUENTA QUE CIERRA HOY' : 'ÚLTIMO ESTADO DE CUENTA · ' + esc(fechaSinAnio(pp.corte).toUpperCase())) + '</div>' +
+      linea('Por pagar', dosMon({ CRC: pp.CRC, USD: pp.USD })) + (pp.flotante.n ? '<div class="suave chico">Sin ' + pp.flotante.n + ' compra' + (pp.flotante.n === 1 ? '' : 's') + ' en flotante (van al corte siguiente).</div>' : '');
+    if (fl.length) {
+      var t = { CRC: 0, USD: 0 }; fl.forEach(function (x) { t[x.mov.moneda === 'USD' ? 'USD' : 'CRC'] += (x.mov.tipo === 'Ingreso' ? -1 : 1) * x.mov.monto; });
+      h += '<div class="flot-caja"><div class="fila"><span class="flot-t">↪ En flotante · van al corte de ' + mesCorte(fl[0].corte.siguiente) + '</span><b class="flot-t">' + dosMon(t) + '</b></div>' +
+        fl.map(function (x) { var m = x.mov; return '<button class="flot-fila" onclick="App.formCorteMov(' + m.fila + ')"><span><b>' + esc(nombreBonito(m.comercio) || 'Compra') + '</b><span class="suave chico" style="display:block">' + esc(DIAS_L[new Date(m.fecha).getDay()] + ' ' + fechaSinAnio(new Date(m.fecha)) + (hora(m.fecha) ? ' · ' + hora(m.fecha) : '')) + '</span></span><b>' + (m.tipo === 'Ingreso' ? '−' : '') + din(m.monto, m.moneda) + '</b></button>'; }).join('') +
+        '<div class="suave chico">Compras de los últimos ' + C.diasFlotante(d, c.nombre) + ' días antes del corte · tocá una para cambiarla</div></div>';
+    }
+    return h;
+  }
+  /** Ajuste por tarjeta: días en flotante */
+  var FLT = { cuenta: '', n: 3, preg: true };
+  function formFlotante(cuenta) {
+    var d = DP(); FLT = { cuenta: cuenta, n: C.diasFlotante(d, cuenta), preg: flotPrefs().preguntar !== false };
+    pintarFlotante();
+  }
+  function pintarFlotante() {
+    var dia = diaCorteDe(FLT.cuenta) || 24, cel = '';
+    for (var i = 6; i >= 0; i--) { var dd = dia - i; if (dd < 1) { cel += '<span></span>'; continue; } cel += '<span class="' + (i === 0 ? 'c' : i < FLT.n ? 'f' : '') + '">' + dd + '</span>'; }
+    var dias = []; for (var j = FLT.n - 1; j >= 0; j--) if (dia - j >= 1) dias.push(dia - j);
+    abrir('<div class="suave chico">' + esc(etiquetaCuenta(FLT.cuenta) || etiquetaFamilia(FLT.cuenta) || FLT.cuenta) + ' · corta el ' + dia + '</div><h2>↪ Días en flotante</h2>' +
+      '<div class="suave">Las compras de estos días antes del corte (incluido el día del corte) se van solas al corte siguiente, como hace el banco. Deuda y disponible las cuentan desde que llegan.</div>' +
+      '<div class="fila" style="margin-top:12px"><span class="paso-n"><button onclick="App.flotPaso(-1)" aria-label="Menos">−</button><b>' + FLT.n + '</b><button onclick="App.flotPaso(1)" aria-label="Más">+</button></span><span class="suave chico" style="text-align:right">0 = apagado<br>máx. 5</span></div>' +
+      '<div class="cal-flot">' + cel + '</div>' +
+      '<div class="suave chico" style="margin-top:6px">' + (FLT.n ? '<span style="color:var(--flot)">■</span> pasan al corte siguiente: ' + dias.join(', ') + ' &nbsp; ' : 'Apagado: todo cuenta en el corte de su fecha. ') + '<span class="acento">■</span> día de corte</div>' +
+      '<div class="fila" style="margin-top:12px"><span><b>Preguntarme en Para revisar</b><span class="suave chico" style="display:block">Después del corte, para confirmar con el estado de cuenta</span></span>' + interruptor('fl-preg', FLT.preg, 'App.flotPreg(this.checked)', 'Preguntarme') + '</div>' +
+      '<div class="acciones"><button class="btn" onclick="App.guardarFlotante(0)">Guardar</button><button class="btn sec" onclick="App.guardarFlotante(1)">Usar ' + FLT.n + ' días en todas mis tarjetas</button><button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
+  }
+  function flotPaso(k) { FLT.n = Math.max(0, Math.min(5, FLT.n + k)); pintarFlotante(); }
+  function flotPreg(v) { FLT.preg = !!v; }
+  function guardarFlotante(todas) {
+    var fp = flotPrefs(), dias = Object.assign({}, fp.dias || {});
+    if (todas) { dias = {}; } else dias[C.normNom(FLT.cuenta)] = FLT.n;
+    var nuevo = Object.assign({}, fp, { dias: dias, preguntar: FLT.preg });
+    if (todas) nuevo.todas = FLT.n;
+    guardarPrefs({ flotante: nuevo }, 'Días en flotante');
+    hecho('↪ ' + (todas ? 'Todas tus tarjetas: ' : '') + (FLT.n ? FLT.n + ' día' + (FLT.n === 1 ? '' : 's') + ' en flotante' : 'flotante apagado'));
+  }
+  /** Para revisar: compras que pasaron solas al corte siguiente, ya cerrado el corte de su fecha (para confirmar con el estado de cuenta) */
+  function flotantesRevisar() {
+    if (flotPrefs().preguntar === false) return [];
+    var d = DP(), vistas = {}, out = [], lim = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 40);
+    var ctas = D.cuentas.filter(function (c) { return c.activa && /tarjeta/i.test(c.tipo || '') && c.diaCorte; }).map(function (c) { return [c.nombre, Number(c.diaCorte)]; })
+      .concat(cortesCfg().filter(function (x) { return x && x.cuenta && x.on !== false && !cuentaPorNombre(x.cuenta); }).map(function (x) { return [x.cuenta, Number(x.dia) || 1]; }));
+    ctas.forEach(function (cd) {
+      if (vistas[cd[0]]) return; vistas[cd[0]] = 1;
+      var h0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()), ult = C.finCorteDe(cd[1], h0);
+      if (ult.getTime() >= h0.getTime()) ult = C.finCorteDe(cd[1], new Date(ult.getFullYear(), ult.getMonth() - 1, Math.min(cd[1], 28)));   // el último corte ya cerrado (antes de hoy)
+      var l = [];
+      D.movimientos.forEach(function (m) {
+        if (!(m.fila > 0) || !m.fecha || (m.tipo !== 'Gasto' && m.tipo !== 'Ingreso') || C.normNom(m.cuenta) !== C.normNom(cd[0])) return;
+        var cc = C.corteCompra(d, cd[0], cd[1], m);
+        if (cc.auto && !cc.forzado && cc.flotante && cc.natural.getTime() === ult.getTime() && ult >= lim) l.push({ mov: m, corte: cc });   // solo el corte que acaba de cerrar
+      });
+      if (l.length) out.push({ cuenta: cd[0], l: l.sort(function (a, b) { return new Date(a.mov.fecha) - new Date(b.mov.fecha); }) });
+    });
+    return out;
+  }
+  function htmlFlotRevisar(g) {
+    var nat = g.l[0].corte.natural, sig = g.l[0].corte.siguiente, filas = g.l.map(function (x) { return x.mov.fila; });
+    return '<div class="caja rev-it"><div class="fila"><b>↪ Compras en flotante</b><span class="flot">' + esc(etiquetaCuenta(g.cuenta) || etiquetaFamilia(g.cuenta) || g.cuenta) + '</span></div>' +
+      '<div class="suave chico">Las pasé al corte de ' + mesCorte(sig) + '. Fijate si salen en el estado de cuenta del ' + esc(fechaSinAnio(nat)) + ':</div>' +
+      g.l.map(function (x) {
+        var m = x.mov;
+        return '<div class="flot-fila" style="cursor:default"><span><b>' + esc(nombreBonito(m.comercio) || 'Compra') + '</b><span class="suave chico" style="display:block">' + esc(fechaSinAnio(new Date(m.fecha))) + ' · ' + (m.tipo === 'Ingreso' ? '−' : '') + din(m.monto, m.moneda) + '</span></span></div>' +
+          '<div class="chips">' + chipRev('✓ Va en ' + mesCorte(x.corte.siguiente), 'App.flotElegir(' + m.fila + ',\'s\',\'rev\')') + chipRev('✗ Salió en ' + mesCorte(x.corte.natural), 'App.flotElegir(' + m.fila + ',\'n\',\'rev\')') + '</div>';
+      }).join('') +
+      (g.l.length > 1 ? '<button class="btn" style="width:100%;margin-top:8px" onclick="App.flotElegir([' + filas.join(',') + '],\'s\',\'rev\')">✓ Todas van en ' + mesCorte(sig) + '</button>' : '') +
+      '<div class="suave chico" style="margin-top:6px">Si no respondés, se quedan en ' + mesCorte(sig) + ' (lo más común).</div></div>';
   }
   // ---------------- v2.18 · App de la casa: un link para que otra persona vea y anote SOLO este presupuesto por corte
   var CASA = { i: -1, e: null };
@@ -3748,6 +3886,7 @@ var App = (function () {
       '<div class="suave chico" id="co-nota"></div>' +
       '<label class="check"><input type="checkbox" id="co-mes"' + (c && c.enMes ? ' checked' : '') + '> Contar estas compras en mi presupuesto del mes</label>' +
       '<label class="check"><input type="checkbox" id="co-av"' + (!c || c.aviso !== false ? ' checked' : '') + '> Avisar al llegar al 80% y si se pasan</label>' +
+      (c ? '<button class="op-corte" onclick="App.formFlotante(\'' + q(c.cuenta) + '\')"><span style="flex:1"><b>↪ Días en flotante: ' + C.diasFlotante(DP(), c.cuenta) + '</b><span class="suave chico" style="display:block">Compras de los últimos días antes del corte que cuentan en el siguiente</span></span><span class="enlace">Cambiar ›</span></button>' : '') +
       '<div class="acciones"><button class="btn" onclick="App.guardarCorte(' + i + ')">Guardar</button>' + (c ? '<button class="btn peligro" onclick="App.quitarCorte(' + i + ')">Quitar</button>' : '') + '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>');
     corteNota();
   }
@@ -3974,7 +4113,7 @@ var App = (function () {
     if (!on && !seguro && c.tipo === 'Tarjeta de crédito') {
       var dt = C.deudaTarjeta(D, c);
       if (dt.CRC > 0.004 || dt.USD > 0.004) {
-        var x = C.porPagarTarjeta(D, c, hoy), prox = c.diaPago ? C.proximaFecha(c.diaPago, hoy) : null;
+        var x = C.porPagarTarjeta(DP(), c, hoy), prox = c.diaPago ? C.proximaFecha(c.diaPago, hoy) : null;
         return abrir('<h2>¿Desactivar ' + esc(c.nombre) + '?</h2><div>Todavía debés <b>' + dosMon({ CRC: Math.max(0, dt.CRC), USD: Math.max(0, dt.USD) }) + '</b>' + (prox ? ' (pago el ' + fechaCorta(prox.toISOString()).replace(/ \d{4}$/, '') + ')' : '') + '. Si la desactivás:</div>' +
           '<div class="suave" style="line-height:1.7;margin-top:8px">• No sale en Tarjetas ni en la deuda total<br>• No te avisa la fecha de pago<br>• Sus compras se siguen anotando (te pregunta si activarla)<br>• Nada se borra: la activás cuando quieras</div>' +
           '<div class="acciones"><button class="btn" onclick="App.ctaActiva(' + fila + ',false,true)">Desactivar igual</button><button class="btn sec" onclick="App.formCuentasLista()">Dejarla activa</button></div>');
@@ -4280,7 +4419,7 @@ var App = (function () {
       '<div class="rap-fila"><button class="chip" onclick="App.rapMoneda()" aria-label="Cambiar moneda">₡ ⇄ $</button>' +
       '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, sinCuentaTexto()) +
         (rap.tipo === 'Gasto' || fam ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') + '</select></div>' +
-      '<div class="rap-monto" id="rp-monto"' + (dev ? ' style="color:var(--positivo)"' : '') + '>' + textoMontoRapido() + '<i></i></div>' +
+      '<div class="rap-monto-w"><div class="rap-monto" id="rp-monto"' + (dev ? ' style="color:var(--positivo)"' : '') + '>' + textoMontoRapido() + '<i></i></div></div>' +
       (fam ? '<div id="rp-corte">' + textoCorteRapido() + '</div>' : '') +
       (fr.length ? '<div class="chips rap-frec">' + fr.map(function (f, i) {
         return '<button class="chip' + (rap.frec === i ? ' on' : '') + '" onclick="App.rapFrecuente(' + i + ')">' + (f.categoria ? iconoMov({ tipo: rap.tipo, categoria: f.categoria })[0] : '•') + ' ' + esc(nombreSug(f.nombre)) + '</button>';
@@ -4350,9 +4489,20 @@ var App = (function () {
     if (/dep[oó]sito|recibi|recibid|transferencia recibida|acredit/i.test(t)) r.tipo = 'Ingreso';
     return r;
   }
+  /** v2.19 (#72): ¿lo copiado es solo un número? ("25055", "25.055", "₡25.055,50") → el número; si no, null */
+  function numeroSolo(t) {
+    t = String(t || '').trim().replace(/^[₡¢$]\s*/, '').replace(/\s*(CRC|USD|colones)$/i, '');
+    if (!/^\d[\d.,\s]*$/.test(t)) return null;
+    var n = C.leerNumero(t.replace(/\s/g, ''));
+    return n > 0 ? Math.round(n * 100) / 100 : null;
+  }
+  /** Número → texto del teclado del "+" ("25055,5"), con el mismo tope del teclado */
+  function montoTeclado(n) { var s = String(Math.round(n * 100) / 100).replace('.', ','); return s.replace(',', '').length > 11 ? s.slice(0, 11) : s; }
   function rapPegar() {
     if (!navigator.clipboard || !navigator.clipboard.readText) return toast('Este navegador no deja leer lo copiado. Escribí el monto con el teclado.', 4500);
     navigator.clipboard.readText().then(function (t) {
+      var solo = numeroSolo(t);   // v2.19 (#72): lo que copia la calculadora ("25055") se pega como monto
+      if (solo !== null) { rap.monto = montoTeclado(solo); pintarRapido(); toast('📋 Pegué ' + txt(solo, rap.moneda), 2200); return; }
       var r = leerMensajeBanco(t);
       if (!r.monto) return toast('No encontré un monto en lo que copiaste.', 4000);
       if (r.tipo && r.tipo !== rap.tipo) { rap.tipo = r.tipo; rap.frec = -1; rap.categoria = rap.sobre = ''; }
@@ -5593,7 +5743,7 @@ var App = (function () {
     if (a.correo.activo) srv('probarResumenCorreo', [], function (m) { toast(m); }, b);
     if (avisosTel()) navigator.serviceWorker.ready.then(function (reg) {
       // v2.9.0: la prueba muestra el próximo pago de tarjeta real (o un ejemplo)
-      var px = C.pagosProximos(D, hoy, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31], 31).filter(function (p) { return p.debe; })[0];
+      var px = C.pagosProximos(DP(), hoy, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31], 31).filter(function (p) { return p.debe; })[0];
       var tit = px ? '💳 ' + px.nombre + ' · ' + (px.dias === 0 ? 'vence HOY' : px.dias === 1 ? 'vence mañana' : 'pagar en ' + px.dias + ' días') : '✉ Así se ven los avisos';
       var cuerpo = px ? [px.CRC > 0.004 ? txt(px.CRC, 'CRC') : '', px.USD > 0.004 ? txt(px.USD, 'USD') : ''].filter(String).join(' + ') + ' · vence el ' + fechaCorta(px.fecha).replace(/ \d{4}$/, '') + ' (prueba)' : 'Por ejemplo: 3 movimientos por asignar a sobres';
       reg.showNotification(tit, { body: cuerpo, icon: 'icons/icono-192.png', badge: 'icons/icono-192.png', tag: 'prueba', data: { url: px ? './?ir=tarjetas' : './?ir=porasignar' }, actions: [{ action: 'abrir', title: 'Abrir' }] });
@@ -6397,7 +6547,7 @@ var App = (function () {
       }).join('') + '</div>');
     }
     // v2.10.0: planeador "espejo del banco": cuánto pagar → de qué sobres sale → solo se anotan las sacadas
-    var c0 = cuentaPorNombre(nombre), pp = C.porPagarTarjeta(D, c0, hoy);
+    var c0 = cuentaPorNombre(nombre), pp = C.porPagarTarjeta(DP(), c0, hoy);
     var mon0 = pp.CRC > 0.004 || !(pp.USD > 0.004) ? 'CRC' : 'USD';
     PL = { esp: true, cuenta: nombre, paso: 1, modo: 'estado', moneda: mon0, monto: Math.max(0, pp[mon0]), pp: pp, sobres: {}, sinCorreo: false,
       origen: (ORIG().porTarjeta || {})[nombre] || ORIG().tarjetas || cuentaPrincipal() };
@@ -6856,7 +7006,7 @@ var App = (function () {
   function cmFiltro(f) { if (f === 'rango') return formRango('cta'); CM.f = f; pintar(); }
   function rangoCM(c) {
     var dia = function (d) { return d ? new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1) : null; };
-    if (CM.f === 'corte') return [dia(C.ultimoCorte(c, hoy)), null];
+    if (CM.f === 'corte') { var u = C.ultimoCorte(c, hoy); return [u ? new Date(u.getFullYear(), u.getMonth() - 1, u.getDate() - 6) : null, null]; }   // v2.19: "Por corte" (agrupa por corte; el filtro fino va abajo)
     if (CM.f === 'saldo') { var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null; return [fs && !isNaN(fs) ? dia(fs) : null, null]; }
     if (CM.f === 'rango') return [CM.desde, CM.hasta];
     if (CM.f === 'todo') return [null, null];
@@ -6882,6 +7032,12 @@ var App = (function () {
     }
     var r = rangoCM(c);
     var lista = items.filter(function (x) { var f = new Date(x.fecha); return (!r[0] || f >= r[0]) && (!r[1] || f < r[1]); });
+    var porCorte = tj && c.diaCorte && CM.f === 'corte', ultC = porCorte ? C.ultimoCorte(c, hoy) : null;
+    if (porCorte) {   // v2.19 (#70): el corte que corre y el que acaba de cerrar, cada compra en el corte que le toca
+      var dP = DP();
+      lista.forEach(function (x) { var m = x.mov, cc = m && (m.tipo === 'Gasto' || m.tipo === 'Ingreso') ? C.corteCompra(dP, c.nombre, c.diaCorte, m) : null; x.fin = cc ? cc.fin : C.finCorteDe(c.diaCorte, new Date(x.fecha)); x.flot = cc && cc.flotante; });
+      lista = lista.filter(function (x) { return x.fin >= ultC; });
+    }
     var sum = { e: { CRC: 0, USD: 0 }, s: { CRC: 0, USD: 0 } };
     lista.forEach(function (x) { if (x.grupo !== 'sobre') sum[x.monto >= 0 ? 'e' : 's'][x.moneda] += Math.abs(x.monto); });
     var h = cabSimple('Movimientos', esc(c.nombre));
@@ -6890,12 +7046,21 @@ var App = (function () {
     h += '<div class="resumen-mov">' + (tj ? col('Compras', dosMon(sum.s)) + col('Pagos', dosMon(sum.e), 'verde-pos') + col('Deuda hoy', dosMon(hoyV))
       : col('Entró', dosMon(sum.e, mon), 'verde-pos') + col('Salió', dosMon(sum.s, mon), 'rojo') + (function () { var dp = disponibleDe(c, hoyV); return dp ? col('Disponible', din(dp.disponible, 'CRC') + '<small>total ' + txt(dp.total, 'CRC') + '</small>', dp.disponible < -0.005 ? 'rojo' : '') : col(hoyV.vivo ? 'Saldo hoy' : 'Saldo', hoyV.vivo ? dosMon(hoyV, mon) : '—'); })()) + '</div>';
     // v2.9.0: sin "Desde el saldo" en el menú (solo lo usa "Cuadrar → Buscar qué falta", y ahí se muestra como aviso)
-    var chips = (tj && c.diaCorte ? [['corte', 'Desde el corte']] : [])
+    var chips = (tj && c.diaCorte ? [['corte', 'Por corte']] : [])
       .concat([['mes', 'Este mes'], ['pasado', 'Mes pasado'], ['todo', 'Todo'], ['rango', CM.f === 'rango' && CM.desde ? '📅 ' + textoRango(CM.desde, CM.hasta) : '📅 Rango…']]);
     if (CM.f === 'saldo' && r[0]) h += '<div class="suave chico" style="margin:0 2px 8px">Mostrando desde la fecha del saldo (' + textoRango(r[0]) + ') · <button class="enlace" onclick="App.cmFiltro(\'mes\')">ver este mes</button></div>';
     h += '<div class="chips desliza">' + chips.map(function (x) { return '<button class="chip' + (CM.f === x[0] ? ' on' : '') + '" onclick="App.cmFiltro(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>';
     if (!lista.length) h += '<div class="caja vacio">No hay movimientos en ese período.</div>';
-    else {
+    else if (porCorte) {
+      var cortes = [], porC = {};
+      lista.forEach(function (x) { var k = x.fin.getTime(); if (!porC[k]) { porC[k] = { fin: x.fin, l: [], t: { CRC: 0, USD: 0 } }; cortes.push(k); } porC[k].l.push(x); porC[k].t[x.moneda] += x.monto; });
+      cortes.sort(function (a, b) { return b - a; });
+      h += cortes.map(function (k) {
+        var g = porC[k], t = [Math.abs(g.t.CRC) > 0.004 ? (g.t.CRC > 0 ? '+' : '−') + txt(Math.abs(g.t.CRC), 'CRC') : '', Math.abs(g.t.USD) > 0.004 ? (g.t.USD > 0 ? '+' : '−') + txt(Math.abs(g.t.USD), 'USD') : ''].filter(String).join(' · ');
+        return '<div class="dia"><span>CORTE ' + esc(rangoCorteTxt(g.fin, c.diaCorte).toUpperCase()) + (g.fin > hoy ? ' · CORRE' : '') + '</span><span class="m">' + (oculto() ? '' : t) + '</span></div>' +
+          '<div class="caja sinpad">' + g.l.map(function (x) { return filaBanco(x, tj); }).join('') + '</div>';
+      }).join('');
+    } else {
       var meses = [], por = {};
       lista.forEach(function (x) { var d = new Date(x.fecha), k = d.getFullYear() + '-' + d.getMonth(); if (!por[k]) { por[k] = { d: d, l: [], t: { CRC: 0, USD: 0 } }; meses.push(k); } por[k].l.push(x); por[k].t[x.moneda] += x.monto; });
       h += meses.map(function (k) {
@@ -6916,7 +7081,7 @@ var App = (function () {
     var et = m && (m.tipo === 'Gasto' || C.esSacarMeter(m)) ? etiquetaSobre(m) : '';
     if (x.grupo === 'sobre') det += ' · ' + (m.tipo === C.TIPO_SACAR ? 'del sobre al disponible' : 'del disponible al sobre');
     return '<button class="item fb" onclick="' + (m ? 'App.formMovimiento(' + m.fila + ')' : 'App.ir(\'prestamo\')') + '"><span class="punto ' + (entra ? 'v' : 'r') + '"></span>' +
-      '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombre) + '</span><span class="det" style="display:block">' + det + (et ? ' ' + et : '') + '</span></span>' +
+      '<span class="cuerpo"><span class="nombre" style="display:block">' + esc(nombre) + '</span><span class="det" style="display:block">' + (x.flot ? TAG_FLOT + ' ' : '') + det + (et ? ' ' + et : '') + '</span></span>' +
       '<span class="monto"><b class="' + (entra ? 'verde-pos' : '') + '">' + (entra ? '+' : '−') + din(Math.abs(x.monto), x.moneda) + '</b></span></button>';
   }
 
@@ -7288,7 +7453,7 @@ var App = (function () {
     guardar('mf-vistos', JSON.stringify(vivos));
   }
   function revisarData() {
-    var vacio = { accion: [], listos: [], nuevos: [], confirmar: [] };
+    var vacio = { accion: [], listos: [], nuevos: [], confirmar: [], flot: [] };
     if (!D) return vacio;
     var v = vistos(), lim = hoy.getTime() - DIAS_REV * 86400000;
     var sb = sinServidorSobres() ? null : SB(), pendFila = {}, accion = [], listos = [];
@@ -7316,7 +7481,8 @@ var App = (function () {
     var porFecha = function (a, b) { return new Date((b.mov || b).fecha) - new Date((a.mov || a).fecha); };
     accion.sort(porFecha); listos.sort(porFecha);
     confirmar.sort(porFecha);
-    return { accion: accion, listos: listos, nuevos: nuevos, confirmar: confirmar };
+    var flot = []; try { flot = flotantesRevisar(); } catch (e) { console.log(e); }   // v2.19 (#70)
+    return { accion: accion, listos: listos, nuevos: nuevos, confirmar: confirmar, flot: flot };
   }
   /** Lo que la app hizo sola con un movimiento (una línea) */
   function queHizo(m, ef) {
@@ -7387,20 +7553,20 @@ var App = (function () {
     return out.slice(0, 3);
   }
   function tarjetaRevisar(res) {
-    var r = revisarData(), n = r.accion.length, l = r.listos.length, cf = r.confirmar.length;
-    if (!n && !l && !cf) return '';
+    var r = revisarData(), n = r.accion.length, l = r.listos.length, cf = r.confirmar.length, fl = r.flot.reduce(function (a, g) { return a + g.l.length; }, 0);
+    if (!n && !l && !cf && !fl) return '';
     var nuevos = r.nuevos.length;
     return '<button class="caja rev-ini' + (n ? ' borde-acento' : '') + '" onclick="App.ir(\'revisar\')"><span class="av-rev">📥</span><span class="cuerpo"><b>' +
       (nuevos ? 'Llegaron ' + nuevos + ' movimiento' + (nuevos === 1 ? '' : 's') : 'Para revisar') + '</b><span class="chico">' +
       (l ? '<span class="verde-pos">' + l + ' listo' + (l === 1 ? '' : 's') + ' ✓</span>' : '') + (l && n ? ' · ' : '') +
-      (n ? '<span class="acento">' + n + ' necesita' + (n === 1 ? '' : 'n') + ' un toque</span>' : '') + ((l || n) && cf ? ' · ' : '') + (cf ? '<span class="suave">' + cf + ' por confirmar</span>' : '') + '</span></span><span class="flecha acento">›</span></button>';
+      (n ? '<span class="acento">' + n + ' necesita' + (n === 1 ? '' : 'n') + ' un toque</span>' : '') + ((l || n) && cf ? ' · ' : '') + (cf ? '<span class="suave">' + cf + ' por confirmar</span>' : '') + ((l || n || cf) && fl ? ' · ' : '') + (fl ? '<span style="color:var(--flot)">↪ ' + fl + ' en flotante</span>' : '') + '</span></span><span class="flecha acento">›</span></button>';
   }
   function chipRev(txt, accion, on) { return '<button class="chip' + (on ? ' on' : '') + '" onclick="' + accion + '">' + txt + '</button>'; }
   function q(s) { return esc(s).replace(/'/g, "\\'"); }
   function pRevisar() {
     var r = revisarData(), ef = C.efectosCuentas(D, ORIG());
     var h = cabSimple('Para revisar', 'Lo que llegó');
-    if (!r.accion.length && !r.listos.length && !r.confirmar.length) {
+    if (!r.accion.length && !r.listos.length && !r.confirmar.length && !r.flot.length) {
       h += '<div class="caja" style="text-align:center;gap:6px;padding:22px"><div style="font-size:36px">✅</div><b style="font-size:17px">Todo al día</b><span class="suave chico">No llegó nada nuevo y no hay nada pendiente.</span>' +
         (leerJSONSeguro('mf-ultimo-lote') ? '<button class="btn sec" style="margin-top:10px" onclick="App.ir(\'aldia\')">Ver cómo quedó lo último</button>' : '') + '</div>';
       $('p-revisar').innerHTML = h; return;
@@ -7461,6 +7627,7 @@ var App = (function () {
         return '<div class="caja rev-it borde-acento">' + cab(m) + cuerpo + '</div>';
       }).join('');
     }
+    if (r.flot.length) h += '<div class="seccion-t">COMPRAS EN FLOTANTE · ' + r.flot.reduce(function (a, g) { return a + g.l.length; }, 0) + '</div>' + r.flot.map(htmlFlotRevisar).join('');   // v2.19 (#70)
     if (r.confirmar.length) {
       h += '<div class="seccion-t">POR CONFIRMAR · ' + r.confirmar.length + '</div>' + r.confirmar.map(function (m) {
         return '<div class="caja rev-it">' + cab(m) + '<div class="rev-q">≈ ' + (esIVA(m) ? 'IVA estimado' : 'Monto estimado') + ': confirmalo cuando el banco lo aplique.</div><div class="chips">' +
@@ -7950,18 +8117,42 @@ var App = (function () {
   function calcVisible() { return true; }   // v2.14 (#59): la calculadora está siempre arriba (ya no hay interruptor)
   function calcMostrar(on) { guardar('mf-calc-ver', on ? 'si' : 'no'); montarCalc(); pintar(); toast(on ? '🧮 Calculadora visible' : 'Calculadora oculta (se activa en Ajustes → Apariencia)', 2200); }
   document.addEventListener('focusin', function (e) { var c = e.target; if (c && c.hasAttribute && c.hasAttribute('data-dinero')) CALC.ultMonto = c; });
+  // v2.19 (#71): ya no hay botón flotante. La 🧮 va arriba en el encabezado de TODAS las pantallas y, en las ventanas, al lado de cada monto.
   function montarCalc() {
-    var b = document.getElementById('calc-btn');
-    if (!calcVisible() || !D) { if (b) b.remove(); cerrarCalc(); return; }
-    if (b) return;
-    b = document.createElement('button'); b.id = 'calc-btn'; b.type = 'button'; b.setAttribute('aria-label', 'Calculadora'); b.innerHTML = ICO_CALC;
-    // v2.13.0 (#56): el botón flotante solo sale donde no hay botón arriba (pantallas sin +) o con un formulario abierto
-    document.body.appendChild(b);
-    b.addEventListener('click', function () { b.classList.remove('dormido'); alternarCalc(); });
-    dormirCalc();
+    var b = document.getElementById('calc-btn'); if (b) b.remove();
+    if (!D) { cerrarCalc(); return; }
+    calcEnCab();
+  }
+  /** Pone la 🧮 en el encabezado de la pantalla activa si no la tiene */
+  function calcEnCab() {
+    var cab = document.querySelector('.pantalla.activa .cab'); if (!cab || cab.querySelector('.btn-calc')) return;
+    var w = document.createElement('div'); w.className = 'cab-calc';
+    if (cab.children.length > 1) w.appendChild(cab.lastElementChild);
+    w.insertAdjacentHTML('beforeend', '<button class="btn-icono btn-calc" aria-label="Calculadora" onclick="App.alternarCalc()">' + ICO_CALC + '</button>');
+    cab.appendChild(w);
+  }
+  /** 🧮 chiquita al lado de cada monto de una ventana (y del monto del "+") */
+  function calcMini(raiz) {
+    if (!raiz) return;
+    Array.prototype.forEach.call(raiz.querySelectorAll('label.campo > input[data-dinero]:not([readonly])'), function (inp) {
+      if (inp.nextElementSibling && inp.nextElementSibling.classList.contains('calc-mini')) return;
+      inp.classList.add('con-calc');
+      inp.insertAdjacentHTML('afterend', '<button type="button" class="calc-mini" aria-label="Calculadora para este monto" onclick="App.calcPara(this,event)">' + ICO_CALC + '</button>');
+      if (inp.parentElement) inp.parentElement.classList.add('calc-rel');
+    });
+    var rm = raiz.querySelector('#rp-monto');
+    if (rm && !raiz.querySelector('.calc-mini.rap')) rm.insertAdjacentHTML('afterend', '<button type="button" class="calc-mini rap" aria-label="Calculadora para el monto" onclick="App.calcPara(this,event)">' + ICO_CALC + '</button>');
+  }
+  function calcPara(b, e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    var c = b.classList.contains('rap') ? document.getElementById('rp-monto') : b.previousElementSibling;
+    if (c) CALC.ultMonto = c;
+    var v = c && c.id === 'rp-monto' ? montoRapido() : c ? C.leerNumero(c.value) : 0;
+    if (v && !CALC.abierta) { CALC.expr = String(v).replace('.', ','); guardar('mf-calc-expr', CALC.expr); }
+    abrirCalc();
   }
   var tDormir = null;
-  function dormirCalc() { clearTimeout(tDormir); tDormir = setTimeout(function () { var b = document.getElementById('calc-btn'); if (b && !CALC.abierta) b.classList.add('dormido'); }, 4000); }
+  function dormirCalc() { clearTimeout(tDormir); }
   function alternarCalc() { if (CALC.abierta) cerrarCalc(); else abrirCalc(); }
   function abrirCalc() {
     CALC.abierta = true; document.body.classList.add('calc-abierta');
@@ -7970,8 +8161,19 @@ var App = (function () {
     pintarCalc();
   }
   function cerrarCalc() { CALC.abierta = false; document.body.classList.remove('calc-abierta'); var p = document.getElementById('calc-panel'); if (p) p.remove(); dormirCalc(); }
-  function montoVisible() { var c = CALC.ultMonto; return c && document.body.contains(c) && c.offsetParent !== null ? c : null; }
-  function nombreCampo(c) { var l = c.closest('label'); var sp = l && l.querySelector('span'); return sp ? sp.textContent.replace(/\s*\(.*\)$/, '').trim() : 'Monto'; }
+  function montoVisible() {
+    var vis = function (c) { return c && document.body.contains(c) && c.offsetParent !== null; };
+    if (vis(CALC.ultMonto)) return CALC.ultMonto;
+    var rm = document.getElementById('rp-monto');   // v2.19 (#72): el monto del "+" (no es un campo de texto: es el visor de su teclado)
+    return vis(rm) && $('velo').classList.contains('abierto') ? rm : null;
+  }
+  function nombreCampo(c) {
+    if (c.id === 'rp-monto') return 'Monto';
+    var l = c.closest('label'), sp = l && l.querySelector('span');
+    if (!sp && c.parentElement) sp = c.parentElement.querySelector('span');   // filas del reparto: el nombre del sobre
+    var t = sp ? sp.textContent.replace(/\s*\(.*\)$/, '').replace(/AJUSTE$/, '').trim() : '';
+    return t || 'Monto';
+  }
   function pintarCalc() {
     var p = document.getElementById('calc-panel'); if (!p) return;
     var r = calcular(CALC.expr), campo = montoVisible();
@@ -7996,6 +8198,10 @@ var App = (function () {
   }
   function calcUsar() {
     var c = montoVisible(), r = calcular(CALC.expr); if (!c || r === null) return;
+    if (c.id === 'rp-monto') {   // v2.19 (#72): el monto del "+"
+      rap.monto = montoTeclado(Math.abs(r)); pintarRapido();
+      toast('✓ ' + numTexto(Math.abs(r)) + ' en Monto', 1800); cerrarCalc(); return;
+    }
     c.value = formatoMonto(String(Math.abs(r)).replace('.', ','));
     c.dispatchEvent(new Event('input', { bubbles: true })); c.dispatchEvent(new Event('change', { bubbles: true }));
     toast('✓ ' + numTexto(Math.abs(r)) + ' en ' + nombreCampo(c), 1800); cerrarCalc();
@@ -8063,7 +8269,7 @@ var App = (function () {
     verViaje: verViaje, formViaje: formViaje, guardarViaje: guardarViaje, borrarViaje: borrarViaje, formLimiteViaje: formLimiteViaje,
     guardarLimiteViaje: guardarLimiteViaje, formCompraViaje: formCompraViaje, marcarViaje: marcarViaje, formAgregarViaje: formAgregarViaje,
     formCasa: formCasa, casaCrear: casaCrear, casaNuevo: casaNuevo, casaApagar: casaApagar, casaPermiso: casaPermiso, casaCopiar: casaCopiar,
-    verCorte: verCorte, formCortes: formCortes, formCorte: formCorte, corteCuenta: corteCuenta, corteNota: corteNota, guardarCorte: guardarCorte, quitarCorte: quitarCorte,
+    calcPara: calcPara, verCorte: verCorte, formCorteMov: formCorteMov, flotElegir: flotElegir, formFlotante: formFlotante, flotPaso: flotPaso, flotPreg: flotPreg, guardarFlotante: guardarFlotante, formCortes: formCortes, formCorte: formCorte, corteCuenta: corteCuenta, corteNota: corteNota, guardarCorte: guardarCorte, quitarCorte: quitarCorte,
     verTC: verTC, formAbonoTC: formAbonoTC, abonoCompra: abonoCompra, abonoVista: abonoVista, abonoTipo: abonoTipo, repartoMov: repartoMov, repOn: repOn, repSuma: repSuma,
     guardarAbonoTC: guardarAbonoTC, borrarAbonoTC: borrarAbonoTC,
     tcFiltro: function (f) { tcFiltro = f; tcVerTodo = false; pintar(); }, tcVerTodo: function () { tcVerTodo = true; pintar(); }

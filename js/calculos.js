@@ -905,20 +905,71 @@ var Calc = (function () {
    * CRC/USD = lo que toca pagar: la deuda de hoy sin las compras hechas después del último corte (esas van al siguiente estado de cuenta).
    * avisar = hoy es uno de los días elegidos (p. ej. [3,1,0]) y todavía queda algo por pagar (si ya pagaste, no avisa).
    */
-  /** v2.10.0 · Lo que toca pagar de una tarjeta hoy: la deuda sin las compras hechas después del último corte. */
+  // ---------------- v2.19 (#70) · Compras en flotante al cierre del corte ----------------
+  // Las compras de los últimos N días antes del corte (incluido el día del corte) el banco las cobra en el corte siguiente.
+  // La fecha de compra NO cambia: solo el corte en que cuentan (Por pagar, avisos, súper de la casa). Deuda y disponible las cuentan ya.
+  function flotantePrefs(d) { return (d && d.flotante) || (d && d.ajustes && d.ajustes.prefs && d.ajustes.prefs.flotante) || {}; }
+  /** Clave estable de un movimiento (la misma que usa la app para "vistos") */
+  function claveFlot(m) { return m.autorizacion ? 'a:' + m.autorizacion : 'f:' + m.fila + '|' + m.monto + '|' + String(m.fecha || '').slice(0, 10); }
+  var FLOT_DEF = 3;
+  /** Días en flotante de una tarjeta (0 = apagado; por defecto 3) */
+  function diasFlotante(d, cuenta) {
+    var p = flotantePrefs(d).dias || {}, v = p[normNom(cuenta)];
+    if (v === undefined || v === null || v === '') v = flotantePrefs(d).todas;
+    if (v === undefined || v === null || v === '') return FLOT_DEF;
+    return Math.max(0, Math.min(5, Math.round(Number(v) || 0)));
+  }
+  function isoDia(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'); }
+  function leerDia(s) { var x = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return x ? new Date(+x[1], +x[2] - 1, +x[3]) : null; }
+  /** Día de corte que cierra el período donde cae `fecha` (el mismo día del corte cuenta en ese corte) */
+  function finCorteDe(dia, fecha) {
+    var h = soloFecha(fecha), c = diaDelMes(h.getFullYear(), h.getMonth(), dia);
+    return h > c ? diaDelMes(h.getFullYear(), h.getMonth() + 1, dia) : c;
+  }
+  function corteSiguiente(dia, fin) { return diaDelMes(fin.getFullYear(), fin.getMonth() + 1, dia); }
+  /**
+   * En qué corte cuenta una compra (o devolución) de una tarjeta que corta el día `dia`.
+   * { fin, natural, siguiente, flotante (va al corte siguiente), auto (lo decidió la app), forzado (lo eligió el usuario) }
+   */
+  function corteCompra(d, cuenta, dia, m) {
+    var nat = finCorteDe(dia, new Date(m.fecha)), sig = corteSiguiente(dia, nat);
+    var dias = diasFlotante(d, cuenta), falta = Math.round((nat - soloFecha(new Date(m.fecha))) / 86400000);
+    var auto = dias > 0 && falta < dias && (m.tipo === 'Gasto' || m.tipo === 'Ingreso');
+    var fin = auto ? sig : nat, fz = m.corteForzado || (flotantePrefs(d).forzar || {})[claveFlot(m)], forzado = false;
+    if (fz) { var f = leerDia(fz); if (f && (f.getTime() === nat.getTime() || f.getTime() === sig.getTime())) { fin = f; forzado = true; } }
+    return { fin: fin, natural: nat, siguiente: sig, flotante: fin.getTime() > nat.getTime(), auto: auto, forzado: forzado, dias: dias };
+  }
+  /** Compras recientes de una tarjeta que pasaron al corte siguiente (las del corte que corre o el que acaba de cerrar) */
+  function flotantesTarjeta(d, cuenta, dia, hoy) {
+    if (!dia) return [];
+    var h = soloFecha(hoy), ult = finCorteDe(dia, h); if (ult > h) ult = diaDelMes(ult.getFullYear(), ult.getMonth() - 1, dia);
+    var out = [];
+    (d.movimientos || []).forEach(function (m) {
+      if (!m.fecha || (m.tipo !== 'Gasto' && m.tipo !== 'Ingreso') || normNom(m.cuenta) !== normNom(cuenta)) return;
+      var cc = corteCompra(d, cuenta, dia, m);
+      if (cc.flotante && cc.natural >= ult) out.push({ mov: m, corte: cc });
+    });
+    return out.sort(function (a, b) { return new Date(a.mov.fecha) - new Date(b.mov.fecha); });
+  }
+  /** v2.10.0 · Lo que toca pagar de una tarjeta hoy: la deuda sin las compras que van a un corte después del último. v2.19: con compras en flotante. */
   function porPagarTarjeta(d, c, hoy) {
     var r2 = function (n) { return Math.round(n * 100) / 100; };
     var dt = deudaTarjeta(d, c), corte = ultimoCorte(c, hoy), finCorte = corte ? new Date(corte.getFullYear(), corte.getMonth(), corte.getDate() + 1) : null;
     var fs = c.fechaSaldo ? new Date(c.fechaSaldo) : null, finSaldo = fs && !isNaN(fs) ? new Date(fs.getFullYear(), fs.getMonth(), fs.getDate() + 1) : null;
-    var nuevas = { CRC: 0, USD: 0 }, pagado = false;
+    var nuevas = { CRC: 0, USD: 0 }, pagado = false, flot = { CRC: 0, USD: 0, n: 0 };
     (d.movimientos || []).forEach(function (m) {
       if (normNom(m.cuenta) !== normNom(c.nombre) || !m.fecha) return;
       var fm = new Date(m.fecha);
       if (m.tipo === 'Pago de tarjeta' && finCorte && fm >= finCorte) pagado = true;
-      if ((m.tipo === 'Gasto' || (m.tipo === 'Compra tasa cero' && !c.diaCorte)) && finCorte && fm >= finCorte && (!finSaldo || fm >= finSaldo)) nuevas[m.moneda === 'USD' ? 'USD' : 'CRC'] += m.monto;
+      if (!(m.tipo === 'Gasto' || (m.tipo === 'Compra tasa cero' && !c.diaCorte)) || !finCorte || (finSaldo && fm < finSaldo)) return;
+      var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
+      if (m.tipo === 'Gasto' && c.diaCorte) {
+        var cc = corteCompra(d, c.nombre, c.diaCorte, m);
+        if (cc.fin.getTime() > corte.getTime()) { nuevas[mon] += m.monto; if (cc.flotante && cc.natural.getTime() <= corte.getTime()) { flot[mon] += m.monto; flot.n++; } }
+      } else if (fm >= finCorte) nuevas[mon] += m.monto;
     });
     var crc = dt.CRC > 0.004 ? Math.max(0, dt.CRC - nuevas.CRC) : dt.CRC, usd = dt.USD > 0.004 ? Math.max(0, dt.USD - nuevas.USD) : dt.USD;
-    return { CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) }, nuevas: { CRC: r2(nuevas.CRC), USD: r2(nuevas.USD) }, pagado: pagado, corte: corte };
+    return { CRC: r2(crc), USD: r2(usd), deuda: { CRC: r2(dt.CRC), USD: r2(dt.USD) }, nuevas: { CRC: r2(nuevas.CRC), USD: r2(nuevas.USD) }, flotante: { CRC: r2(flot.CRC), USD: r2(flot.USD), n: flot.n }, pagado: pagado, corte: corte };
   }
   /**
    * v2.11.0 (#51) · Cuotas tasa cero que se cargan a la tarjeta el día del corte.
@@ -1005,21 +1056,25 @@ var Calc = (function () {
     var per = periodoCorte(Number(cfg.dia) || 1, hoy, atras), t0 = per.ini.getTime(), t1 = per.fin.getTime() + 86400000;
     var compras = [], gastado = 0, porDia = [], brutas = 0, devol = 0, estimado = 0;
     for (var i = 0; i < per.dias; i++) porDia.push(0);
+    var finT = per.fin.getTime(), dia = Number(cfg.dia) || 1, nFlot = 0, flotM = 0;
     (d.movimientos || []).forEach(function (m) {
       if (!m.fecha || (m.tipo !== 'Gasto' && m.tipo !== 'Ingreso') || !esDeCorte(cfg, m)) return;   // v2.18: Ingreso = devolución / crédito (resta)
-      var t = new Date(m.fecha).getTime(); if (t < t0 || t >= t1) return;
+      var t = new Date(m.fecha).getTime(); if (t < t0 - 40 * 86400000 || t >= t1 + 40 * 86400000) return;
+      var cc = corteCompra(d, cfg.cuenta, dia, m);   // v2.19 (#70): cuenta en el corte que le toca (las de los últimos días pasan al siguiente)
+      if (cc.fin.getTime() !== finT) return;
       var v = enCRC(d, m.monto, m.moneda) * (m.tipo === 'Ingreso' ? -1 : 1);
       if (v < 0) devol -= v; else brutas += v;
       if (/monto estimado|IVA estimado/i.test(m.nota || '')) estimado += v;
-      gastado += v; compras.push({ mov: m, monto: v, devolucion: v < 0 });
-      var k = Math.floor((soloFecha(new Date(m.fecha)) - per.ini) / 86400000); if (k >= 0 && k < per.dias) porDia[k] += v;
+      if (cc.flotante) { nFlot++; flotM += v; }
+      gastado += v; compras.push({ mov: m, monto: v, devolucion: v < 0, flotante: cc.flotante, corte: cc });
+      var k = Math.max(0, Math.floor((soloFecha(new Date(m.fecha)) - per.ini) / 86400000)); if (k < per.dias) porDia[k] += v;
     });
     compras.sort(function (a, b) { return new Date(b.mov.fecha) - new Date(a.mov.fecha); });
     var monto = Number(cfg.monto) || 0, quedan = monto - gastado, acum = 0;
     var serie = porDia.slice(0, per.dia).map(function (v) { acum += v; return acum; });
     var ideal = monto * per.dia / per.dias;
     return {
-      cfg: cfg, periodo: per, gastado: gastado, monto: monto, brutas: brutas, devoluciones: devol, estimado: estimado, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
+      cfg: cfg, periodo: per, gastado: gastado, monto: monto, flotantes: { n: nFlot, monto: flotM }, brutas: brutas, devoluciones: devol, estimado: estimado, quedan: quedan, pct: monto ? gastado / monto : 0, compras: compras, n: compras.length,
       promedio: per.dia ? Math.round(gastado / per.dia) : 0, porDia: Math.floor(per.faltan > 0 ? Math.max(0, quedan) / per.faltan : Math.max(0, quedan)),
       serie: serie, ideal: ideal, ritmo: Math.round(ideal - gastado),   // > 0: van por debajo del ritmo ideal
       estado: !monto ? 'bien' : gastado > monto + 0.001 ? 'pasado' : gastado / monto >= 0.8 ? 'alerta' : (gastado / monto > per.dia / per.dias + 0.10 && gastado / monto >= 0.5) ? 'rapido' : 'bien'
@@ -1171,7 +1226,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes, tipoAbono: tipoAbono, cuentaTasaCero: cuentaTasaCero,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, cortesPrefs: cortesPrefs, esDeCorte: esDeCorte, corteDe: corteDe, periodoCorte: periodoCorte, presupuestoCorte: presupuestoCorte, historialCorte: historialCorte, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, cortesPrefs: cortesPrefs, esDeCorte: esDeCorte, corteDe: corteDe, periodoCorte: periodoCorte, presupuestoCorte: presupuestoCorte, historialCorte: historialCorte, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, flotantePrefs: flotantePrefs, claveFlot: claveFlot, diasFlotante: diasFlotante, corteCompra: corteCompra, flotantesTarjeta: flotantesTarjeta, finCorteDe: finCorteDe, corteSiguiente: corteSiguiente, isoDia: isoDia, FLOT_DEF: FLOT_DEF, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;
