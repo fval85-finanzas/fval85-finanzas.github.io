@@ -1,0 +1,26 @@
+{
+ "web": "2.19.0",
+ "servidor": "2.19.0",
+ "sha256": "e8d15b10ddf67075d1eefeaf27f69b7dc4901629b20cfa8c8cde747f96c0a871",
+ "novedades": "↪ Compras en flotante al cierre del corte · 🧮 calculadora siempre arriba (sin botón flotante) · pegar el número de la calculadora en el +",
+ "manifiesto": {
+  "timeZone": "America/Costa_Rica",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+   "https://www.googleapis.com/auth/spreadsheets",
+   "https://mail.google.com/",
+   "https://www.googleapis.com/auth/script.send_mail",
+   "https://www.googleapis.com/auth/script.external_request",
+   "https://www.googleapis.com/auth/script.scriptapp",
+   "https://www.googleapis.com/auth/userinfo.email",
+   "https://www.googleapis.com/auth/script.projects",
+   "https://www.googleapis.com/auth/script.deployments"
+  ],
+  "webapp": {
+   "executeAs": "USER_DEPLOYING",
+   "access": "ANYONE_ANONYMOUS"
+  }
+ }
+}

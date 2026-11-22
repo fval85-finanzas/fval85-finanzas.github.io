@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="dorado">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Finanzas</title>
+  <meta name="theme-color" content="#121417">
+  <meta name="color-scheme" content="light dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Finanzas">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icono-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilos.css">
+  <script>
+    try {
+      var t = localStorage.getItem('mf-tema') || 'dorado';
+      if (t === 'auto') t = window.matchMedia('(prefers-color-scheme: dark)').matches ? (localStorage.getItem('mf-tema-oscuro') || 'dorado') : (localStorage.getItem('mf-tema-claro') || 'crema');
+      document.documentElement.setAttribute('data-tema', t);
+      document.documentElement.setAttribute('data-letra', localStorage.getItem('mf-letra') || 'normal');
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="cargando" id="cargando">
+    <div id="logoCarga" class="logo"></div>
+    <div class="spinner"></div>
+    <div class="suave">Cargando tus finanzas…</div>
+  </div>
+
+  <main class="app">
+    <section class="pantalla" id="p-inicio"></section>
+    <section class="pantalla" id="p-movimientos"></section>
+    <section class="pantalla" id="p-tarjetas"></section>
+    <section class="pantalla" id="p-sobres"></section>
+    <section class="pantalla" id="p-prestamo"></section>
+    <section class="pantalla" id="p-ajustes"></section>
+    <section class="pantalla" id="p-mas"></section>
+    <section class="pantalla" id="p-calculadora"></section>
+    <section class="pantalla" id="p-tasacero"></section>
+    <section class="pantalla" id="p-tcdetalle"></section>
+    <section class="pantalla" id="p-porasignar"></section>
+    <section class="pantalla" id="p-reparto"></section>
+    <section class="pantalla" id="p-limpiar"></section>
+    <section class="pantalla" id="p-fondos"></section>
+    <section class="pantalla" id="p-medeben"></section>
+    <section class="pantalla" id="p-viajes"></section>
+    <section class="pantalla" id="p-presupuesto"></section>
+    <section class="pantalla" id="p-viaje"></section>
+    <section class="pantalla" id="p-reportes"></section>
+    <section class="pantalla" id="p-patrimonio"></section>
+    <section class="pantalla" id="p-super"></section>
+    <section class="pantalla" id="p-lista"></section>
+    <section class="pantalla" id="p-plan"></section>
+    <section class="pantalla" id="p-sobre"></section>
+    <section class="pantalla" id="p-ctamov"></section>
+    <section class="pantalla" id="p-revisar"></section>
+    <section class="pantalla" id="p-aldia"></section>
+  </main>
+
+  <nav class="tabs" id="tabs" aria-label="Secciones"></nav>
+
+  <div class="velo" id="velo" onclick="if (event.target === this) App.cerrar()">
+    <div class="panel" role="dialog" aria-modal="true" id="panel"></div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <div class="bloqueo" id="bloqueo" aria-label="Ingresá tu PIN">
+    <div class="logo" id="logoPin"></div>
+    <div style="font-size:22px;font-weight:800">Finanzas</div>
+    <div class="suave" id="pinTitulo" style="margin-top:-14px">Escribí tu PIN</div>
+    <div class="puntos" id="puntos"></div>
+    <div class="suave" id="pinMsg" style="min-height:20px"></div>
+    <div class="teclado" id="teclado"></div>
+    <div id="pinExtra"></div>
+  </div>
+
+  <div class="conexion" id="conexion"></div>
+
+  <noscript>Esta aplicación necesita JavaScript.</noscript>
+  <script src="js/calculos.js"></script>
+  <script src="js/tiendas.js"></script>
+  <script src="js/pdf.js"></script>
+  <script src="js/lector.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
