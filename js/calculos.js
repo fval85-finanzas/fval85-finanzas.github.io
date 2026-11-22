@@ -729,6 +729,28 @@ var Calc = (function () {
     var n = cta ? cta.nombre : o.principal;
     return n ? { cuenta: n, signo: m.tipo === 'Ingreso' ? 1 : -1, grupo: m.tipo === 'Ingreso' ? 'entra' : 'sale' } : null;
   }
+  /**
+   * v2.19.1 (#68): ¿de qué cuenta de ahorros sale este gasto y cómo queda?
+   *  m = { tipo, monto, moneda, cuenta, fecha, fila? } (fila = se está editando: no se cuenta la versión vieja)
+   *  restar(c, moneda) → número a restar del saldo para mostrar el DISPONIBLE (sobres + reservado), o null si no aplica
+   *  → { cuenta, moneda, antes, despues, negativo, disponible } o null (no es gasto, no toca ahorros, la cuenta no tiene saldo anotado,
+   *    o la fecha es de antes del saldo anotado)
+   */
+  function quedaEnCuenta(d, o, m, restar) {
+    if (!m || m.tipo !== 'Gasto') return null;
+    var v = Math.max(0, Number(m.monto) || 0), mm = Object.assign({}, m, { monto: v });
+    var e = efectoCuenta(d, mm, o || {}); if (!e || e.signo >= 0) return null;
+    var c = (d.cuentas || []).filter(function (x) { return normNom(x.nombre) === normNom(e.cuenta); })[0];
+    if (!c || !esAhorro(c) || !esCuentaReal(c)) return null;
+    var mon = m.moneda === 'USD' ? 'USD' : 'CRC';
+    var d2 = m.fila ? Object.assign({}, d, { movimientos: (d.movimientos || []).filter(function (x) { return x.fila !== m.fila; }) }) : d;
+    var sc = saldoCuenta(d2, c, o); if (!sc.vivo) return null;
+    var ds = new Date(sc.fecha), f = m.fecha ? new Date(m.fecha) : new Date();
+    if (!isNaN(ds) && f < new Date(ds.getFullYear(), ds.getMonth(), ds.getDate() + 1)) return null;   // de antes del saldo anotado: no lo mueve
+    var r = typeof restar === 'function' ? restar(c, mon) : null;
+    var antes = sc[mon] - (r || 0), despues = antes - v;
+    return { cuenta: c.nombre, moneda: mon, antes: antes, despues: despues, negativo: v > 0 && despues < -0.005, disponible: r !== null && r !== undefined };
+  }
   /** v2.5.6: ¿la transferencia entra o sale de la cuenta anotada? (por la descripción que pone el lector o la persona) */
   function entraTransferencia(m) { return /^\s*(entr[oó]|cr[eé]dito|sinpe de|dep[oó]sito|recib)/i.test(m.comercio || ''); }
   /**
@@ -1226,7 +1248,7 @@ var Calc = (function () {
     sobres: sobres, dinero: dinero, leerNumero: leerNumero, pct: pct, NO_GASTO: NO_GASTO,
     amortizar: amortizar, cuotaNivelada: cuotaNivelada, planTasaCero: planTasaCero, abonosEnMes: abonosEnMes, tipoAbono: tipoAbono, cuentaTasaCero: cuentaTasaCero,
     esTarjeta: esTarjeta, sentidoSobre: sentidoSobre, analizarSobres: analizarSobres, saldosSobres: saldosSobres, reparto: reparto,
-    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, cortesPrefs: cortesPrefs, esDeCorte: esDeCorte, corteDe: corteDe, periodoCorte: periodoCorte, presupuestoCorte: presupuestoCorte, historialCorte: historialCorte, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, flotantePrefs: flotantePrefs, claveFlot: claveFlot, diasFlotante: diasFlotante, corteCompra: corteCompra, flotantesTarjeta: flotantesTarjeta, finCorteDe: finCorteDe, corteSiguiente: corteSiguiente, isoDia: isoDia, FLOT_DEF: FLOT_DEF, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
+    fondos: fondos, sugerirSubcuenta: sugerirSubcuenta, deudaTarjeta: deudaTarjeta, meDeben: meDeben, esCobro: esCobro, esSobreReal: esSobreReal, esCuentaReal: esCuentaReal, TIPO_SACAR: TIPO_SACAR, TIPO_METER: TIPO_METER, esSacarMeter: esSacarMeter, esCompraTarjeta: esCompraTarjeta, sobresAl: sobresAl, esAhorro: esAhorro, origenes: origenes, efectoCuenta: efectoCuenta, quedaEnCuenta: quedaEnCuenta, movsCuenta: movsCuenta, efectosCuentas: efectosCuentas, normNom: normNom, leerDesde: leerDesde, entraTransferencia: entraTransferencia, saldoCuenta: saldoCuenta, historialSobre: historialSobre, saldosMensualesSobre: saldosMensualesSobre, leerBusqueda: leerBusqueda, coincide: coincide, rangoPeriodo: rangoPeriodo, ultimoCorte: ultimoCorte, presupuesto: presupuesto, periodoPresupuesto: periodoPresupuesto, cortesPrefs: cortesPrefs, esDeCorte: esDeCorte, corteDe: corteDe, periodoCorte: periodoCorte, presupuestoCorte: presupuestoCorte, historialCorte: historialCorte, categoriaPresupuesto: categoriaPresupuesto, promediosPresupuesto: promediosPresupuesto, librePresupuesto: librePresupuesto, cuotasAlCorte: cuotasAlCorte, saldoTasaCeroTarjeta: saldoTasaCeroTarjeta, pagosProximos: pagosProximos, porPagarTarjeta: porPagarTarjeta, flotantePrefs: flotantePrefs, claveFlot: claveFlot, diasFlotante: diasFlotante, corteCompra: corteCompra, flotantesTarjeta: flotantesTarjeta, finCorteDe: finCorteDe, corteSiguiente: corteSiguiente, isoDia: isoDia, FLOT_DEF: FLOT_DEF, tarjetaDesconocida: tarjetaDesconocida, fechasSalario: fechasSalario, esSalario: esSalario, viaje: viaje, enViaje: enViaje, categoriaViaje: categoriaViaje, marcaViaje: marcaViaje, esEfectivo: esEfectivo, esFamilia: esFamilia, efectivoPropioViaje: efectivoPropioViaje, familia4: familia4, personaFamilia: personaFamilia, familiaPrefs: familiaPrefs, SIN_FAMILIA: SIN_FAMILIA, CATS_VIAJE: CATS_VIAJE, aMoneda: aMoneda
   };
 })();
 if (typeof module !== 'undefined') module.exports = Calc;

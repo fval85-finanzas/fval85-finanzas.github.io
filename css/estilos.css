@@ -1119,3 +1119,13 @@ input.con-calc { padding-right: 50px !important; }
 .rap-monto-w { position: relative; }
 .calc-mini.rap { bottom: auto; top: 50%; transform: translateY(-50%); right: 2px; width: 38px; height: 38px; }
 .rap-monto-w .rap-monto { padding-left: 42px; padding-right: 42px; }
+
+/* v2.19.1 (#68): cómo queda la cuenta de ahorros con el gasto + pregunta si queda en negativo */
+.queda { font-size: 13px; line-height: 1.35; margin: 6px 2px 2px; text-align: center; overflow-wrap: anywhere; }
+.queda.neg { color: var(--rojo); font-weight: 600; }
+.queda.neg .suave { font-weight: 400; }
+#f-queda .queda { text-align: left; margin-top: 4px; }
+.neg-preg { margin: 8px 0 4px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--rojo);
+  background: color-mix(in srgb, var(--rojo) 10%, transparent); font-size: 14px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px; }
+.neg-bts { display: flex; flex-wrap: wrap; gap: 6px; }
+.neg-bts .btn { flex: 1 1 auto; min-width: 0; margin: 0; padding: 9px 10px; font-size: 13.5px; white-space: nowrap; }

@@ -13,7 +13,7 @@ var App = (function () {
   var AJ = null;                      // ajustes del servidor
   var ocultoDesde = null;
   var MINUTOS_BLOQUEO = 5;
-  var VERSION_WEB = '2.19.0';
+  var VERSION_WEB = '2.19.1';
 
   function guardado(clave, def, donde) { try { var v = (donde || localStorage).getItem(clave); return v === null ? def : v; } catch (e) { return def; } }
   function guardar(clave, v, donde) { try { if (v === null) (donde || localStorage).removeItem(clave); else (donde || localStorage).setItem(clave, v); } catch (e) {} }
@@ -3273,16 +3273,17 @@ var App = (function () {
     var h = '<h2>' + (fila ? 'Movimiento' : 'Nuevo movimiento') + '</h2>';
     if (m.origen === 'Correo') h += '<div class="pill ok" style="display:inline-block">Registrado desde un correo' + (m.autorizacion && m.autorizacion.indexOf('auto-') !== 0 ? ' · aut. ' + esc(m.autorizacion) : '') + '</div>';
     repMv = { fila: fila || 0, cuenta: null, items: [], on: false };
-    h += '<label class="campo"><span>Tipo</span><select id="f-tipo" onchange="App.repartoMov()">' + opciones((function (l) { l = l.slice(); if (m.tipo && l.indexOf(m.tipo) < 0) l.push(m.tipo); return l; })(D.tiposMovimiento.length ? D.tiposMovimiento : ['Gasto', 'Ingreso']), m.tipo) + '</select></label>' +
-      '<div style="display:flex;gap:8px;align-items:flex-end"><label class="campo" style="flex:1"><span>Monto</span><input id="f-monto" data-dinero class="monto" inputmode="decimal" placeholder="0" oninput="App.repSuma()" value="' + (m.monto ? esc(String(m.monto).replace('.', ',')) : '') + '"></label>' +
-      '<label class="campo" style="width:96px"><span>Moneda</span><select id="f-moneda" onchange="App.repartoMov(1)">' + '<option value="CRC"' + (m.moneda === 'CRC' ? ' selected' : '') + '>₡</option><option value="USD"' + (m.moneda === 'USD' ? ' selected' : '') + '>$</option></select></label></div>' +
+    h += '<label class="campo"><span>Tipo</span><select id="f-tipo" onchange="App.repartoMov();App.pintarQuedaForm()">' + opciones((function (l) { l = l.slice(); if (m.tipo && l.indexOf(m.tipo) < 0) l.push(m.tipo); return l; })(D.tiposMovimiento.length ? D.tiposMovimiento : ['Gasto', 'Ingreso']), m.tipo) + '</select></label>' +
+      '<div style="display:flex;gap:8px;align-items:flex-end"><label class="campo" style="flex:1"><span>Monto</span><input id="f-monto" data-dinero class="monto" inputmode="decimal" placeholder="0" oninput="App.repSuma();App.pintarQuedaForm()" value="' + (m.monto ? esc(String(m.monto).replace('.', ',')) : '') + '"></label>' +
+      '<label class="campo" style="width:96px"><span>Moneda</span><select id="f-moneda" onchange="App.repartoMov(1);App.pintarQuedaForm()">' + '<option value="CRC"' + (m.moneda === 'CRC' ? ' selected' : '') + '>₡</option><option value="USD"' + (m.moneda === 'USD' ? ' selected' : '') + '>$</option></select></label></div>' +
       '<label class="campo"><span>Comercio o descripción</span><input id="f-comercio" value="' + esc(m.comercio) + '" placeholder="Ej. Automercado"></label>' +
       '<label class="campo"><span>Lugar</span><input id="f-lugar" value="' + esc(m.lugar) + '" placeholder="Opcional"></label>' +
-      '<label class="campo"><span>Fecha y hora</span><input id="f-fecha" type="datetime-local" value="' + localInput(m.fecha, true) + '"></label>' +
+      '<label class="campo"><span>Fecha y hora</span><input id="f-fecha" type="datetime-local" onchange="App.pintarQuedaForm()" value="' + localInput(m.fecha, true) + '"></label>' +
       (function () { var cc = fila ? corteMov(m) : null; return cc ? '<button class="op-corte" style="margin-top:2px" onclick="App.formCorteMov(' + fila + ')"><span style="flex:1"><span class="suave chico" style="display:block">Cuenta en el corte de</span><b>' + mesCorte(cc.fin) + '</b> ' + (cc.flotante ? TAG_FLOT : '') + '</span><span class="enlace">Cambiar ›</span></button>' : ''; })() +   // v2.19 (#70)
-      '<label class="campo"><span>Tarjeta o cuenta</span><select id="f-cuenta" onchange="App.monedaDeCuenta();App.repartoMov()">' + opciones(cuentas, m.cuenta, sinCuentaTexto()) +
+      '<label class="campo"><span>Tarjeta o cuenta</span><select id="f-cuenta" onchange="App.monedaDeCuenta();App.repartoMov();App.pintarQuedaForm()">' + opciones(cuentas, m.cuenta, sinCuentaTexto()) + opcionEfectivo(m.cuenta) +
         // v2.17.1: las tarjetas de la familia también se pueden elegir aquí (antes se perdían al tocar "Cambiar ›" en el "+")
         cuentasFamilia().concat(C.esFamilia(m) && cuentasFamilia().indexOf(m.cuenta) < 0 ? [m.cuenta] : []).map(function (k) { return '<option value="' + esc(k) + '"' + (k === m.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') + '</select></label>' +
+      '<div id="f-queda">' + lineaQueda(Object.assign({}, m, { fila: fila || null, monto: m.monto || 0 })) + '</div>' +   // v2.19.1 (#68)
       '<div id="f-reparto"></div>' +
       '<label class="campo"><span>Categoría</span><select id="f-categoria">' + opciones(D.categorias, m.categoria, '— Sin categoría —') + '</select></label>' +
       '<label class="campo"><span>Sobre</span><select id="f-sobre">' + opciones(sobres, m.sobre, '— Ninguno —') + '</select></label>' +
@@ -3290,7 +3291,7 @@ var App = (function () {
       '<label class="check"><input type="checkbox" id="f-regla"> Usar siempre esta categoría y sobre para este comercio</label>' +
       (fila && m.tipo === 'Pago de tarjeta' ? bloqueAbonosDePago(m) : '') +
       (fila ? bloqueSobresDeMov(m) + bloqueViajeDeMov(m) : '') +
-      '<div class="acciones"><button class="btn" id="f-guardar" onclick="App.guardarMov(' + (fila || 0) + ')">Guardar</button>' +
+      '<div class="acciones"><button class="btn" id="f-guardar" data-fila="' + (fila || 0) + '" onclick="App.guardarMov(' + (fila || 0) + ')">Guardar</button>' +
       (fila && m.tipo === 'Gasto' ? '<button class="btn sec" onclick="App.formTasaCero(' + fila + ')">Pasar a tasa cero</button>' : '') +
       (fila ? '<button class="btn peligro" id="f-borrar" onclick="App.borrarMov(' + fila + ')">Eliminar movimiento</button>' : '') +
       '<button class="btn sec" onclick="App.cerrar()">Cancelar</button></div>';
@@ -3354,12 +3355,15 @@ var App = (function () {
   }
   function monedaDeCuenta() { var c = cuentaPorNombre(val('f-cuenta')); if (c && !$('f-monto').value) $('f-moneda').value = c.moneda; }
 
-  function guardarMov(fila) {
+  function guardarMov(fila, seguro) {
     var monto = C.leerNumero(val('f-monto'));
     if (!monto || monto <= 0) return toast('Escribí un monto mayor a cero.');
     var fecha = desdeInput(val('f-fecha'), true);
     if (!fecha) return toast('Revisá la fecha.');
     var orig = fila ? D.movimientos.filter(function (x) { return x.fila === fila; })[0] : null;
+    // v2.19.1 (#68): avisar si deja una cuenta en negativo (al editar, solo si cambió algo que mueve la plata)
+    var mf = movForm(), cambia = !orig || orig.tipo !== mf.tipo || Math.abs((orig.monto || 0) - mf.monto) > 0.004 || (orig.moneda || 'CRC') !== mf.moneda || C.normNom(orig.cuenta || '') !== C.normNom(mf.cuenta || '');
+    if (seguro !== true && cambia) { var q = quedaMov(mf); if (q && q.negativo && preguntaNegativo(q, 'form')) return; }
     var m = {
       fila: fila || null, control: orig ? { monto: orig.monto } : null,
       fecha: fecha, monto: monto, moneda: val('f-moneda'), tipo: val('f-tipo'),
@@ -4388,6 +4392,58 @@ var App = (function () {
   /** v2.17 (#67): tarjetas de la familia activas como cuentas para anotar a mano ("Familia ••1234") */
   /** v2.17.1 (#68): lo que pasa con un movimiento sin cuenta, dicho claro (se toma de la cuenta principal) */
   function sinCuentaTexto() { var p = ORIG().principal; return p ? 'Sin cuenta · sale de ' + p : 'Sin cuenta'; }
+  // ---- v2.19.1 (#68): aviso si un gasto deja una cuenta de ahorros en negativo
+  /** Opción "💵 Efectivo" (no sale de ninguna cuenta), salvo que ya exista una cuenta con ese nombre */
+  function opcionEfectivo(sel) {
+    if (D.cuentas.some(function (c) { return C.normNom(c.nombre) === 'efectivo'; })) return '';
+    return '<option value="Efectivo"' + (sel === 'Efectivo' ? ' selected' : '') + '>💵 Efectivo · no sale de ninguna cuenta</option>';
+  }
+  /** Cómo queda la cuenta de ahorros con este gasto (en la principal, el DISPONIBLE como en la app del banco) */
+  function quedaMov(m) {
+    try {
+      return C.quedaEnCuenta(D, ORIG(), m, function (c, mon) {
+        if (mon !== 'CRC' || ORIG().principal !== c.nombre || sinServidorSobres() || c.moneda === 'USD') return null;
+        var sb = C.saldosSobres(D, hoy, hoy); return sb.total.CRC + (sb.reservadoTotal || 0);
+      });
+    } catch (e) { return null; }
+  }
+  /** Línea en vivo debajo de la cuenta: "Sale de … · te queda ₡X" (roja si baja de cero) */
+  function lineaQueda(m) {
+    var q = quedaMov(m); if (!q) return '';
+    var que = q.disponible ? 'disponible' : 'saldo', nom = '<b>' + esc(q.cuenta) + '</b>';
+    if (!(m.monto > 0)) return '<div class="queda suave">🏦 ' + nom + ' · ' + que + ' ' + din(q.antes, q.moneda) + '</div>';
+    if (q.negativo) return '<div class="queda neg">⚠ ' + nom + ' queda en ' + din(q.despues, q.moneda) + ' <span class="suave">(' + que + ' hoy ' + din(q.antes, q.moneda) + ')</span></div>';
+    return '<div class="queda">🏦 Sale de ' + nom + ' · te queda ' + din(q.despues, q.moneda) + '</div>';
+  }
+  /** Pregunta antes de guardar (dentro del mismo formulario, para no perder lo escrito) */
+  function preguntaNegativo(q, donde) {
+    var cont = $(donde === 'rap' ? 'rp-queda' : 'f-queda'); if (!cont) return false;
+    cont.innerHTML = '<div class="neg-preg"><div>⚠ Con este gasto <b>' + esc(q.cuenta) + '</b> queda en <b class="rojo">' + din(q.despues, q.moneda) + '</b>.</div>' +
+      '<div class="suave chico">' + (q.disponible ? 'Disponible' : 'Saldo') + ' en la app hoy: ' + din(q.antes, q.moneda) + '. Si el banco tiene más, puede que falte anotar algo que entró.</div>' +
+      '<div class="neg-bts"><button class="btn sec" onclick="App.negCambiar(\'' + donde + '\')">Cambiar cuenta</button>' +
+      '<button class="btn sec" onclick="App.negEfectivo(\'' + donde + '\')">💵 Fue en efectivo</button>' +
+      '<button class="btn" onclick="App.negIgual(\'' + donde + '\')">Guardar igual</button></div></div>';
+    try { cont.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) { }
+    return true;
+  }
+  function negCambiar(donde) {
+    if (donde === 'rap') { var eq = $('rp-queda'); if (eq) eq.innerHTML = lineaQueda(movRapido()); }
+    else { var fq = $('f-queda'); if (fq) fq.innerHTML = lineaQueda(movForm()); }
+    var s = $(donde === 'rap' ? 'rp-cuenta' : 'f-cuenta'); if (!s) return;
+    try { (s._btn || s).scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { }
+    if (s._btn) abrirElegir(s); else { try { s.focus(); if (s.showPicker) s.showPicker(); } catch (e) { } }
+  }
+  function negEfectivo(donde) {
+    if (donde === 'rap') { rap.cuenta = 'Efectivo'; rapGuardar(true); }
+    else { var s = $('f-cuenta'); if (s) s.value = 'Efectivo'; guardarMov(Number((($('f-guardar') || {}).dataset || {}).fila) || 0, true); }
+  }
+  function negIgual(donde) { if (donde === 'rap') rapGuardar(true); else guardarMov(Number((($('f-guardar') || {}).dataset || {}).fila) || 0, true); }
+  function movRapido() { return { tipo: rap.tipo, monto: montoRapido(), moneda: rap.moneda, cuenta: rap.cuenta, fecha: new Date().toISOString() }; }
+  function movForm() {
+    var fila = Number((($('f-guardar') || {}).dataset || {}).fila) || 0;
+    return { tipo: val('f-tipo'), monto: C.leerNumero(val('f-monto')) || 0, moneda: val('f-moneda') || 'CRC', cuenta: val('f-cuenta'), fecha: desdeInput(val('f-fecha'), true) || new Date().toISOString(), fila: fila || null };
+  }
+  function pintarQuedaForm() { var fq = $('f-queda'); if (fq) fq.innerHTML = lineaQueda(movForm()); }
   function cuentasFamilia() { var o = familia(); return Object.keys(o).filter(function (k) { return !o[k].pausada; }).map(function (k) { return 'Familia ••' + k; }); }
   function cuentaValida(n) { return !!n && (!!cuentaPorNombre(n) || cuentasFamilia().indexOf(n) >= 0); }
   function etiquetaFamilia(k) { var x = infoFamilia(k); return '👪 ' + x.persona + ' · ' + x.nombre + ' ••' + x.u4; }
@@ -4418,7 +4474,9 @@ var App = (function () {
       '<button class="rap-pegar" onclick="App.rapPegar()">📋 <span>Pegar mensaje del banco</span></button>' +
       '<div class="rap-fila"><button class="chip" onclick="App.rapMoneda()" aria-label="Cambiar moneda">₡ ⇄ $</button>' +
       '<select id="rp-cuenta" class="rap-cuenta" onchange="App.rapCuenta(this.value)" aria-label="Tarjeta o cuenta">' + opciones(cuentas, rap.cuenta, sinCuentaTexto()) +
-        (rap.tipo === 'Gasto' || fam ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') + '</select></div>' +
+        (rap.tipo === 'Gasto' || fam ? cuentasFamilia().map(function (k) { return '<option value="' + esc(k) + '"' + (k === rap.cuenta ? ' selected' : '') + '>' + esc(etiquetaFamilia(k)) + '</option>'; }).join('') : '') +
+        (rap.tipo === 'Gasto' && !fam ? opcionEfectivo(rap.cuenta) : '') + '</select></div>' +
+      '<div id="rp-queda">' + lineaQueda(movRapido()) + '</div>' +   // v2.19.1 (#68)
       '<div class="rap-monto-w"><div class="rap-monto" id="rp-monto"' + (dev ? ' style="color:var(--positivo)"' : '') + '>' + textoMontoRapido() + '<i></i></div></div>' +
       (fam ? '<div id="rp-corte">' + textoCorteRapido() + '</div>' : '') +
       (fr.length ? '<div class="chips rap-frec">' + fr.map(function (f, i) {
@@ -4441,6 +4499,7 @@ var App = (function () {
     }
     rap.monto = s;
     var e = $('rp-monto'); if (e) e.innerHTML = textoMontoRapido() + '<i></i>'; var ec = $('rp-corte'); if (ec) ec.innerHTML = textoCorteRapido();
+    var eq = $('rp-queda'); if (eq) eq.innerHTML = lineaQueda(movRapido());   // v2.19.1 (#68)
   }
   function rapTipo(t) { rap.tipo = t; rap.frec = -1; rap.comercio = rap.categoria = rap.sobre = ''; pintarRapido(); }
   /** v2.18: con la tarjeta de la familia, cómo queda el presupuesto por corte con este monto */
@@ -4465,14 +4524,15 @@ var App = (function () {
   function rapDetalles() {
     formMovimiento(0, { tipo: rap.tipo, monto: montoRapido() || null, moneda: rap.moneda, cuenta: rap.cuenta, comercio: rap.comercio, categoria: rap.categoria, sobre: rap.sobre });
   }
-  function rapGuardar() {
+  function rapGuardar(seguro) {
     var monto = montoRapido();
     if (!(monto > 0)) return toast('Escribí el monto.');
+    if (seguro !== true) { var q = quedaMov(movRapido()); if (q && q.negativo && preguntaNegativo(q, 'rap')) return; }   // v2.19.1 (#68)
     var m = { fila: null, control: null, fecha: new Date().toISOString(), monto: monto, moneda: rap.moneda, tipo: rap.tipo, comercio: rap.comercio || '', lugar: '',
       cuenta: rap.cuenta, categoria: rap.categoria, sobre: C.esFamilia({ cuenta: rap.cuenta }) ? '' : rap.sobre, nota: '', origen: 'Manual', autorizacion: '', recordarRegla: false };
     if (C.esFamilia(m)) m.nota = m.tipo === 'Ingreso' ? 'Devolución / crédito · anotada a mano' : 'Tarjeta de la familia · anotada a mano';
     if (C.esFamilia(m) && m.tipo === 'Ingreso' && !m.comercio) m.comercio = 'Devolución';
-    guardar('mf-rap-cuenta', rap.cuenta || '');
+    guardar('mf-rap-cuenta', rap.cuenta === 'Efectivo' ? '' : rap.cuenta || '');
     encolar('guardarMovimiento', [m], 'Nuevo: ' + (nombreBonito(m.comercio) || m.categoria || m.tipo) + ' · ' + txt(monto, m.moneda));
     hecho('✅ ' + (m.tipo === 'Ingreso' ? 'Ingreso' : 'Gasto') + ' de ' + txt(monto, m.moneda) + ' guardado');
   }
@@ -8221,7 +8281,7 @@ var App = (function () {
     buscar: function (v) { filtro.q = v; pintarLista(); },
     chip: function (c) { filtro.chip = c; pintar(); },
     historial: function () { verTodoHistorial = !verTodoHistorial; pintar(); },
-    formMovimiento: formMovimiento, monedaDeCuenta: monedaDeCuenta, guardarMov: guardarMov, borrarMov: borrarMov,
+    formMovimiento: formMovimiento, monedaDeCuenta: monedaDeCuenta, guardarMov: guardarMov, borrarMov: borrarMov, negCambiar: negCambiar, negEfectivo: negEfectivo, negIgual: negIgual, pintarQuedaForm: pintarQuedaForm,
     formTasaCero: formTasaCero, cuotaTC: cuotaTC, guardarTC: guardarTC,
     formCuenta: formCuenta, guardarCta: guardarCta, formSobre: formSobre, guardarSob: guardarSob,
     formPago: formPago, guardarPago: guardarPago, formTBP: formTBP, guardarTBP: guardarTBP,
